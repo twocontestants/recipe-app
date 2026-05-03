@@ -317,7 +317,7 @@ export default function RecipesPage() {
                 </button>
               </div>
               <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-                {plannerModal.recipe.title}
+                {plannerModal?.recipe.title}
               </p>
               <div className="form-group">
                 <label>Week</label>
@@ -623,7 +623,7 @@ export default function RecipesPage() {
               </div>
 
               <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-                {plannerModal.recipe.title}
+                {plannerModal?.recipe.title}
               </p>
 
               <div className="form-group">
