@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: recipe-app
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ANTHROPIC_API_KEY
+        sync: false   # you'll paste this in the dashboard
