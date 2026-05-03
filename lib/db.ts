@@ -85,9 +85,11 @@ export async function setupDatabase() {
       category_labels  JSONB NOT NULL DEFAULT '{}',
       category_order   JSONB NOT NULL DEFAULT '[]',
       item_order       JSONB NOT NULL DEFAULT '{}',
+      checked_state    JSONB NOT NULL DEFAULT '{}',
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await pool().query(`ALTER TABLE shopping_list_edits ADD COLUMN IF NOT EXISTS checked_state JSONB NOT NULL DEFAULT '{}'`);
 }
 
 export interface ShoppingListEdits {
@@ -96,6 +98,7 @@ export interface ShoppingListEdits {
   category_labels: Record<string, string>;
   category_order:  string[];
   item_order:      Record<string, string[]>;
+  checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
 }
 
 export async function getShoppingListEdits(weekStart: string): Promise<ShoppingListEdits | null> {
@@ -111,6 +114,7 @@ export async function getShoppingListEdits(weekStart: string): Promise<ShoppingL
     category_labels: row.category_labels ?? {},
     category_order:  row.category_order  ?? [],
     item_order:      row.item_order      ?? {},
+    checked_state:   row.checked_state   ?? {},
   };
 }
 
@@ -120,14 +124,15 @@ export async function saveShoppingListEdits(
 ): Promise<void> {
   await pool().query(
     `INSERT INTO shopping_list_edits
-       (week_start, item_overrides, custom_items, category_labels, category_order, item_order, updated_at)
-     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, NOW())
+       (week_start, item_overrides, custom_items, category_labels, category_order, item_order, checked_state, updated_at)
+     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, NOW())
      ON CONFLICT (week_start) DO UPDATE SET
        item_overrides  = EXCLUDED.item_overrides,
        custom_items    = EXCLUDED.custom_items,
        category_labels = EXCLUDED.category_labels,
        category_order  = EXCLUDED.category_order,
        item_order      = EXCLUDED.item_order,
+       checked_state   = EXCLUDED.checked_state,
        updated_at      = NOW()`,
     [
       weekStart,
@@ -136,6 +141,7 @@ export async function saveShoppingListEdits(
       JSON.stringify(edits.category_labels),
       JSON.stringify(edits.category_order),
       JSON.stringify(edits.item_order),
+      JSON.stringify(edits.checked_state ?? {}),
     ]
   );
 }

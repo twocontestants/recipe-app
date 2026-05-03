@@ -835,9 +835,45 @@ textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
 /* ── Responsive ───────────────────────────── */
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; padding: 1rem; }
-  .sidebar-logo { margin-bottom: 0; width: 100%; }
+  .sidebar {
+    position: static; height: auto; flex-direction: row;
+    flex-wrap: wrap; padding: 0.75rem 1rem; gap: 0.5rem;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo { margin-bottom: 0; width: 100%; font-size: 1.1rem; }
+  .sidebar-nav { flex-direction: row; gap: 0.25rem; width: 100%; }
+  .sidebar-nav a { padding: 0.5rem 0.75rem; font-size: 0.78rem; flex: 1; justify-content: center; }
   .planner-grid { grid-template-columns: repeat(4, 1fr); }
   .two-col { grid-template-columns: 1fr; }
-  .main-content { padding: 1.5rem; }
+  .main-content { padding: 1.25rem; }
+  .page-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+  .page-header > div:last-child { width: 100%; flex-wrap: wrap; }
+  .recipe-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+  .modal { margin: 0.75rem; max-height: calc(100dvh - 1.5rem); border-radius: 10px; }
+}
+
+@media (max-width: 600px) {
+  .main-content { padding: 1rem; }
+  .page-title { font-size: 2rem; }
+  .recipe-grid { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .recipe-card-img, .recipe-card-img-placeholder { height: 130px; }
+  .recipe-card-body { padding: 0.85rem; }
+  .recipe-card-title { font-size: 1rem; }
+  .recipe-card-desc { display: none; }
+  .recipe-card-actions { padding: 0.6rem 0.85rem; }
+  .planner-grid { grid-template-columns: repeat(3, 1fr); font-size: 0.75rem; }
+  .planner-day-header { font-size: 0.65rem; padding: 0.35rem 0.4rem; }
+  .meal-chip { padding: 0.3rem 0.35rem; }
+  .meal-chip-name { font-size: 0.62rem; }
+  .week-nav { gap: 0.35rem; }
+  .week-label { font-size: 0.8rem; }
+  .sidebar-nav a span { display: none; }
+  .sidebar-nav a { padding: 0.5rem; }
+  .modal { margin: 0; max-height: 100dvh; border-radius: 0; }
+  .modal-overlay { align-items: flex-end; }
+  .shop-item-name { font-size: 0.82rem; }
+  .shop-category-header { padding: 0.25rem 0.2rem 0.35rem; }
+  .ingredient-row { grid-template-columns: 60px 80px 1fr auto; gap: 0.25rem; }
+  .page-header > div:last-child { gap: 0.4rem; }
+  .page-header .btn { font-size: 0.75rem; padding: 0.4rem 0.65rem; }
 }

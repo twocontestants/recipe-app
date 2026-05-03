@@ -77,6 +77,20 @@ export default function RecipesPage() {
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
+  const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
+  const [plannerWeek, setPlannerWeek] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    d.setDate(diff); d.setHours(0,0,0,0);
+    return d.toISOString().split('T')[0];
+  });
+  const [plannerDay, setPlannerDay] = useState(() => {
+    const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const d = new Date(); return days[d.getDay() === 0 ? 6 : d.getDay() - 1];
+  });
+  const [plannerMeal, setPlannerMeal] = useState('dinner');
+  const [addingToPlan, setAddingToPlan] = useState(false);
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -149,6 +163,30 @@ export default function RecipesPage() {
       showToast(`Parse failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
     } finally {
       setParsing(false);
+    }
+  };
+
+  const handleAddToPlanner = async () => {
+    if (!plannerModal) return;
+    setAddingToPlan(true);
+    try {
+      const res = await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          week_start: plannerWeek,
+          day_of_week: plannerDay,
+          meal_type: plannerMeal,
+          recipe_id: plannerModal.recipe.id,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setPlannerModal(null);
+      showToast(`Added to ${plannerDay} ${plannerMeal}!`, 'success');
+    } catch (e) {
+      showToast(`Failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
+    } finally {
+      setAddingToPlan(false);
     }
   };
 
@@ -255,8 +293,81 @@ export default function RecipesPage() {
     r.tags?.some(t => t.toLowerCase().includes(search.toLowerCase()))
   );
 
+  // Planner modal is shared between grid and detail views
+  const plannerModalJsx = plannerModal && (() => {
+        const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+        const DAY_LABELS: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+        const MEALS = ['breakfast','lunch','dinner','snack'];
+        const weekDate = new Date(plannerWeek + 'T00:00:00');
+        const fmtWeek = (d: Date) => {
+          const sun = new Date(d); sun.setDate(d.getDate() + 6);
+          return `${d.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
+        };
+        const shiftWeek = (n: number) => {
+          const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
+          setPlannerWeek(d.toISOString().split('T')[0]);
+        };
+        return (
+          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
+            <div className="modal" style={{ maxWidth: '420px' }}>
+              <div className="modal-header">
+                <h2 className="modal-title">Add to Planner</h2>
+                <button className="modal-close" onClick={() => setPlannerModal(null)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
+                {plannerModal.recipe.title}
+              </p>
+              <div className="form-group">
+                <label>Week</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(-1)}>‹</button>
+                  <span style={{ flex: 1, textAlign: 'center', fontSize: '0.85rem', color: 'var(--ink-soft)' }}>{fmtWeek(weekDate)}</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(1)}>›</button>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Day</label>
+                <div className="plan-picker-grid">
+                  {DAYS.map(d => (
+                    <button key={d} type="button"
+                      className={`plan-picker-btn ${plannerDay === d ? 'active' : ''}`}
+                      onClick={() => setPlannerDay(d)}>
+                      {DAY_LABELS[d]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Meal</label>
+                <div className="plan-picker-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                  {MEALS.map(m => (
+                    <button key={m} type="button"
+                      className={`plan-picker-btn ${plannerMeal === m ? 'active' : ''}`}
+                      onClick={() => setPlannerMeal(m)}
+                      style={{ textTransform: 'capitalize' }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button className="btn btn-secondary" onClick={() => setPlannerModal(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleAddToPlanner} disabled={addingToPlan}>
+                  {addingToPlan ? <span className="loading-dots"><span/><span/><span/></span> : 'Add to Plan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })();
+
   if (viewRecipe) {
-    return <RecipeDetail recipe={viewRecipe} onEdit={() => openEditModal(viewRecipe)} onDelete={() => handleDelete(viewRecipe.id)} onBack={() => setViewRecipe(null)} />;
+    return <>
+      <RecipeDetail recipe={viewRecipe} onEdit={() => openEditModal(viewRecipe)} onDelete={() => handleDelete(viewRecipe.id)} onBack={() => setViewRecipe(null)} onAddToPlanner={() => setPlannerModal({ recipe: viewRecipe })} />
+      {plannerModalJsx}
+    </>;
   }
 
   return (
@@ -323,6 +434,10 @@ export default function RecipesPage() {
                 )}
               </div>
               <div className="recipe-card-actions" onClick={e => e.stopPropagation()}>
+                <button className="btn btn-primary btn-sm" onClick={() => setPlannerModal({ recipe })} title="Add to meal planner">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
+                  Plan
+                </button>
                 <button className="btn btn-ghost btn-sm" onClick={() => openEditModal(recipe)}>Edit</button>
                 <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
               </div>
@@ -468,7 +583,95 @@ export default function RecipesPage() {
           text-decoration: underline; text-underline-offset: 2px;
         }
         .link-btn:hover { opacity: 0.75; }
+        .plan-picker-grid {
+          display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
+        }
+        .plan-picker-btn {
+          padding: 0.35rem 0.2rem; border: 1px solid var(--border); border-radius: 6px;
+          background: white; color: var(--ink-soft); font-size: 0.72rem; cursor: pointer;
+          font-family: var(--font-body); transition: all 0.15s; text-align: center;
+        }
+        .plan-picker-btn:hover { border-color: var(--rust); color: var(--rust); }
+        .plan-picker-btn.active { background: var(--rust); border-color: var(--rust); color: white; }
       `}</style>
+
+
+      {plannerModalJsx}
+
+      {false && (() => {
+        const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+        const DAY_LABELS: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+        const MEALS = ['breakfast','lunch','dinner','snack'];
+        // Week nav
+        const weekDate = new Date(plannerWeek + 'T00:00:00');
+        const fmtWeek = (d: Date) => {
+          const sun = new Date(d); sun.setDate(d.getDate() + 6);
+          return `${d.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
+        };
+        const shiftWeek = (n: number) => {
+          const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
+          setPlannerWeek(d.toISOString().split('T')[0]);
+        };
+        return (
+          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
+            <div className="modal" style={{ maxWidth: '420px' }}>
+              <div className="modal-header">
+                <h2 className="modal-title">Add to Planner</h2>
+                <button className="modal-close" onClick={() => setPlannerModal(null)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
+                {plannerModal.recipe.title}
+              </p>
+
+              <div className="form-group">
+                <label>Week</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(-1)}>‹</button>
+                  <span style={{ flex: 1, textAlign: 'center', fontSize: '0.85rem', color: 'var(--ink-soft)' }}>{fmtWeek(weekDate)}</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(1)}>›</button>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Day</label>
+                <div className="plan-picker-grid">
+                  {DAYS.map(d => (
+                    <button key={d} type="button"
+                      className={`plan-picker-btn ${plannerDay === d ? 'active' : ''}`}
+                      onClick={() => setPlannerDay(d)}>
+                      {DAY_LABELS[d]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Meal</label>
+                <div className="plan-picker-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                  {MEALS.map(m => (
+                    <button key={m} type="button"
+                      className={`plan-picker-btn ${plannerMeal === m ? 'active' : ''}`}
+                      onClick={() => setPlannerMeal(m)}
+                      style={{ textTransform: 'capitalize' }}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button className="btn btn-secondary" onClick={() => setPlannerModal(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleAddToPlanner} disabled={addingToPlan}>
+                  {addingToPlan ? <span className="loading-dots"><span/><span/><span/></span> : 'Add to Plan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {showPasteModal && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowPasteModal(false); }}>
@@ -518,11 +721,12 @@ export default function RecipesPage() {
   );
 }
 
-function RecipeDetail({ recipe, onEdit, onDelete, onBack }: {
+function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
   recipe: Recipe;
   onEdit: () => void;
   onDelete: () => void;
   onBack: () => void;
+  onAddToPlanner: () => void;
 }) {
   return (
     <>
@@ -549,6 +753,10 @@ function RecipeDetail({ recipe, onEdit, onDelete, onBack }: {
               View Source ↗
             </a>
           )}
+          <button className="btn btn-primary btn-sm" onClick={onAddToPlanner}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px' }}><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
+            Add to Planner
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>
           <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>
         </div>

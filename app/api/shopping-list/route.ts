@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
         category_labels: {},
         category_order: [],
         item_order: {},
+        checked_state: {},
       },
     });
   } catch (error) {
@@ -49,6 +50,7 @@ export async function PUT(req: NextRequest) {
       category_labels: body.category_labels ?? {},
       category_order:  body.category_order  ?? [],
       item_order:      body.item_order      ?? {},
+      checked_state:   body.checked_state   ?? {},
     });
 
     return NextResponse.json({ success: true });

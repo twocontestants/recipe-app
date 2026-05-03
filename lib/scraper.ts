@@ -548,17 +548,53 @@ function heuristicScrape($: cheerio.CheerioAPI, url: string): ScrapedRecipe {
 // ── Ingredient line parser ─────────────────────────────────────────────────
 
 function parseIngredientLine(line: string): Ingredient {
-  const cleaned = line.trim().replace(/\s+/g, ' ');
+  // Strip leading/trailing punctuation artifacts (parens, slashes, bullets, etc.)
+  const cleaned = line
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s\/\(\)\[\]\-\*\•\·]+/, '')   // leading junk
+    .replace(/[\s\/\(\)\[\]]+$/, '');           // trailing junk
+
+  if (!cleaned) return { amount: '', unit: '', name: '' };
+
+  // Unit list — deliberately excludes size words (large/medium/small) so they
+  // stay as part of the ingredient name, not parsed as the unit.
+  const unitPattern = [
+    'cups?', 'tbsps?', 'tbsp', 'tsps?', 'tsp',
+    'tablespoons?', 'teaspoons?',
+    'fl\\.?\\s*oz', 'ounces?', 'oz',
+    'pounds?', 'lbs?',
+    'grams?', 'g', 'kilograms?', 'kg',
+    'millilitres?', 'milliliters?', 'ml',
+    'litres?', 'liters?',
+    'cloves?', 'cans?', 'packages?', 'pkgs?',
+    'pinch(?:es)?', 'handfuls?', 'bunch(?:es)?',
+    'slices?', 'pieces?', 'strips?',
+    'inches?', 'cm',
+  ].join('|');
 
   const match = cleaned.match(
-    /^([\d\s¼½¾⅓⅔⅛⅜⅝⅞\/\-\.]+)?\s*(cups?|tbsp?|tsp?|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|kilograms?|ml|liters?|litres?|l|cloves?|cans?|packages?|pkgs?|pinch(?:es)?|handful(?:s)?|bunch(?:es)?|slices?|pieces?|inches?|cm|large|medium|small|whole)?\s*(.+)/i
+    new RegExp(
+      `^([\\d\\s¼½¾⅓⅔⅛⅜⅝⅞/\\-\\.]+)?\\s*(${unitPattern})\\.?\\s*(.+)`,
+      'i'
+    )
   );
 
   if (match) {
     return {
       amount: (match[1] || '').trim(),
-      unit: (match[2] || '').trim(),
-      name: (match[3] || cleaned).trim(),
+      unit:   (match[2] || '').trim(),
+      name:   (match[3] || cleaned).trim(),
+    };
+  }
+
+  // No unit matched — try to split leading number from name
+  const numOnly = cleaned.match(/^([\d\s¼½¾⅓⅔⅛⅜⅝⅞\/\-\.]+)\s+(.+)/);
+  if (numOnly) {
+    return {
+      amount: numOnly[1].trim(),
+      unit:   '',
+      name:   numOnly[2].trim(),
     };
   }
 

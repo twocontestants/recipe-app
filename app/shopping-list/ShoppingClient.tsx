@@ -49,6 +49,7 @@ interface ResolvedItem {
   resolvedCategory: string;
   isCustom: boolean;
   originalServerName?: string;
+  recipes?: string[];
 }
 
 // ── Shopper name ──────────────────────────────────────────────────────────
@@ -80,12 +81,13 @@ interface ItemRowProps {
   onDragOverItem: (e: React.DragEvent) => void;
   onDropOnItem: (e: React.DragEvent) => void;
   onEnterAtEnd: () => void;
+  recipes?: string[];
 }
 
 function ItemRow({
   item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter,
   onToggle, onDelete, onNameChange, onAmountChange,
-  onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd,
+  onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes,
 }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
@@ -174,6 +176,13 @@ function ItemRow({
           />
         </div>
 
+        {recipes && recipes.length > 0 && (
+          <div className="recipe-source-bar" title={recipes.join(', ')}>
+            {recipes.map((r, i) => (
+              <span key={i} className="recipe-source-pip">{r}</span>
+            ))}
+          </div>
+        )}
         <div className="shop-item-amount-wrap">
           <span
             ref={amountRef}
@@ -362,6 +371,9 @@ export default function ShoppingListClient() {
         setCustomItems(edits.custom_items ?? []);
         setCategoryLabels(edits.category_labels ?? {});
         setItemOrder(edits.item_order ?? {});
+        if (edits.checked_state && Object.keys(edits.checked_state).length > 0) {
+          setChecked(edits.checked_state);
+        }
         setCategoryOrder(
           edits.category_order?.length > 0
             ? edits.category_order
@@ -396,6 +408,7 @@ export default function ShoppingListClient() {
             category_labels: categoryLabels,
             category_order:  categoryOrder,
             item_order:      itemOrder,
+            checked_state:   checked,
           }),
         });
       } catch {
@@ -403,7 +416,7 @@ export default function ShoppingListClient() {
       }
     }, 800);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [itemOverrides, customItems, categoryLabels, categoryOrder, itemOrder, weekKey]);
+  }, [itemOverrides, customItems, categoryLabels, categoryOrder, itemOrder, checked, weekKey]);
 
 
   useEffect(() => {
@@ -428,6 +441,7 @@ export default function ShoppingListClient() {
         resolvedCategory: ov.category ?? si.category,
         isCustom: false,
         originalServerName: si.name,
+        recipes: si.recipes,
       });
     }
     for (const ci of customItems) {
@@ -710,7 +724,6 @@ export default function ShoppingListClient() {
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
             if (catItems.length === 0 && insertingIn?.cat !== cat) return null;
-            const unchecked = catItems.filter(i => !checked[i.key]?.checked);
             const checkedCat = catItems.filter(i => checked[i.key]?.checked);
             const label = getCatLabel(cat);
             const isCatDragging = dragCat === cat;
@@ -764,7 +777,7 @@ export default function ShoppingListClient() {
                 </div>
 
                 <div className="shop-items">
-                  {[...unchecked, ...checkedCat].map(item => {
+                  {catItems.map(item => {
                     const isChecked = !!checked[item.key]?.checked;
                     return (
                       <div key={item.key}>
@@ -784,6 +797,7 @@ export default function ShoppingListClient() {
                           onDragOverItem={e => { if (dragItem) handleItemDragOverItem(e, item.key); }}
                           onDropOnItem={e => { if (dragItem) handleItemDropOnItem(e, item.key, cat); }}
                           onEnterAtEnd={() => setInsertingIn({ cat, afterKey: item.key })}
+                          recipes={item.recipes}
                         />
                         {insertingIn?.cat === cat && insertingIn.afterKey === item.key && (
                           <NewItemRow
@@ -937,6 +951,19 @@ export default function ShoppingListClient() {
         .shop-item.is-checked .shop-checkbox { background: var(--sage); border-color: var(--sage); }
         .shop-checkbox svg { display: none; }
         .shop-item.is-checked .shop-checkbox svg { display: block; }
+
+        /* Recipe source bar */
+        .recipe-source-bar {
+          display: flex; flex-wrap: wrap; gap: 3px; flex-shrink: 0;
+          align-items: center; max-width: 140px;
+        }
+        .recipe-source-pip {
+          font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment);
+          border: 1px solid var(--border); border-radius: 3px;
+          padding: 1px 5px; white-space: nowrap; overflow: hidden;
+          text-overflow: ellipsis; max-width: 130px; line-height: 1.4;
+          font-style: italic;
+        }
 
         /* Document-style name */
         .shop-item-name-wrap { flex: 1; min-width: 0; }
