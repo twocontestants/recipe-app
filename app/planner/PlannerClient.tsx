@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 
+// ── Protein helpers ───────────────────────────────────────────────────────────
 
 const PROTEIN_COLORS: Record<string, string> = {
   chicken: '#E8A838', beef: '#C0392B', pork: '#D4697A', lamb: '#8E44AD',
@@ -14,73 +15,113 @@ const PROTEIN_EMOJI: Record<string, string> = {
   chicken: '🍗', beef: '🥩', pork: '🐷', lamb: '🐑',
   fish: '🐟', seafood: '🦐', tofu: '🫘', eggs: '🥚', legumes: '🫘', dairy: '🧀',
 };
-function ProteinPip({ protein }: { protein?: string }) {
+const ALL_PROTEINS = Object.keys(PROTEIN_COLORS);
+
+function ProteinBadge({ protein }: { protein?: string }) {
   if (!protein) return null;
   const color = PROTEIN_COLORS[protein] || '#888';
-  const emoji = PROTEIN_EMOJI[protein] || '';
   return (
-    <span
-      title={protein}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '2px',
-        fontSize: '0.58rem', fontWeight: 600, textTransform: 'capitalize',
-        color: 'white', background: color,
-        borderRadius: '99px', padding: '1px 5px', lineHeight: 1.4,
-        letterSpacing: '0.02em',
-      }}
-    >
-      {emoji} {protein}
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '3px',
+      fontSize: '0.65rem', fontWeight: 600, textTransform: 'capitalize',
+      color: 'white', background: color, borderRadius: '99px',
+      padding: '2px 7px', lineHeight: 1.4, letterSpacing: '0.02em', flexShrink: 0,
+    }}>
+      {PROTEIN_EMOJI[protein]} {protein}
     </span>
   );
 }
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const MEAL_TYPES = ['dinner'];
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const DAYS_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 function getMonday(date: Date): Date {
   const d = new Date(date);
   const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
+  d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
   d.setHours(0, 0, 0, 0);
   return d;
 }
 function formatDate(d: Date): string { return d.toISOString().split('T')[0]; }
-function formatWeekLabel(monday: Date): string {
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return `${monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – ${sunday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+function formatWeekRange(monday: Date): string {
+  const sun = new Date(monday); sun.setDate(monday.getDate() + 6);
+  const opt = (d: Date) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  return `${opt(monday)} – ${opt(sun)}`;
+}
+function isThisWeek(monday: Date): boolean {
+  return formatDate(monday) === formatDate(getMonday(new Date()));
+}
+function isNextWeek(monday: Date): boolean {
+  const next = getMonday(new Date()); next.setDate(next.getDate() + 7);
+  return formatDate(monday) === formatDate(next);
+}
+function weekLabel(monday: Date): string {
+  if (isThisWeek(monday)) return 'This week';
+  if (isNextWeek(monday)) return 'Next week';
+  return formatWeekRange(monday);
+}
+function getDayDate(weekStart: Date, dayIndex: number): Date {
+  const d = new Date(weekStart); d.setDate(weekStart.getDate() + dayIndex); return d;
+}
+function todayDayIndex(): number {
+  const d = new Date().getDay(); return d === 0 ? 6 : d - 1;
 }
 
-type DragSource =
-  | { type: 'meal'; mealId: string; sourceDay: number; sourceMealType: string }
-  | { type: 'recipe'; recipeId: string };
+// ── Suggestion logic (client-side) ────────────────────────────────────────────
+
+function suggestForDay(
+  recipes: Recipe[],
+  plannedProteins: (string | null | undefined)[], // proteins of already-planned days
+  count = 3
+): Recipe[] {
+  if (recipes.length === 0) return [];
+  const usedProteins = new Set(plannedProteins.filter(Boolean));
+  // Prefer recipes whose protein isn't already used this week
+  const fresh = recipes.filter(r => !usedProteins.has(r.primary_protein ?? ''));
+  const pool = fresh.length >= count ? fresh : [...fresh, ...recipes.filter(r => !fresh.includes(r))];
+  // Shuffle
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+// ── Magic settings ────────────────────────────────────────────────────────────
 
 interface MagicSettings {
   variety: 'low' | 'medium' | 'high';
   servings: number;
   preferTags: string;
   excludeTags: string;
-  mealTypes: string[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlannerClient() {
   const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()));
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dragSource, setDragSource] = useState<DragSource | null>(null);
-  const [dragOver, setDragOver] = useState<{ day: number; mealType: string } | null>(null);
-  const [showRecipePicker, setShowRecipePicker] = useState<{ day: number; mealType: string } | null>(null);
+
+  // Picker modal state
+  const [picker, setPicker] = useState<{ dayIndex: number; replacing?: string } | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
-  const [sidebarSearch, setSidebarSearch] = useState('');
+
+  // Magic modal
   const [showMagic, setShowMagic] = useState(false);
   const [magicSettings, setMagicSettings] = useState<MagicSettings>({
-    variety: 'medium', servings: 4, preferTags: '', excludeTags: '', mealTypes: ['dinner'],
+    variety: 'medium', servings: 4, preferTags: '', excludeTags: '',
   });
   const [magicLoading, setMagicLoading] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Day action menu (replace/remove)
+  const [actionMenu, setActionMenu] = useState<{ mealId: string; dayIndex: number } | null>(null);
+
+  const todayRef = useRef<HTMLDivElement>(null);
+
+  // ── Data fetching ───────────────────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -91,41 +132,42 @@ export default function PlannerClient() {
       ]);
       setMealPlans(await plansRes.json());
       setRecipes(await recipesRes.json());
-    } catch { showToast('Failed to load planner data', 'error'); }
+    } catch { showToast('Failed to load planner', 'error'); }
     finally { setLoading(false); }
   }, [weekStart]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Scroll to today on first load
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowRecipePicker(null);
+    if (!loading && todayRef.current && isThisWeek(weekStart)) {
+      todayRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    if (showRecipePicker) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showRecipePicker]);
+  }, [loading]);
 
-  const prevWeek = () => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() - 7); return nd; });
-  const nextWeek = () => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() + 7); return nd; });
+  // Close action menu on outside click
+  useEffect(() => {
+    if (!actionMenu) return;
+    const handler = () => setActionMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [actionMenu]);
 
-  const getMealsForSlot = (day: number, mealType: string) =>
-    mealPlans.filter(m => m.day_of_week === day && m.meal_type === mealType);
+  // ── Meal operations ─────────────────────────────────────────────────────────
 
-  const getDayDate = (dayIndex: number): Date => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + dayIndex);
-    return d;
-  };
+  const getMealForDay = (dayIndex: number) =>
+    mealPlans.find(m => m.day_of_week === dayIndex && m.meal_type === 'dinner') ?? null;
 
-  const addMeal = async (day: number, mealType: string, recipeId: string, servings?: number) => {
+  const addMeal = async (dayIndex: number, recipeId: string) => {
     try {
       const recipe = recipes.find(r => r.id === recipeId);
       const res = await fetch('/api/planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          week_start: formatDate(weekStart), recipe_id: recipeId, day_of_week: day,
-          meal_type: mealType, servings: servings || magicSettings.servings || recipe?.servings || 4,
+          week_start: formatDate(weekStart), recipe_id: recipeId,
+          day_of_week: dayIndex, meal_type: 'dinner',
+          servings: recipe?.servings || 4,
         }),
       });
       if (!res.ok) throw new Error();
@@ -140,48 +182,12 @@ export default function PlannerClient() {
     } catch { showToast('Failed to remove meal', 'error'); }
   };
 
-  const handleSidebarDragStart = (e: React.DragEvent, recipe: Recipe) => {
-    setDragSource({ type: 'recipe', recipeId: recipe.id });
-    e.dataTransfer.effectAllowed = 'copy';
+  const replaceMeal = async (dayIndex: number, existingId: string, newRecipeId: string) => {
+    await removeMeal(existingId);
+    await addMeal(dayIndex, newRecipeId);
   };
 
-  const handleMealDragStart = (e: React.DragEvent, meal: MealPlan) => {
-    setDragSource({ type: 'meal', mealId: meal.id, sourceDay: meal.day_of_week, sourceMealType: meal.meal_type });
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e: React.DragEvent, day: number, mealType: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = dragSource?.type === 'recipe' ? 'copy' : 'move';
-    setDragOver({ day, mealType });
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetDay: number, targetMealType: string) => {
-    e.preventDefault();
-    setDragOver(null);
-    if (!dragSource) return;
-    if (dragSource.type === 'recipe') {
-      await addMeal(targetDay, targetMealType, dragSource.recipeId);
-    } else {
-      const meal = mealPlans.find(m => m.id === dragSource.mealId);
-      if (!meal) return;
-      if (targetDay === dragSource.sourceDay && targetMealType === dragSource.sourceMealType) return;
-      try {
-        await fetch(`/api/planner?id=${dragSource.mealId}`, { method: 'DELETE' });
-        await fetch('/api/planner', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            week_start: formatDate(weekStart), recipe_id: meal.recipe_id,
-            day_of_week: targetDay, meal_type: targetMealType, servings: meal.servings,
-          }),
-        });
-        await fetchData();
-      } catch { showToast('Failed to move meal', 'error'); }
-    }
-    setDragSource(null);
-  };
-
-  const handleDragEnd = () => { setDragSource(null); setDragOver(null); };
+  // ── Magic plan ──────────────────────────────────────────────────────────────
 
   const handleMagicSuggest = async () => {
     if (recipes.length === 0) { showToast('Add some recipes first!', 'error'); return; }
@@ -190,479 +196,604 @@ export default function PlannerClient() {
       for (const meal of mealPlans) await fetch(`/api/planner?id=${meal.id}`, { method: 'DELETE' });
       const preferTags = magicSettings.preferTags.split(',').map(t => t.trim()).filter(Boolean);
       const excludeTags = magicSettings.excludeTags.split(',').map(t => t.trim()).filter(Boolean);
-      let pool = recipes.filter(r => !(excludeTags.length > 0 && r.tags?.some(t => excludeTags.includes(t.toLowerCase()))));
+      let pool = recipes.filter(r => !excludeTags.some(t => r.tags?.includes(t)));
       if (pool.length === 0) pool = recipes;
       const scored = pool.map(r => ({
         recipe: r,
-        score: Math.random() + (preferTags.length > 0 && r.tags?.some(t => preferTags.includes(t.toLowerCase())) ? 1 : 0),
+        score: Math.random() + (preferTags.some(t => r.tags?.includes(t)) ? 1 : 0),
       })).sort((a, b) => b.score - a.score);
-      const adds: Array<{ day: number; mealType: string; recipeId: string }> = [];
+
+      const picks: string[] = [];
       for (let day = 0; day < 7; day++) {
-        for (const mealType of magicSettings.mealTypes) {
-          let idx = 0;
-          if (magicSettings.variety === 'high') {
-            const usedIds = new Set(adds.map(a => a.recipeId));
-            const unused = scored.filter(s => !usedIds.has(s.recipe.id));
-            const pickFrom = unused.length > 0 ? unused : scored;
-            idx = Math.floor(Math.random() * Math.min(pickFrom.length, 3));
-            adds.push({ day, mealType, recipeId: pickFrom[idx].recipe.id });
-          } else if (magicSettings.variety === 'medium') {
-            const recentIds = adds.slice(-4).map(a => a.recipeId);
-            const fresh = scored.filter(s => !recentIds.includes(s.recipe.id));
-            const pickFrom = fresh.length > 0 ? fresh : scored;
-            idx = Math.floor(Math.random() * Math.min(pickFrom.length, 5));
-            adds.push({ day, mealType, recipeId: pickFrom[idx].recipe.id });
-          } else {
-            idx = Math.floor(Math.random() * Math.min(scored.length, 3));
-            adds.push({ day, mealType, recipeId: scored[idx].recipe.id });
-          }
+        let idx = 0;
+        if (magicSettings.variety === 'high') {
+          const used = new Set(picks);
+          const unused = scored.filter(s => !used.has(s.recipe.id));
+          const from = unused.length > 0 ? unused : scored;
+          idx = Math.floor(Math.random() * Math.min(from.length, 3));
+          picks.push(from[idx].recipe.id);
+        } else if (magicSettings.variety === 'medium') {
+          const recent = picks.slice(-3);
+          const from = scored.filter(s => !recent.includes(s.recipe.id));
+          const pool2 = from.length > 0 ? from : scored;
+          idx = Math.floor(Math.random() * Math.min(pool2.length, 5));
+          picks.push(pool2[idx].recipe.id);
+        } else {
+          idx = Math.floor(Math.random() * Math.min(scored.length, 3));
+          picks.push(scored[idx].recipe.id);
         }
       }
-      for (const add of adds) {
+
+      for (let day = 0; day < 7; day++) {
         await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            week_start: formatDate(weekStart), recipe_id: add.recipeId,
-            day_of_week: add.day, meal_type: add.mealType, servings: magicSettings.servings,
+            week_start: formatDate(weekStart), recipe_id: picks[day],
+            day_of_week: day, meal_type: 'dinner',
+            servings: magicSettings.servings,
           }),
         });
       }
       await fetchData();
       setShowMagic(false);
-      showToast(`Planned ${adds.length} meals for the week!`, 'success');
-    } catch { showToast('Magic suggest failed', 'error'); }
+      showToast('Week planned! ✨', 'success');
+    } catch { showToast('Magic plan failed', 'error'); }
     finally { setMagicLoading(false); }
   };
 
-  const toggleMagicMealType = (mt: string) => {
-    setMagicSettings(prev => ({
-      ...prev,
-      mealTypes: prev.mealTypes.includes(mt) ? prev.mealTypes.filter(m => m !== mt) : [...prev.mealTypes, mt],
-    }));
-  };
+  // ── Picker filter ───────────────────────────────────────────────────────────
 
   const filteredRecipes = recipes.filter(r =>
-    !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) ||
+    !pickerSearch ||
+    r.title.toLowerCase().includes(pickerSearch.toLowerCase()) ||
     r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()))
   );
 
-  const sidebarRecipes = recipes.filter(r =>
-    !sidebarSearch || r.title.toLowerCase().includes(sidebarSearch.toLowerCase()) ||
-    r.tags?.some(t => t.toLowerCase().includes(sidebarSearch.toLowerCase()))
-  );
+  // Planned proteins for suggestion logic
+  const plannedProteins = DAYS.map((_, i) => getMealForDay(i)?.recipe?.primary_protein);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="planner-layout">
-      {/* ── Recipe sidebar ── */}
-      <aside className="recipe-sidebar">
-        <div className="sidebar-header">
-          <h2 className="sidebar-title">Recipes</h2>
-          <span className="sidebar-hint">Drag onto a cell</span>
-        </div>
-        <div className="sidebar-search-wrap">
-          <svg className="sidebar-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input type="text" className="sidebar-search" placeholder="Search…" value={sidebarSearch} onChange={e => setSidebarSearch(e.target.value)} />
-          {sidebarSearch && <button className="sidebar-search-clear" onClick={() => setSidebarSearch('')}>×</button>}
-        </div>
-        {recipes.length === 0 ? (
-          <div className="sidebar-empty"><span>No recipes yet.</span><a href="/recipes">Add some →</a></div>
-        ) : (
-          <div className="sidebar-cards">
-            {sidebarRecipes.map(recipe => (
-              <div
-                key={recipe.id}
-                className={`recipe-thumb-card ${dragSource?.type === 'recipe' && (dragSource as any).recipeId === recipe.id ? 'is-dragging' : ''}`}
-                draggable
-                onDragStart={e => handleSidebarDragStart(e, recipe)}
-                onDragEnd={handleDragEnd}
-                title={recipe.title}
-              >
-                <div className="recipe-thumb-img">
-                  {recipe.image_url
-                    ? <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                    : <span className="recipe-thumb-emoji">🍽</span>
-                  }
-                  <div className="recipe-thumb-drag-hint">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <circle cx="9" cy="5" r="1.2" fill="currentColor"/><circle cx="15" cy="5" r="1.2" fill="currentColor"/>
-                      <circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/>
-                      <circle cx="9" cy="19" r="1.2" fill="currentColor"/><circle cx="15" cy="19" r="1.2" fill="currentColor"/>
-                    </svg>
-                  </div>
-                </div>
-                <div className="recipe-thumb-info">
-                  <span className="recipe-thumb-name">{recipe.title}</span>
-                  {recipe.tags && recipe.tags.length > 0 && (
-                    <span className="recipe-thumb-tags">{recipe.tags.slice(0, 2).join(', ')}</span>
-                  )}
-                  {recipe.primary_protein && <ProteinPip protein={recipe.primary_protein} />}
-                  {recipe.cook_time && <span className="recipe-thumb-time">{recipe.cook_time}m</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </aside>
+    <div className="pl-root">
 
-      {/* ── Main planner ── */}
-      <div className="planner-root">
-        <div className="planner-header">
-          <div className="planner-header-left">
-            <h1 className="planner-title">Meal <em>Planner</em></h1>
-            <div className="week-nav">
-              <button className="nav-btn" onClick={prevWeek}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-              </button>
-              <span className="week-label">{formatWeekLabel(weekStart)}</span>
-              <button className="nav-btn" onClick={nextWeek}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-              <button className="nav-btn-text" onClick={() => setWeekStart(getMonday(new Date()))}>Today</button>
-            </div>
-          </div>
-          <div className="planner-header-right">
-            <span className="meal-count">{mealPlans.length} meals planned</span>
-            <button className="btn-magic" onClick={() => setShowMagic(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
-              Auto-plan week
+      {/* ── Top bar ── */}
+      <div className="pl-topbar">
+        <div className="pl-topbar-left">
+          <h1 className="pl-title">Meal <em>Planner</em></h1>
+          <div className="pl-week-nav">
+            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() - 7); return nd; })}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
             </button>
-            <a href="/shopping-list" className="btn-shop">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
-                <path d="M16 10a4 4 0 01-8 0"/>
-              </svg>
-              Shopping list
-            </a>
+            <span className="pl-week-label">{weekLabel(weekStart)}</span>
+            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() + 7); return nd; })}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            {!isThisWeek(weekStart) && (
+              <button className="pl-today-btn" onClick={() => setWeekStart(getMonday(new Date()))}>Today</button>
+            )}
           </div>
         </div>
+        <div className="pl-topbar-right">
+          <span className="pl-count">{mealPlans.length} of 7 planned</span>
+          <button className="pl-btn-magic" onClick={() => setShowMagic(true)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
+            Auto-plan
+          </button>
+          <a href="/shopping-list" className="pl-btn-shop">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/>
+            </svg>
+            Shopping list
+          </a>
+        </div>
+      </div>
 
-        {loading ? (
-          <div className="planner-loading"><div className="loading-dots"><span/><span/><span/></div></div>
-        ) : (
-          <div className="planner-grid-wrap">
-            <div className="planner-grid">
-              <div className="planner-col-header-spacer" />
-              {DAYS_SHORT.map((day, i) => {
-                const date = getDayDate(i);
-                const isToday = formatDate(date) === formatDate(new Date());
-                return (
-                  <div key={i} className={`planner-col-header ${isToday ? 'today' : ''}`}>
-                    <span className="col-day">{day}</span>
-                    <span className="col-date">{date.getDate()}</span>
+      {loading ? (
+        <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
+      ) : (
+        <div className="pl-days">
+          {DAYS.map((dayName, dayIndex) => {
+            const date = getDayDate(weekStart, dayIndex);
+            const todayIdx = todayDayIndex();
+            const isToday = isThisWeek(weekStart) && dayIndex === todayIdx;
+            const isPast = isThisWeek(weekStart) && dayIndex < todayIdx;
+            const meal = getMealForDay(dayIndex);
+            const recipe = meal?.recipe ?? null;
+            const suggestions = !recipe ? suggestForDay(
+              recipes,
+              plannedProteins.filter((_, i) => i !== dayIndex),
+              3
+            ) : [];
+
+            return (
+              <div
+                key={dayIndex}
+                ref={isToday ? todayRef : undefined}
+                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}`}
+              >
+                {/* Day header */}
+                <div className="pl-day-header">
+                  <div className="pl-day-label">
+                    {isToday && <span className="pl-today-pip">Today</span>}
+                    <span className="pl-day-name">{dayName}</span>
+                    <span className="pl-day-date">
+                      {date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                    </span>
                   </div>
-                );
-              })}
-              {MEAL_TYPES.map(mealType => (
-                <>
-                  <div key={`label-${mealType}`} className="planner-row-label"><span>{mealType}</span></div>
-                  {DAYS_SHORT.map((_, dayIndex) => {
-                    const meals = getMealsForSlot(dayIndex, mealType);
-                    const isDragTarget = dragOver?.day === dayIndex && dragOver?.mealType === mealType;
-                    const isNewDrop = dragSource?.type === 'recipe';
-                    return (
-                      <div
-                        key={`${mealType}-${dayIndex}`}
-                        className={`planner-cell ${isDragTarget ? 'drag-over' : ''} ${isDragTarget && isNewDrop ? 'drag-over-new' : ''} ${meals.length > 0 ? 'has-meal' : ''}`}
-                        onDragOver={e => handleDragOver(e, dayIndex, mealType)}
-                        onDrop={e => handleDrop(e, dayIndex, mealType)}
-                        onDragLeave={() => setDragOver(null)}
-                        onClick={() => { if (meals.length === 0) { setShowRecipePicker({ day: dayIndex, mealType }); setPickerSearch(''); } }}
+                  {recipe && (
+                    <div className="pl-day-actions" onMouseDown={e => e.stopPropagation()}>
+                      <button
+                        className="pl-action-btn"
+                        title="Replace or remove"
+                        onClick={() => setActionMenu(prev =>
+                          prev?.mealId === meal!.id ? null : { mealId: meal!.id, dayIndex }
+                        )}
                       >
-                        {meals.length === 0 ? (
-                          <div className="cell-empty">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
-                          </div>
-                        ) : (
-                          meals.map(meal => (
-                            <div
-                              key={meal.id}
-                              className={`meal-chip ${dragSource?.type === 'meal' && (dragSource as any).mealId === meal.id ? 'dragging' : ''}`}
-                              draggable
-                              onDragStart={e => handleMealDragStart(e, meal)}
-                              onDragEnd={handleDragEnd}
-                            >
-                              {(meal.recipe as any)?.image_url && (
-                                <div className="meal-chip-thumb">
-                                  <img src={(meal.recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                </div>
-                              )}
-                              <div className="meal-chip-body">
-                                {meal.recipe?.primary_protein && <ProteinPip protein={meal.recipe.primary_protein} />}
-                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '4px' }}>
-                                <span className="meal-chip-name">{meal.recipe?.title}</span>
-                                <button className="meal-chip-remove" onClick={e => { e.stopPropagation(); removeMeal(meal.id); }}>×</button>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                        {meals.length > 0 && (
-                          <button className="cell-add-more" onClick={e => { e.stopPropagation(); setShowRecipePicker({ day: dayIndex, mealType }); setPickerSearch(''); }}>+</button>
-                        )}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="5" r="1.5" fill="currentColor"/>
+                          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                          <circle cx="12" cy="19" r="1.5" fill="currentColor"/>
+                        </svg>
+                      </button>
+                      {actionMenu?.mealId === meal!.id && (
+                        <div className="pl-action-menu" onMouseDown={e => e.stopPropagation()}>
+                          <button onClick={() => { setActionMenu(null); setPicker({ dayIndex, replacing: meal!.id }); setPickerSearch(''); }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Replace recipe
+                          </button>
+                          <button className="danger" onClick={() => { setActionMenu(null); removeMeal(meal!.id); }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Recipe card or empty state */}
+                {recipe ? (
+                  <div
+                    className="pl-recipe-card"
+                    onClick={() => window.open(`/recipes`, '_self')}
+                    title="View recipe"
+                  >
+                    {(recipe as any).image_url && (
+                      <div className="pl-recipe-img">
+                        <img src={(recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                       </div>
-                    );
-                  })}
-                </>
+                    )}
+                    <div className="pl-recipe-info">
+                      <div className="pl-recipe-top">
+                        <span className="pl-recipe-name">{recipe.title}</span>
+                        {recipe.primary_protein && <ProteinBadge protein={recipe.primary_protein} />}
+                      </div>
+                      <div className="pl-recipe-meta">
+                        {(recipe as any).cook_time && <span>🔥 {(recipe as any).cook_time}m</span>}
+                        {(recipe as any).servings && <span>👤 {(recipe as any).servings} servings</span>}
+                        {(recipe as any).tags?.slice(0, 2).map((t: string) => (
+                          <span key={t} className="pl-recipe-tag">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pl-empty-slot">
+                    <button
+                      className="pl-add-btn"
+                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                      Add dinner
+                    </button>
+
+                    {suggestions.length > 0 && (
+                      <div className="pl-suggestions">
+                        <span className="pl-suggestions-label">Suggestions to vary your week</span>
+                        <div className="pl-suggestion-pills">
+                          {suggestions.map(r => (
+                            <button
+                              key={r.id}
+                              className="pl-suggestion-pill"
+                              onClick={() => addMeal(dayIndex, r.id)}
+                              title={r.title}
+                            >
+                              {r.primary_protein && (
+                                <span style={{
+                                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                                  background: PROTEIN_COLORS[r.primary_protein] || '#ccc',
+                                  display: 'inline-block',
+                                }} />
+                              )}
+                              {r.title}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Recipe picker modal ── */}
+      {picker && (
+        <div className="modal-overlay" onClick={() => setPicker(null)}>
+          <div className="pl-picker" onClick={e => e.stopPropagation()}>
+            <div className="pl-picker-header">
+              <div>
+                <h2 className="pl-picker-title">
+                  {picker.replacing ? 'Replace recipe' : 'Add dinner'}
+                </h2>
+                <p className="pl-picker-day">{DAYS[picker.dayIndex]}</p>
+              </div>
+              <button className="modal-close" onClick={() => setPicker(null)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div className="pl-picker-search-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)', pointerEvents: 'none' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input
+                autoFocus
+                type="text"
+                className="pl-picker-search"
+                placeholder="Search recipes…"
+                value={pickerSearch}
+                onChange={e => setPickerSearch(e.target.value)}
+              />
+            </div>
+            <div className="pl-picker-list">
+              {filteredRecipes.length === 0 ? (
+                <div className="pl-picker-empty">
+                  {recipes.length === 0
+                    ? <><span>No recipes yet.</span> <a href="/recipes">Add some →</a></>
+                    : <span>No matches for "{pickerSearch}"</span>}
+                </div>
+              ) : filteredRecipes.map(r => (
+                <button
+                  key={r.id}
+                  className="pl-picker-row"
+                  onClick={async () => {
+                    if (picker.replacing) {
+                      await replaceMeal(picker.dayIndex, picker.replacing, r.id);
+                    } else {
+                      await addMeal(picker.dayIndex, r.id);
+                    }
+                    setPicker(null);
+                  }}
+                >
+                  <div className="pl-picker-thumb">
+                    {(r as any).image_url
+                      ? <img src={(r as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      : <span>🍽</span>}
+                  </div>
+                  <div className="pl-picker-info">
+                    <span className="pl-picker-name">{r.title}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {r.primary_protein && <ProteinBadge protein={r.primary_protein} />}
+                      <span className="pl-picker-meta">
+                        {[(r as any).cook_time && `${(r as any).cook_time}m`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--border)', flexShrink: 0 }}><path d="M9 18l6-6-6-6"/></svg>
+                </button>
               ))}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Recipe picker popover */}
-        {showRecipePicker && (
-          <div className="picker-overlay" onClick={() => setShowRecipePicker(null)}>
-            <div className="recipe-picker-popover" ref={pickerRef} onClick={e => e.stopPropagation()}>
-              <div className="picker-header">
-                <div className="picker-title">{DAYS[showRecipePicker.day]} · {showRecipePicker.mealType}</div>
-                <button className="picker-close" onClick={() => setShowRecipePicker(null)}>×</button>
+      {/* ── Magic modal ── */}
+      {showMagic && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
+          <div className="magic-modal">
+            <div className="magic-header">
+              <div>
+                <h2 className="magic-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: 8 }}><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
+                  Auto-plan my week
+                </h2>
+                <p className="magic-sub">Fills the whole week from your recipe library</p>
               </div>
-              <input autoFocus type="text" className="picker-search" placeholder="Search recipes…" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} />
-              <div className="picker-list">
-                {filteredRecipes.length === 0 ? (
-                  <div className="picker-empty">
-                    {recipes.length === 0 ? <><span>No recipes yet.</span> <a href="/recipes">Add some →</a></> : <span>No matches</span>}
-                  </div>
-                ) : filteredRecipes.map(r => (
-                  <button key={r.id} className="picker-recipe-row" onClick={() => { addMeal(showRecipePicker.day, showRecipePicker.mealType, r.id); setShowRecipePicker(null); }}>
-                    <div className="picker-recipe-thumb">
-                      {r.image_url ? <img src={r.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <span>🍽</span>}
-                    </div>
-                    <div className="picker-recipe-info">
-                      <span className="picker-recipe-name">{r.title}</span>
-                      {r.primary_protein && <ProteinPip protein={r.primary_protein} />}
-                      <span className="picker-recipe-meta">{[r.cook_time && `${r.cook_time}m`, r.servings && `${r.servings} servings`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}</span>
-                    </div>
-                    <svg className="picker-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-                  </button>
-                ))}
-              </div>
+              <button className="modal-close" onClick={() => setShowMagic(false)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
             </div>
-          </div>
-        )}
 
-        {/* Magic modal */}
-        {showMagic && (
-          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
-            <div className="magic-modal">
-              <div className="magic-modal-header">
-                <div>
-                  <h2 className="magic-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: 'middle', marginRight: '8px' }}><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
-                    Auto-plan my week
-                  </h2>
-                  <p className="magic-subtitle">We&rsquo;ll fill the week from your recipe library</p>
+            <div className="magic-fields">
+              <div className="magic-field">
+                <label>Variety</label>
+                <div className="toggle-group">
+                  {(['low','medium','high'] as const).map(v => (
+                    <button key={v} className={`toggle-btn ${magicSettings.variety === v ? 'active' : ''}`}
+                      onClick={() => setMagicSettings(p => ({ ...p, variety: v }))}>
+                      {v === 'low' ? 'Favourites' : v === 'medium' ? 'Some variety' : 'Max variety'}
+                    </button>
+                  ))}
                 </div>
-                <button className="modal-close" onClick={() => setShowMagic(false)}>×</button>
-              </div>
-              <div className="magic-grid">
-                <div className="magic-field">
-                  <label>Meal types to plan</label>
-                  <div className="toggle-group">
-                    {MEAL_TYPES.map(mt => (
-                      <button key={mt} className={`toggle-btn ${magicSettings.mealTypes.includes(mt) ? 'active' : ''}`} onClick={() => toggleMagicMealType(mt)}>{mt}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="magic-field">
-                  <label>Variety</label>
-                  <div className="toggle-group">
-                    {(['low', 'medium', 'high'] as const).map(v => (
-                      <button key={v} className={`toggle-btn ${magicSettings.variety === v ? 'active' : ''}`} onClick={() => setMagicSettings(p => ({ ...p, variety: v }))}>
-                        {v === 'low' ? 'Repeat favourites' : v === 'medium' ? 'Some variety' : 'Max variety'}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="magic-hint">
-                    {magicSettings.variety === 'low' && 'Will reuse popular recipes throughout the week'}
-                    {magicSettings.variety === 'medium' && 'Avoids repeating the same recipe back-to-back'}
-                    {magicSettings.variety === 'high' && 'Uses each recipe at most once where possible'}
-                  </p>
-                </div>
-                <div className="magic-field">
-                  <label>Servings per meal</label>
-                  <div className="servings-control">
-                    <button className="servings-btn" onClick={() => setMagicSettings(p => ({ ...p, servings: Math.max(1, p.servings - 1) }))}>−</button>
-                    <span className="servings-value">{magicSettings.servings}</span>
-                    <button className="servings-btn" onClick={() => setMagicSettings(p => ({ ...p, servings: Math.min(20, p.servings + 1) }))}>+</button>
-                    <span className="servings-label">people</span>
-                  </div>
-                </div>
-                <div className="magic-field">
-                  <label>Prefer recipes tagged with</label>
-                  <input type="text" className="magic-input" placeholder="e.g. italian, quick, vegetarian" value={magicSettings.preferTags} onChange={e => setMagicSettings(p => ({ ...p, preferTags: e.target.value }))} />
-                </div>
-                <div className="magic-field">
-                  <label>Avoid recipes tagged with</label>
-                  <input type="text" className="magic-input" placeholder="e.g. spicy, heavy" value={magicSettings.excludeTags} onChange={e => setMagicSettings(p => ({ ...p, excludeTags: e.target.value }))} />
-                </div>
-              </div>
-              <div className="magic-footer">
-                <p className="magic-warning">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                  This will replace all current meals for this week
+                <p className="magic-hint">
+                  {magicSettings.variety === 'low' && 'Repeats your top recipes freely'}
+                  {magicSettings.variety === 'medium' && 'Avoids back-to-back repeats'}
+                  {magicSettings.variety === 'high' && 'Each recipe used at most once'}
                 </p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn-cancel" onClick={() => setShowMagic(false)}>Cancel</button>
-                  <button className="btn-magic-go" onClick={handleMagicSuggest} disabled={magicLoading || magicSettings.mealTypes.length === 0}>
-                    {magicLoading ? <span className="loading-dots"><span/><span/><span/></span> : <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>Plan my week</>}
-                  </button>
+              </div>
+
+              <div className="magic-field">
+                <label>Servings per meal</label>
+                <div className="servings-row">
+                  <button className="servings-btn" onClick={() => setMagicSettings(p => ({ ...p, servings: Math.max(1, p.servings - 1) }))}>−</button>
+                  <span className="servings-val">{magicSettings.servings}</span>
+                  <button className="servings-btn" onClick={() => setMagicSettings(p => ({ ...p, servings: Math.min(20, p.servings + 1) }))}>+</button>
+                  <span className="servings-lbl">people</span>
                 </div>
+              </div>
+
+              <div className="magic-field">
+                <label>Prefer tags</label>
+                <input className="magic-input" placeholder="e.g. italian, quick, vegetarian" value={magicSettings.preferTags} onChange={e => setMagicSettings(p => ({ ...p, preferTags: e.target.value }))} />
+              </div>
+
+              <div className="magic-field">
+                <label>Avoid tags</label>
+                <input className="magic-input" placeholder="e.g. spicy, heavy" value={magicSettings.excludeTags} onChange={e => setMagicSettings(p => ({ ...p, excludeTags: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="magic-footer">
+              <p className="magic-warn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Replaces all current meals for this week
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button className="btn-cancel" onClick={() => setShowMagic(false)}>Cancel</button>
+                <button className="btn-magic-go" onClick={handleMagicSuggest} disabled={magicLoading}>
+                  {magicLoading
+                    ? <span className="loading-dots"><span/><span/><span/></span>
+                    : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>Plan my week</>}
+                </button>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <style>{`
-        .planner-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+        /* ── Layout ── */
+        .pl-root { max-width: 680px; }
 
-        /* ── Sidebar ── */
-        .recipe-sidebar {
-          width: 190px; flex-shrink: 0; position: sticky; top: 1.5rem;
-          max-height: calc(100vh - 3rem); display: flex; flex-direction: column; overflow: hidden;
+        /* ── Top bar ── */
+        .pl-topbar {
+          display: flex; align-items: flex-start; justify-content: space-between;
+          gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap;
         }
-        .sidebar-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.6rem; }
-        .sidebar-title { font-family: var(--font-display); font-size: 1.1rem; font-weight: 300; color: var(--ink); }
-        .sidebar-hint { font-size: 0.63rem; color: var(--ink-muted); font-style: italic; }
-        .sidebar-search-wrap { position: relative; margin-bottom: 0.75rem; }
-        .sidebar-search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
-        .sidebar-search {
-          width: 100%; padding: 0.42rem 1.75rem; border: 1px solid var(--border);
-          border-radius: 6px; font-size: 0.78rem; font-family: var(--font-body);
-          color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; background: white;
+        .pl-title {
+          font-family: var(--font-display); font-size: 2.8rem; font-weight: 300;
+          line-height: 1; color: var(--ink); margin-bottom: 0.75rem;
         }
-        .sidebar-search:focus { border-color: var(--rust); }
-        .sidebar-search-clear { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--ink-muted); cursor: pointer; font-size: 14px; padding: 0; line-height: 1; }
-        .sidebar-empty { padding: 1.5rem 0; text-align: center; font-size: 0.8rem; color: var(--ink-muted); display: flex; flex-direction: column; gap: 0.4rem; }
-        .sidebar-empty a { color: var(--rust); }
-        .sidebar-cards { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 0.45rem; padding-right: 2px; padding-bottom: 1rem; }
-        .sidebar-cards::-webkit-scrollbar { width: 3px; }
-        .sidebar-cards::-webkit-scrollbar-track { background: transparent; }
-        .sidebar-cards::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        .pl-title em { font-style: italic; color: var(--rust); }
+        .pl-week-nav { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+        .pl-nav-btn {
+          background: white; border: 1px solid var(--border); border-radius: 6px;
+          padding: 0.35rem 0.5rem; cursor: pointer; color: var(--ink-muted);
+          display: flex; align-items: center; transition: all 0.15s;
+        }
+        .pl-nav-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
+        .pl-week-label { font-size: 0.88rem; color: var(--ink-soft); padding: 0 0.25rem; }
+        .pl-today-btn {
+          background: none; border: none; font-size: 0.78rem; color: var(--rust);
+          cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px;
+          font-family: var(--font-body); transition: all 0.15s;
+        }
+        .pl-today-btn:hover { background: var(--parchment); }
+        .pl-topbar-right { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .pl-count { font-size: 0.78rem; color: var(--ink-muted); }
+        .pl-btn-magic {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.5rem 0.9rem; background: var(--ink); color: var(--cream);
+          border: none; border-radius: 6px; font-size: 0.8rem;
+          font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
+        }
+        .pl-btn-magic:hover { opacity: 0.85; }
+        .pl-btn-shop {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.5rem 0.9rem; background: var(--rust); color: white;
+          border: none; border-radius: 6px; font-size: 0.8rem;
+          font-family: var(--font-body); cursor: pointer; text-decoration: none;
+          transition: opacity 0.15s;
+        }
+        .pl-btn-shop:hover { opacity: 0.88; }
 
-        .recipe-thumb-card {
+        /* ── Day list ── */
+        .pl-days { display: flex; flex-direction: column; gap: 0; }
+
+        .pl-day {
+          padding: 1.25rem 0;
+          border-bottom: 1px solid var(--border);
+          transition: opacity 0.2s;
+        }
+        .pl-day:first-child { border-top: 1px solid var(--border); }
+        .pl-day.is-past { opacity: 0.45; }
+        .pl-day.is-today { opacity: 1; }
+
+        /* Day header */
+        .pl-day-header {
+          display: flex; align-items: center; justify-content: space-between;
+          margin-bottom: 0.75rem;
+        }
+        .pl-day-label { display: flex; align-items: baseline; gap: 0.6rem; }
+        .pl-today-pip {
+          font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
+          letter-spacing: 0.1em; color: white; background: var(--rust);
+          border-radius: 99px; padding: 2px 7px; line-height: 1.4;
+        }
+        .pl-day-name {
+          font-family: var(--font-display); font-size: 1.35rem; font-weight: 300;
+          color: var(--ink); line-height: 1;
+        }
+        .pl-day.is-today .pl-day-name { color: var(--rust); }
+        .pl-day-date { font-size: 0.8rem; color: var(--ink-muted); }
+
+        /* Day action menu */
+        .pl-day-actions { position: relative; }
+        .pl-action-btn {
+          background: none; border: 1px solid var(--border); border-radius: 6px;
+          padding: 0.3rem 0.45rem; color: var(--ink-muted); cursor: pointer;
+          display: flex; align-items: center; transition: all 0.15s;
+        }
+        .pl-action-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
+        .pl-action-menu {
+          position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
           background: white; border: 1px solid var(--border); border-radius: 8px;
-          overflow: hidden; cursor: grab; transition: all 0.15s; user-select: none; flex-shrink: 0;
+          box-shadow: 0 4px 20px rgba(26,22,18,0.12); overflow: hidden; min-width: 160px;
         }
-        .recipe-thumb-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.14); transform: translateY(-1px); }
-        .recipe-thumb-card:active { cursor: grabbing; }
-        .recipe-thumb-card.is-dragging { opacity: 0.4; }
-
-        .recipe-thumb-img { width: 100%; height: 85px; background: var(--parchment); overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; }
-        .recipe-thumb-img img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-        .recipe-thumb-emoji { font-size: 26px; }
-        .recipe-thumb-drag-hint {
-          position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.88);
-          border-radius: 4px; padding: 3px 4px; color: var(--ink-muted); opacity: 0; transition: opacity 0.15s; display: flex; align-items: center;
+        .pl-action-menu button {
+          display: flex; align-items: center; gap: 0.5rem; width: 100%;
+          padding: 0.65rem 1rem; background: none; border: none; font-size: 0.83rem;
+          font-family: var(--font-body); color: var(--ink-soft); cursor: pointer;
+          text-align: left; transition: background 0.12s;
         }
-        .recipe-thumb-card:hover .recipe-thumb-drag-hint { opacity: 1; }
-        .recipe-thumb-info { padding: 0.4rem 0.5rem 0.45rem; display: flex; flex-direction: column; gap: 2px; }
-        .recipe-thumb-name { font-size: 0.75rem; color: var(--ink); font-weight: 400; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        .recipe-thumb-tags { font-size: 0.63rem; color: var(--ink-muted); text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .recipe-thumb-time { font-size: 0.63rem; color: var(--rust); }
+        .pl-action-menu button:hover { background: var(--parchment); }
+        .pl-action-menu button.danger { color: #c0392b; }
+        .pl-action-menu button.danger:hover { background: #fef2f2; }
 
-        /* ── Planner root ── */
-        .planner-root { flex: 1; min-width: 0; padding: 0; }
-        .planner-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-        .planner-title { font-family: var(--font-display); font-size: 2.8rem; font-weight: 300; line-height: 1; color: var(--ink); margin-bottom: 0.75rem; }
-        .planner-title em { font-style: italic; color: var(--rust); }
-        .week-nav { display: flex; align-items: center; gap: 0.5rem; }
-        .nav-btn { background: white; border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
-        .nav-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
-        .nav-btn-text { background: none; border: none; font-size: 0.78rem; color: var(--ink-muted); cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px; font-family: var(--font-body); transition: all 0.15s; }
-        .nav-btn-text:hover { color: var(--ink); background: var(--parchment); }
-        .week-label { font-size: 0.88rem; color: var(--ink-soft); min-width: 200px; text-align: center; }
-        .planner-header-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-        .meal-count { font-size: 0.78rem; color: var(--ink-muted); }
-        .btn-magic { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; background: var(--ink); color: var(--cream); border: none; border-radius: 4px; font-size: 0.82rem; font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
-        .btn-magic:hover { background: var(--ink-soft); }
-        .btn-shop { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; background: var(--rust); color: white; border: none; border-radius: 4px; font-size: 0.82rem; font-family: var(--font-body); cursor: pointer; text-decoration: none; transition: all 0.15s; }
-        .btn-shop:hover { background: var(--rust-light); }
+        /* Recipe card */
+        .pl-recipe-card {
+          display: flex; gap: 1rem; align-items: center;
+          background: white; border: 1px solid var(--border); border-radius: 10px;
+          overflow: hidden; cursor: pointer; transition: all 0.15s;
+        }
+        .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 12px rgba(181,69,27,0.1); }
+        .pl-recipe-img {
+          width: 90px; height: 72px; flex-shrink: 0;
+          background: var(--parchment); overflow: hidden;
+        }
+        .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+        .pl-recipe-info { flex: 1; min-width: 0; padding: 0.75rem 1rem 0.75rem 0; }
+        .pl-recipe-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+        .pl-recipe-name { font-size: 0.95rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
+        .pl-recipe-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--ink-muted); }
+        .pl-recipe-tag {
+          background: var(--parchment); border: 1px solid var(--border);
+          border-radius: 99px; padding: 1px 7px; font-size: 0.68rem; color: var(--ink-soft);
+        }
 
-        .planner-grid-wrap { overflow-x: auto; }
-        .planner-grid { display: grid; grid-template-columns: 72px repeat(7, 1fr); gap: 4px; min-width: 560px; }
-        .planner-col-header { text-align: center; padding: 0.5rem 0.25rem 0.75rem; }
-        .planner-col-header.today .col-day { color: var(--rust); }
-        .planner-col-header.today .col-date { background: var(--rust); color: white; border-radius: 50%; }
-        .col-day { display: block; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 3px; }
-        .col-date { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; font-family: var(--font-display); font-size: 1rem; font-weight: 300; color: var(--ink); }
-        .planner-row-label { display: flex; align-items: flex-start; justify-content: flex-end; padding: 0.6rem 0.75rem 0 0; }
-        .planner-row-label span { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); }
+        /* Empty slot */
+        .pl-empty-slot { display: flex; flex-direction: column; gap: 0.75rem; }
+        .pl-add-btn {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.55rem 1rem; background: none; border: 1.5px dashed var(--border);
+          border-radius: 8px; font-size: 0.82rem; color: var(--ink-muted);
+          font-family: var(--font-body); cursor: pointer; transition: all 0.15s;
+          align-self: flex-start;
+        }
+        .pl-add-btn:hover { border-color: var(--rust); color: var(--rust); }
 
-        .planner-cell { background: white; border: 1px solid var(--border); border-radius: 6px; min-height: 80px; padding: 0.35rem; cursor: pointer; transition: all 0.15s; position: relative; display: flex; flex-direction: column; gap: 3px; }
-        .planner-cell:hover { border-color: var(--ink-muted); }
-        .planner-cell.drag-over { border-color: var(--rust); background: rgba(181,69,27,0.04); box-shadow: 0 0 0 2px rgba(181,69,27,0.15); }
-        .planner-cell.drag-over-new { border-style: dashed; }
-        .cell-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--border); transition: color 0.15s; }
-        .planner-cell:hover .cell-empty { color: var(--ink-muted); }
+        /* Suggestions */
+        .pl-suggestions { }
+        .pl-suggestions-label {
+          font-size: 0.68rem; color: var(--ink-muted); text-transform: uppercase;
+          letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem;
+        }
+        .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .pl-suggestion-pill {
+          display: inline-flex; align-items: center; gap: 5px;
+          padding: 0.3rem 0.7rem; background: white; border: 1px solid var(--border);
+          border-radius: 99px; font-size: 0.75rem; color: var(--ink-soft);
+          font-family: var(--font-body); cursor: pointer; transition: all 0.15s;
+          max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .pl-suggestion-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.04); }
 
-        .meal-chip { background: var(--sage-light); border: 1px solid #D4DBC9; border-radius: 5px; display: flex; flex-direction: column; cursor: grab; transition: all 0.15s; user-select: none; overflow: hidden; }
-        .meal-chip:hover { background: #E0EBCF; }
-        .meal-chip.dragging { opacity: 0.4; cursor: grabbing; }
-        .meal-chip:active { cursor: grabbing; }
-        .meal-chip-thumb { width: 100%; height: 42px; overflow: hidden; flex-shrink: 0; background: #D8E8CC; }
-        .meal-chip-thumb img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; display: block; }
-        .meal-chip-body { display: flex; flex-direction: column; gap: 3px; padding: 0.3rem 0.3rem 0.25rem; }
-        .meal-chip-name { font-size: 0.68rem; color: #3A5030; line-height: 1.3; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-        .meal-chip-remove { background: none; border: none; color: #7A9068; cursor: pointer; padding: 0; line-height: 1; font-size: 14px; flex-shrink: 0; opacity: 0.6; transition: opacity 0.15s; }
-        .meal-chip-remove:hover { opacity: 1; }
-        .cell-add-more { align-self: flex-start; background: none; border: 1px dashed var(--border); border-radius: 3px; color: var(--ink-muted); font-size: 11px; padding: 1px 5px; cursor: pointer; margin-top: 2px; transition: all 0.15s; font-family: var(--font-body); }
-        .cell-add-more:hover { border-color: var(--rust); color: var(--rust); }
+        /* ── Picker modal ── */
+        .pl-picker {
+          background: white; border-radius: 12px; width: 440px; max-width: 95vw;
+          max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+          box-shadow: 0 8px 40px rgba(26,22,18,0.15);
+        }
+        .pl-picker-header {
+          display: flex; align-items: flex-start; justify-content: space-between;
+          padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment);
+        }
+        .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
+        .pl-picker-day { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
+        .pl-picker-search-wrap { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--parchment); }
+        .pl-picker-search {
+          width: 100%; padding: 0.55rem 0.85rem 0.55rem 2.2rem;
+          border: 1px solid var(--border); border-radius: 8px;
+          font-size: 0.88rem; font-family: var(--font-body); color: var(--ink);
+          outline: none; transition: border-color 0.15s; box-sizing: border-box;
+        }
+        .pl-picker-search:focus { border-color: var(--rust); }
+        .pl-picker-list { overflow-y: auto; flex: 1; padding: 0.5rem; }
+        .pl-picker-empty { padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
+        .pl-picker-empty a { color: var(--rust); }
+        .pl-picker-row {
+          display: flex; align-items: center; gap: 0.75rem;
+          padding: 0.65rem 0.75rem; border-radius: 8px; border: none;
+          background: none; cursor: pointer; width: 100%; text-align: left;
+          transition: background 0.12s; font-family: var(--font-body);
+        }
+        .pl-picker-row:hover { background: var(--parchment); }
+        .pl-picker-thumb {
+          width: 44px; height: 44px; border-radius: 6px; overflow: hidden;
+          background: var(--parchment); flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center; font-size: 20px;
+        }
+        .pl-picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .pl-picker-info { flex: 1; min-width: 0; }
+        .pl-picker-name { display: block; font-size: 0.9rem; color: var(--ink); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pl-picker-meta { font-size: 0.72rem; color: var(--ink-muted); }
 
-        .picker-overlay { position: fixed; inset: 0; z-index: 500; }
-        .recipe-picker-popover { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 40px rgba(26,22,18,0.15); width: 380px; max-height: 520px; display: flex; flex-direction: column; overflow: hidden; z-index: 501; }
-        .picker-header { padding: 1rem 1.25rem 0.75rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--parchment); }
-        .picker-title { font-family: var(--font-display); font-size: 1.1rem; font-weight: 400; color: var(--ink); text-transform: capitalize; }
-        .picker-close { background: none; border: none; font-size: 20px; color: var(--ink-muted); cursor: pointer; padding: 0; line-height: 1; transition: color 0.15s; }
-        .picker-close:hover { color: var(--ink); }
-        .picker-search { margin: 0.75rem 1rem; padding: 0.55rem 0.85rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; }
-        .picker-search:focus { border-color: var(--rust); }
-        .picker-list { overflow-y: auto; flex: 1; padding: 0 0.5rem 0.75rem; }
-        .picker-empty { padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
-        .picker-empty a { color: var(--rust); }
-        .picker-recipe-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.75rem; border-radius: 6px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); }
-        .picker-recipe-row:hover { background: var(--parchment); }
-        .picker-recipe-thumb { width: 40px; height: 40px; border-radius: 5px; overflow: hidden; background: var(--parchment); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; }
-        .picker-recipe-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .picker-recipe-info { flex: 1; min-width: 0; }
-        .picker-recipe-name { display: block; font-size: 0.88rem; font-weight: 400; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .picker-recipe-meta { display: block; font-size: 0.72rem; color: var(--ink-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .picker-arrow { color: var(--border); flex-shrink: 0; }
-
-        .magic-modal { background: white; border-radius: 10px; padding: 2rem; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
-        .magic-modal-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.75rem; }
-        .magic-title { font-family: var(--font-display); font-size: 1.6rem; font-weight: 300; color: var(--ink); display: flex; align-items: center; margin-bottom: 0.25rem; }
-        .magic-subtitle { font-size: 0.82rem; color: var(--ink-muted); }
-        .modal-close { background: none; border: none; font-size: 22px; color: var(--ink-muted); cursor: pointer; padding: 0; line-height: 1; }
-        .modal-close:hover { color: var(--ink); }
-        .magic-grid { display: flex; flex-direction: column; gap: 1.25rem; }
-        .magic-field label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 0.5rem; }
-        .toggle-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-        .toggle-btn { padding: 0.45rem 0.9rem; border: 1px solid var(--border); border-radius: 20px; background: white; color: var(--ink-soft); font-size: 0.8rem; cursor: pointer; font-family: var(--font-body); transition: all 0.15s; text-transform: capitalize; }
+        /* ── Magic modal ── */
+        .magic-modal {
+          background: white; border-radius: 12px; padding: 2rem;
+          width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+          box-shadow: 0 8px 40px rgba(26,22,18,0.15);
+        }
+        .magic-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.75rem; }
+        .magic-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 300; color: var(--ink); display: flex; align-items: center; }
+        .magic-sub { font-size: 0.8rem; color: var(--ink-muted); margin-top: 4px; }
+        .magic-fields { display: flex; flex-direction: column; gap: 1.25rem; }
+        .magic-field label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 0.5rem; }
+        .toggle-group { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .toggle-btn { padding: 0.42rem 0.85rem; border: 1px solid var(--border); border-radius: 99px; background: white; color: var(--ink-soft); font-size: 0.78rem; cursor: pointer; font-family: var(--font-body); transition: all 0.15s; }
         .toggle-btn:hover { border-color: var(--rust); color: var(--rust); }
         .toggle-btn.active { background: var(--rust); border-color: var(--rust); color: white; }
-        .magic-hint { font-size: 0.75rem; color: var(--ink-muted); font-style: italic; margin-top: 0.4rem; }
-        .servings-control { display: flex; align-items: center; gap: 0.75rem; }
-        .servings-btn { width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 50%; background: white; color: var(--ink-soft); font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; font-family: var(--font-body); line-height: 1; }
+        .magic-hint { font-size: 0.73rem; color: var(--ink-muted); font-style: italic; margin-top: 0.4rem; }
+        .servings-row { display: flex; align-items: center; gap: 0.65rem; }
+        .servings-btn { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 50%; background: white; color: var(--ink-soft); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; font-family: var(--font-body); line-height: 1; }
         .servings-btn:hover { border-color: var(--rust); color: var(--rust); }
-        .servings-value { font-family: var(--font-display); font-size: 1.6rem; font-weight: 300; color: var(--rust); min-width: 30px; text-align: center; }
-        .servings-label { font-size: 0.82rem; color: var(--ink-muted); }
-        .magic-input { width: 100%; padding: 0.6rem 0.85rem; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-body); font-size: 0.88rem; color: var(--ink); outline: none; transition: border-color 0.15s; }
+        .servings-val { font-family: var(--font-display); font-size: 1.5rem; font-weight: 300; color: var(--rust); min-width: 28px; text-align: center; }
+        .servings-lbl { font-size: 0.8rem; color: var(--ink-muted); }
+        .magic-input { width: 100%; padding: 0.55rem 0.85rem; border: 1px solid var(--border); border-radius: 8px; font-family: var(--font-body); font-size: 0.88rem; color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
         .magic-input:focus { border-color: var(--rust); }
         .magic-footer { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-        .magic-warning { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--ink-muted); }
-        .btn-cancel { padding: 0.55rem 1rem; background: white; border: 1px solid var(--border); border-radius: 4px; font-size: 0.82rem; font-family: var(--font-body); color: var(--ink-soft); cursor: pointer; transition: all 0.15s; }
+        .magic-warn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.73rem; color: var(--ink-muted); }
+        .btn-cancel { padding: 0.5rem 0.9rem; background: white; border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); color: var(--ink-soft); cursor: pointer; transition: all 0.15s; }
         .btn-cancel:hover { border-color: var(--ink-muted); }
-        .btn-magic-go { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1.25rem; background: var(--ink); color: var(--cream); border: none; border-radius: 4px; font-size: 0.82rem; font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
+        .btn-magic-go { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.1rem; background: var(--ink); color: var(--cream); border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
         .btn-magic-go:hover:not(:disabled) { background: var(--rust); }
         .btn-magic-go:disabled { opacity: 0.5; cursor: not-allowed; }
-        .planner-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
 
-        @media (max-width: 900px) {
-          .planner-layout { flex-direction: column; }
-          .recipe-sidebar { width: 100%; position: static; max-height: none; }
-          .sidebar-cards { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; overflow-y: visible; gap: 0.5rem; padding-bottom: 0.5rem; }
-          .recipe-thumb-card { min-width: 130px; }
+        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
+
+        /* ── Mobile ── */
+        @media (max-width: 600px) {
+          .pl-title { font-size: 2rem; }
+          .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; }
+          .pl-topbar-right { gap: 0.4rem; }
+          .pl-btn-magic, .pl-btn-shop { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
+          .pl-day { padding: 1rem 0; }
+          .pl-day-name { font-size: 1.1rem; }
+          .pl-recipe-img { width: 70px; height: 58px; }
+          .pl-recipe-name { font-size: 0.88rem; }
+          .pl-picker { max-height: 92dvh; border-radius: 16px 16px 0 0; }
+          .modal-overlay { align-items: flex-end; }
         }
       `}</style>
     </div>
