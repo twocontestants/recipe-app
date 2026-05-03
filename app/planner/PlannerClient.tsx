@@ -36,7 +36,7 @@ function ProteinPip({ protein }: { protein?: string }) {
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
+const MEAL_TYPES = ['dinner'];
 
 function getMonday(date: Date): Date {
   const d = new Date(date);

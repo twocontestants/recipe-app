@@ -346,7 +346,6 @@ export default function RecipesPage() {
       DAYS.forEach((k, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); map[k] = d.getDate(); });
       return map;
     })();
-    const MEALS = ['breakfast','lunch','dinner','snack'];
     const today = todayDayKey();
     const shiftWeek = (n: number) => {
       const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
@@ -400,20 +399,6 @@ export default function RecipesPage() {
             })}
           </div>
 
-          {/* Meal selector */}
-          <div className="pqm-meal-row">
-            {MEALS.map(m => (
-              <button
-                key={m}
-                className={`pqm-meal-btn ${plannerMeal === m ? 'selected' : ''}`}
-                onClick={() => setPlannerMeal(m)}
-              >
-                {m === 'breakfast' ? '🍳' : m === 'lunch' ? '🥗' : m === 'dinner' ? '🍽' : '🍎'}
-                <span>{m}</span>
-              </button>
-            ))}
-          </div>
-
           {/* Action */}
           <button
             className="pqm-add-btn"
@@ -422,7 +407,7 @@ export default function RecipesPage() {
           >
             {addingToPlan
               ? <span className="loading-dots"><span/><span/><span/></span>
-              : <>Add to {DAY_SHORT[plannerDay]} {plannerMeal}</>}
+              : <>Add to {DAY_SHORT[plannerDay]}</>}
           </button>
         </div>
       </div>
@@ -714,23 +699,6 @@ export default function RecipesPage() {
           border: 1px solid var(--border); opacity: 0.4;
         }
 
-        /* Meal row */
-        .pqm-meal-row {
-          display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem;
-          margin-bottom: 1.25rem;
-        }
-        .pqm-meal-btn {
-          display: flex; flex-direction: column; align-items: center; gap: 3px;
-          padding: 0.55rem 0.25rem; border: 1.5px solid var(--border);
-          border-radius: 8px; background: white; cursor: pointer;
-          transition: all 0.15s; font-size: 0.65rem; text-transform: capitalize;
-          color: var(--ink-muted); font-family: var(--font-body);
-        }
-        .pqm-meal-btn:hover { border-color: var(--rust); color: var(--rust); }
-        .pqm-meal-btn.selected {
-          border-color: var(--rust); background: rgba(181,69,27,0.06); color: var(--rust);
-        }
-        .pqm-meal-btn span { font-size: 0.65rem; }
 
         /* Add button */
         .pqm-add-btn {
