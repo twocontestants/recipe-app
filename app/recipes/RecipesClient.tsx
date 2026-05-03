@@ -49,6 +49,37 @@ function ProteinBadge({ protein, size = 'sm' }: { protein?: string; size?: 'sm' 
   );
 }
 
+
+// ── Planner date helpers ──────────────────────────────────────────────────
+function getThisMonday(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff); d.setHours(0, 0, 0, 0);
+  return d.toISOString().split('T')[0];
+}
+function todayDayKey(): string {
+  const KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+  const d = new Date().getDay();
+  return KEYS[d === 0 ? 6 : d - 1];
+}
+function mondayOfWeek(weekStart: string): Date {
+  return new Date(weekStart + 'T00:00:00');
+}
+function formatShortWeek(weekStart: string): string {
+  const mon = mondayOfWeek(weekStart);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return `${mon.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
+}
+function isThisWeek(weekStart: string): boolean {
+  return weekStart === getThisMonday();
+}
+function isNextWeek(weekStart: string): boolean {
+  const next = new Date(getThisMonday() + 'T00:00:00');
+  next.setDate(next.getDate() + 7);
+  return weekStart === next.toISOString().split('T')[0];
+}
+
 const EMPTY_RECIPE = {
   title: '',
   description: '',
@@ -78,19 +109,11 @@ export default function RecipesPage() {
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
-  const [plannerWeek, setPlannerWeek] = useState(() => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    d.setDate(diff); d.setHours(0,0,0,0);
-    return d.toISOString().split('T')[0];
-  });
-  const [plannerDay, setPlannerDay] = useState(() => {
-    const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    const d = new Date(); return days[d.getDay() === 0 ? 6 : d.getDay() - 1];
-  });
+  const [plannerWeek, setPlannerWeek] = useState(() => getThisMonday());
+  const [plannerDay, setPlannerDay] = useState(() => todayDayKey());
   const [plannerMeal, setPlannerMeal] = useState('dinner');
   const [addingToPlan, setAddingToPlan] = useState(false);
+  const [weekPlan, setWeekPlan] = useState<Record<string, string[]>>({});
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -166,6 +189,20 @@ export default function RecipesPage() {
     }
   };
 
+  const fetchWeekPlan = async (week: string) => {
+    try {
+      const res = await fetch(`/api/planner?weekStart=${week}`);
+      const plans = await res.json();
+      // Build map: dayKey → [meal_type, ...]
+      const map: Record<string, string[]> = {};
+      for (const p of plans) {
+        if (!map[p.day_of_week]) map[p.day_of_week] = [];
+        map[p.day_of_week].push(p.meal_type);
+      }
+      setWeekPlan(map);
+    } catch { /* silent */ }
+  };
+
   const handleAddToPlanner = async () => {
     if (!plannerModal) return;
     setAddingToPlan(true);
@@ -181,14 +218,20 @@ export default function RecipesPage() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
+      const dayLabel = plannerDay.charAt(0).toUpperCase() + plannerDay.slice(1);
+      const mealLabel = plannerMeal.charAt(0).toUpperCase() + plannerMeal.slice(1);
+      showToast(`${mealLabel} added for ${dayLabel}! 🗓`, 'success');
       setPlannerModal(null);
-      showToast(`Added to ${plannerDay} ${plannerMeal}!`, 'success');
     } catch (e) {
       showToast(`Failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
     } finally {
       setAddingToPlan(false);
     }
   };
+
+  useEffect(() => {
+    if (plannerModal) fetchWeekPlan(plannerWeek);
+  }, [plannerModal, plannerWeek]);
 
   const handleScrape = async () => {
     if (!scrapeUrl.trim()) return;
@@ -295,73 +338,96 @@ export default function RecipesPage() {
 
   // Planner modal is shared between grid and detail views
   const plannerModalJsx = plannerModal && (() => {
-        const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-        const DAY_LABELS: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
-        const MEALS = ['breakfast','lunch','dinner','snack'];
-        const weekDate = new Date(plannerWeek + 'T00:00:00');
-        const fmtWeek = (d: Date) => {
-          const sun = new Date(d); sun.setDate(d.getDate() + 6);
-          return `${d.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
-        };
-        const shiftWeek = (n: number) => {
-          const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
-          setPlannerWeek(d.toISOString().split('T')[0]);
-        };
-        return (
-          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
-            <div className="modal" style={{ maxWidth: '420px' }}>
-              <div className="modal-header">
-                <h2 className="modal-title">Add to Planner</h2>
-                <button className="modal-close" onClick={() => setPlannerModal(null)}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-              </div>
-              <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-                {plannerModal?.recipe.title}
-              </p>
-              <div className="form-group">
-                <label>Week</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(-1)}>‹</button>
-                  <span style={{ flex: 1, textAlign: 'center', fontSize: '0.85rem', color: 'var(--ink-soft)' }}>{fmtWeek(weekDate)}</span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(1)}>›</button>
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Day</label>
-                <div className="plan-picker-grid">
-                  {DAYS.map(d => (
-                    <button key={d} type="button"
-                      className={`plan-picker-btn ${plannerDay === d ? 'active' : ''}`}
-                      onClick={() => setPlannerDay(d)}>
-                      {DAY_LABELS[d]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Meal</label>
-                <div className="plan-picker-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                  {MEALS.map(m => (
-                    <button key={m} type="button"
-                      className={`plan-picker-btn ${plannerMeal === m ? 'active' : ''}`}
-                      onClick={() => setPlannerMeal(m)}
-                      style={{ textTransform: 'capitalize' }}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button className="btn btn-secondary" onClick={() => setPlannerModal(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleAddToPlanner} disabled={addingToPlan}>
-                  {addingToPlan ? <span className="loading-dots"><span/><span/><span/></span> : 'Add to Plan'}
-                </button>
-              </div>
+    const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const DAY_SHORT: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+    const DAY_DATE: Record<string,number> = (() => {
+      const mon = mondayOfWeek(plannerWeek);
+      const map: Record<string,number> = {};
+      DAYS.forEach((k, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); map[k] = d.getDate(); });
+      return map;
+    })();
+    const MEALS = ['breakfast','lunch','dinner','snack'];
+    const today = todayDayKey();
+    const shiftWeek = (n: number) => {
+      const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
+      const newWeek = d.toISOString().split('T')[0];
+      setPlannerWeek(newWeek);
+    };
+    const weekLabel = isThisWeek(plannerWeek) ? 'This week' : isNextWeek(plannerWeek) ? 'Next week' : formatShortWeek(plannerWeek);
+
+    return (
+      <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
+        <div className="modal planner-quick-modal">
+          {/* Header */}
+          <div className="modal-header" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+            <div>
+              <h2 className="modal-title" style={{ fontSize: '1.1rem' }}>Add to Planner</h2>
+              <p className="pqm-recipe-name">{plannerModal?.recipe.title}</p>
             </div>
+            <button className="modal-close" onClick={() => setPlannerModal(null)}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
           </div>
-        );
-      })();
+
+          {/* Week selector */}
+          <div className="pqm-week-row">
+            <button className="pqm-week-arrow" onClick={() => shiftWeek(-1)} title="Previous week">‹</button>
+            <span className="pqm-week-label">{weekLabel}</span>
+            <button className="pqm-week-arrow" onClick={() => shiftWeek(1)} title="Next week">›</button>
+          </div>
+
+          {/* Day grid — shows date + occupancy dots */}
+          <div className="pqm-day-grid">
+            {DAYS.map(d => {
+              const isToday = d === today && isThisWeek(plannerWeek);
+              const isSelected = d === plannerDay;
+              const occupied = weekPlan[d] || [];
+              return (
+                <button
+                  key={d}
+                  className={`pqm-day-btn ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                  onClick={() => setPlannerDay(d)}
+                >
+                  <span className="pqm-day-name">{DAY_SHORT[d]}</span>
+                  <span className="pqm-day-date">{DAY_DATE[d]}</span>
+                  <span className="pqm-day-dots">
+                    {occupied.length > 0
+                      ? occupied.slice(0, 3).map((_, i) => <span key={i} className="pqm-dot" />)
+                      : <span className="pqm-dot-empty" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Meal selector */}
+          <div className="pqm-meal-row">
+            {MEALS.map(m => (
+              <button
+                key={m}
+                className={`pqm-meal-btn ${plannerMeal === m ? 'selected' : ''}`}
+                onClick={() => setPlannerMeal(m)}
+              >
+                {m === 'breakfast' ? '🍳' : m === 'lunch' ? '🥗' : m === 'dinner' ? '🍽' : '🍎'}
+                <span>{m}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Action */}
+          <button
+            className="pqm-add-btn"
+            onClick={handleAddToPlanner}
+            disabled={addingToPlan}
+          >
+            {addingToPlan
+              ? <span className="loading-dots"><span/><span/><span/></span>
+              : <>Add to {DAY_SHORT[plannerDay]} {plannerMeal}</>}
+          </button>
+        </div>
+      </div>
+    );
+  })();
 
   if (viewRecipe) {
     return <>
@@ -414,11 +480,21 @@ export default function RecipesPage() {
         <div className="recipe-grid">
           {filtered.map(recipe => (
             <div key={recipe.id} className="card" onClick={() => setViewRecipe(recipe)} style={{ cursor: 'pointer' }}>
-              {recipe.image_url ? (
-                <img src={recipe.image_url} alt={recipe.title} className="recipe-card-img" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-              ) : (
-                <div className="recipe-card-img-placeholder">🍳</div>
-              )}
+              <div className="recipe-card-img-wrap" onClick={e => e.stopPropagation()}>
+                {recipe.image_url ? (
+                  <img src={recipe.image_url} alt={recipe.title} className="recipe-card-img" onClick={() => setViewRecipe(recipe)} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                ) : (
+                  <div className="recipe-card-img-placeholder" onClick={() => setViewRecipe(recipe)}>🍳</div>
+                )}
+                <button
+                  className="card-plan-btn"
+                  onClick={() => setPlannerModal({ recipe })}
+                  title="Add to meal planner"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
+                  Plan
+                </button>
+              </div>
               <div className="recipe-card-body">
                 <h3 className="recipe-card-title">{recipe.title}</h3>
                 <div className="recipe-card-meta">
@@ -434,7 +510,7 @@ export default function RecipesPage() {
                 )}
               </div>
               <div className="recipe-card-actions" onClick={e => e.stopPropagation()}>
-                <button className="btn btn-primary btn-sm" onClick={() => setPlannerModal({ recipe })} title="Add to meal planner">
+                <button className="btn btn-primary btn-sm" onClick={() => setPlannerModal({ recipe })}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
                   Plan
                 </button>
@@ -577,6 +653,115 @@ export default function RecipesPage() {
       )}
 
       <style>{`
+        /* ── Planner quick-add modal ── */
+        .planner-quick-modal { max-width: 400px; padding: 1.5rem; }
+        .pqm-recipe-name {
+          font-family: var(--font-display); font-style: italic;
+          color: var(--ink-soft); font-size: 0.95rem; margin: 0.1rem 0 0;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          max-width: 280px;
+        }
+        .pqm-week-row {
+          display: flex; align-items: center; gap: 0.5rem;
+          margin: 1rem 0 0.75rem; background: var(--parchment);
+          border-radius: 8px; padding: 0.4rem 0.5rem;
+        }
+        .pqm-week-label {
+          flex: 1; text-align: center; font-size: 0.82rem;
+          color: var(--ink-soft); font-weight: 500;
+        }
+        .pqm-week-arrow {
+          background: none; border: none; font-size: 1.2rem; cursor: pointer;
+          color: var(--ink-muted); padding: 0 0.35rem; line-height: 1;
+          border-radius: 4px; transition: color 0.15s;
+        }
+        .pqm-week-arrow:hover { color: var(--rust); }
+
+        /* Day grid */
+        .pqm-day-grid {
+          display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
+          margin-bottom: 1rem;
+        }
+        .pqm-day-btn {
+          display: flex; flex-direction: column; align-items: center;
+          gap: 2px; padding: 0.5rem 0.2rem; border: 1.5px solid var(--border);
+          border-radius: 8px; background: white; cursor: pointer;
+          transition: all 0.15s; position: relative;
+        }
+        .pqm-day-btn:hover { border-color: var(--rust); }
+        .pqm-day-btn.today { border-color: var(--sage); }
+        .pqm-day-btn.today .pqm-day-name { color: var(--sage); }
+        .pqm-day-btn.selected {
+          border-color: var(--rust); background: var(--rust);
+        }
+        .pqm-day-btn.selected .pqm-day-name,
+        .pqm-day-btn.selected .pqm-day-date { color: white; }
+        .pqm-day-name {
+          font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em;
+          color: var(--ink-muted); font-weight: 500; line-height: 1;
+        }
+        .pqm-day-date {
+          font-size: 0.95rem; font-family: var(--font-display);
+          color: var(--ink); line-height: 1; font-weight: 300;
+        }
+        .pqm-day-dots { display: flex; gap: 2px; height: 5px; align-items: center; }
+        .pqm-dot {
+          width: 4px; height: 4px; border-radius: 50%; background: var(--sage); opacity: 0.7;
+        }
+        .pqm-day-btn.selected .pqm-dot { background: rgba(255,255,255,0.7); }
+        .pqm-dot-empty {
+          width: 4px; height: 4px; border-radius: 50%;
+          border: 1px solid var(--border); opacity: 0.4;
+        }
+
+        /* Meal row */
+        .pqm-meal-row {
+          display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem;
+          margin-bottom: 1.25rem;
+        }
+        .pqm-meal-btn {
+          display: flex; flex-direction: column; align-items: center; gap: 3px;
+          padding: 0.55rem 0.25rem; border: 1.5px solid var(--border);
+          border-radius: 8px; background: white; cursor: pointer;
+          transition: all 0.15s; font-size: 0.65rem; text-transform: capitalize;
+          color: var(--ink-muted); font-family: var(--font-body);
+        }
+        .pqm-meal-btn:hover { border-color: var(--rust); color: var(--rust); }
+        .pqm-meal-btn.selected {
+          border-color: var(--rust); background: rgba(181,69,27,0.06); color: var(--rust);
+        }
+        .pqm-meal-btn span { font-size: 0.65rem; }
+
+        /* Add button */
+        .pqm-add-btn {
+          width: 100%; padding: 0.8rem; background: var(--rust); color: white;
+          border: none; border-radius: 8px; font-size: 0.9rem;
+          font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
+          font-weight: 500; letter-spacing: 0.02em;
+          display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+        }
+        .pqm-add-btn:hover:not(:disabled) { opacity: 0.88; }
+        .pqm-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+
+        /* Card plan button — thumbnail overlay */
+        .recipe-card-img-wrap { position: relative; overflow: hidden; }
+        .recipe-card-img-wrap .recipe-card-img,
+        .recipe-card-img-wrap .recipe-card-img-placeholder { display: block; width: 100%; cursor: pointer; }
+        .card-plan-btn {
+          position: absolute; bottom: 8px; right: 8px;
+          display: inline-flex; align-items: center; gap: 5px;
+          padding: 0.38rem 0.7rem;
+          background: var(--rust); color: white; border: none;
+          border-radius: 99px; font-size: 0.72rem; font-family: var(--font-body);
+          font-weight: 500; cursor: pointer; letter-spacing: 0.02em;
+          opacity: 0; transform: translateY(4px);
+          transition: opacity 0.18s ease, transform 0.18s ease;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.28); white-space: nowrap;
+        }
+        .recipe-card-img-wrap:hover .card-plan-btn { opacity: 1; transform: translateY(0); }
+        @media (hover: none) { .card-plan-btn { opacity: 1; transform: none; } }
+
         .link-btn {
           background: none; border: none; padding: 0; cursor: pointer;
           color: var(--rust); font-size: inherit; font-family: inherit;
@@ -598,80 +783,6 @@ export default function RecipesPage() {
 
       {plannerModalJsx}
 
-      {false && (() => {
-        const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-        const DAY_LABELS: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
-        const MEALS = ['breakfast','lunch','dinner','snack'];
-        // Week nav
-        const weekDate = new Date(plannerWeek + 'T00:00:00');
-        const fmtWeek = (d: Date) => {
-          const sun = new Date(d); sun.setDate(d.getDate() + 6);
-          return `${d.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
-        };
-        const shiftWeek = (n: number) => {
-          const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
-          setPlannerWeek(d.toISOString().split('T')[0]);
-        };
-        return (
-          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
-            <div className="modal" style={{ maxWidth: '420px' }}>
-              <div className="modal-header">
-                <h2 className="modal-title">Add to Planner</h2>
-                <button className="modal-close" onClick={() => setPlannerModal(null)}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-              </div>
-
-              <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: '1.25rem', fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-                {plannerModal?.recipe.title}
-              </p>
-
-              <div className="form-group">
-                <label>Week</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(-1)}>‹</button>
-                  <span style={{ flex: 1, textAlign: 'center', fontSize: '0.85rem', color: 'var(--ink-soft)' }}>{fmtWeek(weekDate)}</span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => shiftWeek(1)}>›</button>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Day</label>
-                <div className="plan-picker-grid">
-                  {DAYS.map(d => (
-                    <button key={d} type="button"
-                      className={`plan-picker-btn ${plannerDay === d ? 'active' : ''}`}
-                      onClick={() => setPlannerDay(d)}>
-                      {DAY_LABELS[d]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Meal</label>
-                <div className="plan-picker-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                  {MEALS.map(m => (
-                    <button key={m} type="button"
-                      className={`plan-picker-btn ${plannerMeal === m ? 'active' : ''}`}
-                      onClick={() => setPlannerMeal(m)}
-                      style={{ textTransform: 'capitalize' }}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button className="btn btn-secondary" onClick={() => setPlannerModal(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleAddToPlanner} disabled={addingToPlan}>
-                  {addingToPlan ? <span className="loading-dots"><span/><span/><span/></span> : 'Add to Plan'}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {showPasteModal && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowPasteModal(false); }}>
