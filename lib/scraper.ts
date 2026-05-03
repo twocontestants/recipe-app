@@ -548,6 +548,9 @@ function heuristicScrape($: cheerio.CheerioAPI, url: string): ScrapedRecipe {
 // ── Ingredient line parser ─────────────────────────────────────────────────
 
 function parseIngredientLine(line: string): Ingredient {
+  return _parseIngredientLine(line);
+}
+function _parseIngredientLine(line: string): Ingredient {
   // Strip leading/trailing punctuation artifacts (parens, slashes, bullets, etc.)
   const cleaned = line
     .trim()
@@ -581,11 +584,11 @@ function parseIngredientLine(line: string): Ingredient {
   );
 
   if (match) {
-    return {
+    return fixSizeWordUnit({
       amount: (match[1] || '').trim(),
       unit:   (match[2] || '').trim(),
       name:   (match[3] || cleaned).trim(),
-    };
+    });
   }
 
   // No unit matched — try to split leading number from name
@@ -599,6 +602,29 @@ function parseIngredientLine(line: string): Ingredient {
   }
 
   return { amount: '', unit: '', name: cleaned };
+}
+
+// Size words that must never end up as units
+const SIZE_AS_UNIT = new Set(['large', 'medium', 'small', 'extra large', 'extra-large', 'jumbo', 'mini']);
+const BOGUS_UNIT_MAP: Record<string, string> = {
+  l: 'large', lg: 'large', lge: 'large',
+  m: 'medium', med: 'medium',
+  s: 'small', sm: 'small',
+  xl: 'extra large',
+};
+
+function fixSizeWordUnit(ing: Ingredient): Ingredient {
+  if (!ing.unit) return ing;
+  const u = ing.unit.toLowerCase().trim();
+  // Exact match on bogus abbreviations (only when no other plausible unit)
+  if (BOGUS_UNIT_MAP[u]) {
+    return { amount: ing.amount, unit: '', name: `${BOGUS_UNIT_MAP[u]} ${ing.name}`.trim() };
+  }
+  // Full size word mistakenly in unit field
+  if (SIZE_AS_UNIT.has(u)) {
+    return { amount: ing.amount, unit: '', name: `${ing.unit} ${ing.name}`.trim() };
+  }
+  return ing;
 }
 
 // ── Duration helpers ───────────────────────────────────────────────────────

@@ -16,163 +16,98 @@ export interface ShoppingCategory {
 
 // Supermarket aisle order
 export const CATEGORY_ORDER = [
+  'Fruit & Veg',
   'Meat & Seafood',
-  'Dairy & Eggs',
-  'Fresh Produce',
-  'Bakery & Bread',
-  'Pantry & Dry Goods',
-  'Canned & Jarred',
-  'Sauces & Condiments',
-  'Oils & Vinegars',
-  'Spices & Herbs',
-  'Frozen',
-  'Drinks & Beverages',
-  'Other',
+  'Dairy',
+  'Pantry',
+  'Spices',
 ];
 
 export const CATEGORY_EMOJI: Record<string, string> = {
+  'Fruit & Veg': '🥦',
   'Meat & Seafood': '🥩',
-  'Dairy & Eggs': '🥛',
-  'Fresh Produce': '🥦',
-  'Bakery & Bread': '🍞',
-  'Pantry & Dry Goods': '🌾',
-  'Canned & Jarred': '🥫',
-  'Sauces & Condiments': '🫙',
-  'Oils & Vinegars': '🫒',
-  'Spices & Herbs': '🌿',
-  'Frozen': '🧊',
-  'Drinks & Beverages': '🧃',
-  'Other': '🛒',
+  'Dairy': '🥛',
+  'Pantry': '🌾',
+  'Spices': '🌿',
 };
 
-// Keyword → category mapping (checked in order, first match wins)
-const CATEGORY_RULES: Array<{ category: string; keywords: string[] }> = [
-  {
-    category: 'Meat & Seafood',
-    keywords: [
-      'chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'veal', 'mince', 'mincemeat',
-      'steak', 'bacon', 'ham', 'sausage', 'salami', 'prosciutto', 'pancetta', 'chorizo',
-      'salmon', 'tuna', 'cod', 'prawns', 'shrimp', 'fish', 'seafood', 'scallop', 'mussel',
-      'crab', 'lobster', 'anchovy', 'sardine', 'tilapia', 'snapper', 'barramundi',
-      'breast', 'thigh', 'drumstick', 'fillet', 'rib', 'roast', 'cutlet', 'rack',
-    ],
-  },
-  {
-    category: 'Dairy & Eggs',
-    keywords: [
-      'milk', 'cream', 'butter', 'cheese', 'parmesan', 'mozzarella', 'cheddar', 'feta',
-      'brie', 'camembert', 'ricotta', 'mascarpone', 'gruyere', 'gouda', 'stilton',
-      'yogurt', 'yoghurt', 'sour cream', 'crème fraîche', 'creme fraiche',
-      'egg', 'eggs', 'ghee', 'half and half', 'buttermilk', 'kefir', 'whipping cream',
-      'double cream', 'single cream', 'evaporated milk', 'condensed milk',
-    ],
-  },
-  {
-    category: 'Fresh Produce',
-    keywords: [
-      'onion', 'garlic', 'ginger', 'tomato', 'potato', 'carrot', 'celery', 'leek',
-      'broccoli', 'cauliflower', 'spinach', 'kale', 'lettuce', 'cabbage', 'bok choy',
-      'zucchini', 'courgette', 'eggplant', 'aubergine', 'capsicum', 'pepper', 'chilli', 'chili',
-      'mushroom', 'asparagus', 'corn', 'peas', 'beans', 'cucumber', 'avocado', 'lime',
-      'lemon', 'orange', 'apple', 'banana', 'mango', 'pear', 'grape', 'strawberry',
-      'blueberry', 'raspberry', 'pineapple', 'watermelon', 'melon', 'peach', 'plum',
-      'herbs', 'basil', 'parsley', 'coriander', 'cilantro', 'mint', 'thyme', 'rosemary',
-      'sage', 'dill', 'chive', 'spring onion', 'shallot', 'fennel', 'rocket', 'arugula',
-      'silverbeet', 'chard', 'beetroot', 'beet', 'turnip', 'parsnip', 'swede', 'pumpkin',
-      'squash', 'sweet potato', 'yam', 'radish', 'artichoke',
-    ],
-  },
-  {
-    category: 'Bakery & Bread',
-    keywords: [
-      'bread', 'baguette', 'sourdough', 'roll', 'bun', 'bagel', 'pita', 'flatbread',
-      'tortilla', 'wrap', 'crumpet', 'muffin', 'croissant', 'brioche', 'focaccia',
-      'naan', 'breadcrumb', 'crouton',
-    ],
-  },
-  {
-    category: 'Pantry & Dry Goods',
-    keywords: [
-      'pasta', 'spaghetti', 'penne', 'fettuccine', 'linguine', 'rigatoni', 'tagliatelle',
-      'rice', 'risotto', 'arborio', 'basmati', 'jasmine', 'quinoa', 'couscous', 'polenta',
-      'flour', 'sugar', 'salt', 'pepper', 'baking powder', 'baking soda', 'bicarbonate',
-      'yeast', 'oats', 'cereal', 'granola', 'muesli', 'lentil', 'chickpea', 'lentils',
-      'chickpeas', 'bean', 'split pea', 'noodle', 'udon', 'soba', 'ramen', 'vermicelli',
-      'lasagne', 'lasagna', 'gnocchi', 'breadcrumbs', 'panko', 'cornstarch', 'cornflour',
-      'almond meal', 'semolina', 'polenta', 'cocoa', 'chocolate', 'vanilla', 'coconut',
-      'desiccated', 'pine nut', 'walnut', 'almond', 'cashew', 'pecan', 'pistachio', 'hazelnut',
-      'sesame', 'sunflower seed', 'pumpkin seed', 'chia', 'flaxseed', 'dried fruit',
-      'raisin', 'sultana', 'cranberry', 'apricot', 'date', 'prune',
-    ],
-  },
-  {
-    category: 'Canned & Jarred',
-    keywords: [
-      'canned', 'tinned', 'can of', 'tin of', 'diced tomato', 'crushed tomato',
-      'tomato paste', 'tomato puree', 'coconut milk', 'coconut cream',
-      'stock', 'broth', 'bouillon', 'chickpea', 'kidney bean', 'black bean',
-      'lentil', 'corn', 'tuna', 'sardine', 'anchovy', 'olive', 'caper',
-      'artichoke heart', 'roasted pepper', 'sun-dried tomato', 'sundried tomato',
-      'passata', 'polenta tube',
-    ],
-  },
-  {
-    category: 'Sauces & Condiments',
-    keywords: [
-      'soy sauce', 'tamari', 'fish sauce', 'oyster sauce', 'hoisin', 'worcestershire',
-      'hot sauce', 'tabasco', 'sriracha', 'ketchup', 'mustard', 'mayonnaise', 'aioli',
-      'relish', 'chutney', 'jam', 'honey', 'maple syrup', 'molasses', 'miso',
-      'tahini', 'peanut butter', 'almond butter', 'vegemite', 'marmite',
-      'teriyaki', 'sweet chilli', 'barbecue sauce', 'bbq sauce', 'nam pla',
-      'rice wine', 'mirin', 'shaoxing', 'sake', 'vinegar', 'balsamic',
-    ],
-  },
-  {
-    category: 'Oils & Vinegars',
-    keywords: [
-      'olive oil', 'vegetable oil', 'canola oil', 'sunflower oil', 'coconut oil',
-      'sesame oil', 'peanut oil', 'avocado oil', 'truffle oil', 'cooking spray',
-      'lard', 'shortening', 'white vinegar', 'red wine vinegar', 'apple cider vinegar',
-      'rice vinegar', 'balsamic vinegar', 'sherry vinegar',
-    ],
-  },
-  {
-    category: 'Spices & Herbs',
-    keywords: [
-      'cumin', 'coriander', 'turmeric', 'paprika', 'smoked paprika', 'cayenne',
-      'chilli powder', 'chili powder', 'curry', 'garam masala', 'cardamom', 'cinnamon',
-      'nutmeg', 'clove', 'allspice', 'star anise', 'bay leaf', 'oregano', 'thyme',
-      'rosemary', 'sage', 'tarragon', 'marjoram', 'sumac', 'za\'atar', 'five spice',
-      'mixed spice', 'dried chilli', 'chilli flake', 'red pepper flake',
-      'white pepper', 'black pepper', 'sea salt', 'kosher salt', 'onion powder',
-      'garlic powder', 'celery salt', 'mustard powder', 'ground ginger',
-    ],
-  },
-  {
-    category: 'Frozen',
-    keywords: [
-      'frozen', 'ice cream', 'gelato', 'sorbet', 'frozen peas', 'frozen corn',
-      'frozen spinach', 'frozen berries', 'frozen fish', 'frozen chicken',
-    ],
-  },
-  {
-    category: 'Drinks & Beverages',
-    keywords: [
-      'water', 'sparkling water', 'juice', 'wine', 'beer', 'cider', 'spirits',
-      'coffee', 'tea', 'milk', 'soda', 'lemonade', 'kombucha', 'coconut water',
-    ],
-  },
-];
+// ── Categorization ─────────────────────────────────────────────────────────
+// Rules are checked top-to-bottom; FIRST match wins.
+// Key design decisions:
+//   1. Spices is checked BEFORE Pantry so "salt", "pepper", "cumin" etc
+//      never fall into Pantry.
+//   2. Dried/ground/powder forms of herbs go to Spices, not Fruit & Veg.
+//   3. Fresh herbs (whole leaves, bunches) go to Fruit & Veg.
+//   4. "pepper" alone → Fruit & Veg (fresh capsicum/chilli); but
+//      "black pepper", "white pepper", "ground pepper", "pepper flakes",
+//      "peppercorn" → Spices (handled by longer-match-first ordering).
 
-export function categorizeIngredient(name: string): string {
-  const lower = name.toLowerCase();
-  for (const rule of CATEGORY_RULES) {
-    for (const keyword of rule.keywords) {
-      if (lower.includes(keyword)) return rule.category;
-    }
-  }
-  return 'Other';
+function categorizeIngredient(name: string): string {
+  const lower = name.toLowerCase().trim();
+
+  // ── Meat & Seafood ──────────────────────────────────────────────────────
+  if (/\b(chicken|beef|pork|lamb|turkey|duck|veal|venison|rabbit|goat|bison)\b/.test(lower)) return 'Meat & Seafood';
+  if (/\b(mince|mincemeat|steak|bacon|ham|sausage|salami|prosciutto|pancetta|chorizo|lardons?|speck|bresaola|mortadella|pepperoni)\b/.test(lower)) return 'Meat & Seafood';
+  if (/\b(salmon|tuna|cod|prawns?|shrimp|crab|lobster|scallop|mussel|clam|squid|calamari|octopus|oyster|anchov|sardine|tilapia|snapper|barramundi|bream|whiting|flathead|halibut|mackerel|trout|herring)\b/.test(lower)) return 'Meat & Seafood';
+  if (/\b(seafood|fish fillet|fish steak|fish cake|fish pie|meatball|rissole|patty|breast|thigh|drumstick|fillet|rib(?:s)?|roast|cutlet|rack of)\b/.test(lower)) return 'Meat & Seafood';
+
+  // ── Dairy ───────────────────────────────────────────────────────────────
+  if (/\b(milk|cream|butter|cheese|parmesan|parmigiano|pecorino|mozzarella|cheddar|feta|brie|camembert|ricotta|mascarpone|gruyere|gouda|stilton|haloumi|halloumi|colby|edam|raclette|manchego|cottage cheese|cream cheese)\b/.test(lower)) return 'Dairy';
+  if (/\b(yogurt|yoghurt|sour cream|crème fraîche|creme fraiche|fromage frais|kefir|quark|ghee|buttermilk|whipping cream|double cream|single cream|thickened cream|pure cream|evaporated milk|condensed milk|skim milk|full.?cream milk)\b/.test(lower)) return 'Dairy';
+  if (/\b(egg|eggs)\b/.test(lower)) return 'Dairy';
+
+  // ── Spices ──────────────────────────────────────────────────────────────
+  // Check spices BEFORE Fruit & Veg and Pantry to catch dried/ground forms.
+  // Long/specific phrases first, then single-word spices.
+  if (/\b(smoked paprika|sweet paprika|hot paprika|chilli powder|chili powder|chilli flakes?|chili flakes?|red pepper flakes?|crushed red pepper|dried chilli|dried chili)\b/.test(lower)) return 'Spices';
+  if (/\b(black pepper|white pepper|ground pepper|peppercorn|pink peppercorn|szechuan pepper|sichuan pepper|cayenne pepper|celery salt|garlic powder|garlic salt|onion powder|onion flakes|mustard powder|ground mustard|ground ginger|ground coriander|ground cumin|ground cardamom|ground cinnamon|ground cloves?|ground nutmeg|ground turmeric|ground allspice)\b/.test(lower)) return 'Spices';
+  if (/\b(salt|sea salt|kosher salt|table salt|rock salt|pink salt|himalayan salt|fleur de sel|flaky salt)\b/.test(lower)) return 'Spices';
+  if (/\b(cumin|turmeric|paprika|cardamom|cinnamon|nutmeg|allspice|cloves?|star anise|bay leaves?|bay leaf|oregano|marjoram|tarragon|sumac|za['\'']?atar|zaatar|five.?spice|mixed spice|garam masala|curry powder|tandoori|ras el hanout|harissa|berbere|dukkah|baharat|jerk seasoning|old bay|cajun|italian seasoning|herbs de provence|herbes de provence|bouquet garni|pickling spice)\b/.test(lower)) return 'Spices';
+  if (/\b(dried (basil|thyme|rosemary|sage|mint|parsley|dill|oregano|coriander|tarragon|chives?|marjoram))\b/.test(lower)) return 'Spices';
+  if (/\b(vanilla (extract|bean|paste|powder|essence))\b/.test(lower)) return 'Spices';
+  // bare spice words — must come after compound phrases above
+  if (/\b(paprika|saffron|fenugreek|anise|mace|juniper|caraway|poppy seed|celery seed|fennel seed|mustard seed|coriander seed|cumin seed)\b/.test(lower)) return 'Spices';
+
+  // ── Pantry-priority tomatoes (paste/puree/canned) before fresh produce ──
+  if (/\b(tomato paste|tomato puree|passata|crushed tomato|diced tomato|tinned tomato|canned tomato|sun.dried tomato|sundried tomato)\b/.test(lower)) return 'Pantry';
+
+  // ── Fruit & Veg ─────────────────────────────────────────────────────────
+  // Fresh herbs (whole/bunch) come here — dried forms already caught above.
+  if (/\b(onion|garlic|ginger|spring onion|green onion|scallion|shallot|leek|chive)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(tomato|potato|carrot|celery|broccoli|cauliflower|spinach|kale|lettuce|cabbage|bok choy|pak choi|wombok|silverbeet|chard|rocket|arugula|watercress|radicchio|endive)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(zucchini|courgette|eggplant|aubergine|capsicum|pepper|chilli|chili|jalapeño|jalapeno|habanero|chipotle)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(mushroom|asparagus|corn|peas?|green beans?|french beans?|broad beans?|runner beans?|snow peas?|sugar snap|cucumber|avocado|artichoke|broccolini|broccoflower|romanesco)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(sweet potato|yam|pumpkin|squash|butternut|beetroot|beet|turnip|parsnip|swede|celeriac|kohlrabi|radish|daikon|fennel|witlof|endive)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(lime|lemon|orange|grapefruit|mandarin|tangerine|clementine|apple|pear|banana|mango|pineapple|papaya|pawpaw|watermelon|rockmelon|honeydew|cantaloupe|melon|grape|cherry|fig|pomegranate|passion.?fruit|kiwi|guava|lychee|rambutan|dragon.?fruit|persimmon|quince)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(strawberr|blueberr|raspberr|blackberr|boysenberr|gooseberr|currant|cranberr)\b/.test(lower)) return 'Fruit & Veg';
+  if (/\b(peach|plum|nectarine|apricot|cherry|damson)\b/.test(lower)) return 'Fruit & Veg';
+  // fresh herbs (no "dried" or "ground" prefix)
+  if (/\b(basil|parsley|coriander|cilantro|mint|thyme|rosemary|sage|dill|tarragon|chervil|sorrel|lemongrass|kaffir lime|curry leaves?)\b/.test(lower) && !/\bdried\b|\bground\b|\bpowder\b/.test(lower)) return 'Fruit & Veg';
+
+  // ── Pantry ──────────────────────────────────────────────────────────────
+  // Everything else that's a shelf-stable ingredient.
+  if (/\b(pasta|spaghetti|penne|fettuccine|linguine|rigatoni|tagliatelle|farfalle|fusilli|orzo|lasagne|lasagna|gnocchi|noodle|udon|soba|ramen|vermicelli|rice noodle|glass noodle|egg noodle)\b/.test(lower)) return 'Pantry';
+  if (/\b(rice|risotto|arborio|basmati|jasmine|brown rice|wild rice|quinoa|couscous|polenta|bulgur|barley|farro|freekeh|spelt|buckwheat|millet|oats|porridge|granola|muesli|cereal)\b/.test(lower)) return 'Pantry';
+  if (/\b(flour|plain flour|self.raising|bread flour|wholemeal|almond flour|almond meal|semolina|cornflour|cornstarch|tapioca|arrowroot|baking powder|baking soda|bicarbonate of soda|bicarb|cream of tartar|yeast|dried yeast|instant yeast)\b/.test(lower)) return 'Pantry';
+  if (/\b(sugar|caster sugar|brown sugar|icing sugar|raw sugar|demerara|muscovado|treacle|golden syrup|maple syrup|honey|agave|rice malt syrup|molasses|glucose|corn syrup)\b/.test(lower)) return 'Pantry';
+  if (/\b(cocoa|cacao|chocolate|dark chocolate|milk chocolate|white chocolate|carob|nutella)\b/.test(lower)) return 'Pantry';
+  if (/\b(coconut milk|coconut cream|coconut water|coconut flakes?|desiccated coconut|shredded coconut)\b/.test(lower)) return 'Pantry';
+  if (/\b(olive oil|vegetable oil|canola oil|sunflower oil|coconut oil|sesame oil|peanut oil|avocado oil|truffle oil|grapeseed oil|rice bran oil|cooking spray|lard|shortening|suet)\b/.test(lower)) return 'Pantry';
+  if (/\b(vinegar|balsamic|white wine vinegar|red wine vinegar|apple cider vinegar|rice vinegar|sherry vinegar|malt vinegar)\b/.test(lower)) return 'Pantry';
+  if (/\b(soy sauce|tamari|fish sauce|oyster sauce|hoisin|worcestershire|hot sauce|tabasco|sriracha|ketchup|tomato sauce|barbecue sauce|bbq sauce|teriyaki|sweet chilli|nam pla|mirin|sake|shaoxing|rice wine)\b/.test(lower)) return 'Pantry';
+  if (/\b(mustard|dijon|wholegrain mustard|american mustard|mayonnaise|aioli|relish|chutney|jam|marmalade|miso|tahini|peanut butter|almond butter|cashew butter|nut butter|vegemite|marmite|bovril)\b/.test(lower)) return 'Pantry';
+  if (/\b(tomato paste|tomato puree|passata|crushed tomato|diced tomato|tinned tomato|canned tomato|sun.dried tomato|sundried tomato)\b/.test(lower)) return 'Pantry';
+  if (/\b(stock|chicken stock|beef stock|vegetable stock|fish stock|broth|bouillon|dashi)\b/.test(lower)) return 'Pantry';
+  if (/\b(lentil|chickpea|kidney bean|black bean|cannellini|borlotti|pinto bean|navy bean|split pea|dried pea|red lentil|green lentil|french lentil)\b/.test(lower)) return 'Pantry';
+  if (/\b(pine nut|walnut|almond|cashew|pecan|pistachio|hazelnut|macadamia|brazil nut|chestnut|peanut|sesame seed|sunflower seed|pumpkin seed|chia seed|flaxseed|linseeds?|hemp seed|poppy seed)\b/.test(lower)) return 'Pantry';
+  if (/\b(raisin|sultana|currant|dried cranberr|dried apricot|dried fig|dried date|prune|dried mango|dried pineapple|goji berr|medjool)\b/.test(lower)) return 'Pantry';
+  if (/\b(bread|baguette|sourdough|roll|bun|bagel|pita|flatbread|tortilla|wrap|crumpet|muffin|croissant|brioche|focaccia|naan|breadcrumb|panko|crouton)\b/.test(lower)) return 'Pantry';
+  if (/\b(canned|tinned|frozen|ice cream|gelato|sorbet|water|juice|wine|beer|cider|coffee|tea|soda|lemonade|kombucha|tofu|tempeh|seitan|gelatin|gelatine|agar|pectin|rennet)\b/.test(lower)) return 'Pantry';
+
+  return 'Pantry'; // sensible default — unknown things are usually pantry items
 }
+
+export { categorizeIngredient };
 
 const UNIT_CONVERSIONS: Record<string, { base: string; factor: number }> = {
   tsp: { base: 'ml', factor: 5 },
