@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Sidebar } from '@/components/Sidebar';
 import { ToastProvider } from '@/components/Toast';
 import RecipesClient from './RecipesClient';
@@ -7,7 +8,9 @@ export default function RecipesPage() {
     <div className="app-shell">
       <Sidebar />
       <main className="main-content">
-        <RecipesClient />
+        <Suspense>
+          <RecipesClient />
+        </Suspense>
       </main>
       <ToastProvider />
     </div>
