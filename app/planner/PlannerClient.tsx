@@ -408,13 +408,6 @@ export default function PlannerClient() {
                           onDragStart={e => handleDragStart(e, meal.id, dayIndex)}
                           onDragEnd={handleDragEnd}
                         >
-                          <div className="pl-drag-handle" title="Drag to move">
-                            <svg width="10" height="14" viewBox="0 0 10 18" fill="currentColor">
-                              <circle cx="3" cy="3" r="1.5"/><circle cx="7" cy="3" r="1.5"/>
-                              <circle cx="3" cy="9" r="1.5"/><circle cx="7" cy="9" r="1.5"/>
-                              <circle cx="3" cy="15" r="1.5"/><circle cx="7" cy="15" r="1.5"/>
-                            </svg>
-                          </div>
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
                               <img src={(recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -434,9 +427,13 @@ export default function PlannerClient() {
                           </div>
                           <button
                             className="pl-replace-btn"
+                            title="Replace recipe"
                             onClick={e => { e.stopPropagation(); setPicker({ dayIndex, replacingId: meal.id }); setPickerSearch(''); }}
                           >
-                            Change
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="1 4 1 10 7 10"/>
+                              <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+                            </svg>
                           </button>
                         </div>
                       );
@@ -657,21 +654,19 @@ export default function PlannerClient() {
         .pl-meal-stack { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
 
         /* Recipe card */
-        .pl-recipe-card { display: flex; align-items: center; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: grab; }
+        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: grab; }
         .pl-recipe-card:active { cursor: grabbing; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
         .pl-recipe-card.is-dragging { opacity: 0.35; }
-        .pl-drag-handle { padding: 0 0.55rem; color: var(--border); display: flex; align-items: center; flex-shrink: 0; cursor: grab; transition: color 0.15s; }
-        .pl-recipe-card:hover .pl-drag-handle { color: var(--ink-muted); }
         .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
-        .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; }
+        .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; display: flex; flex-direction: column; justify-content: center; }
         .pl-recipe-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
         .pl-recipe-name { font-size: 0.9rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
         .pl-recipe-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.72rem; color: var(--ink-muted); }
         .pl-recipe-tag { background: var(--parchment); border: 1px solid var(--border); border-radius: 99px; padding: 1px 6px; font-size: 0.66rem; color: var(--ink-soft); }
-        .pl-replace-btn { background: none; border: none; border-left: 1px solid var(--border); color: var(--ink-muted); cursor: pointer; padding: 0 1rem; min-width: 64px; height: 100%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; align-self: stretch; font-size: 0.78rem; font-family: var(--font-body); font-weight: 500; letter-spacing: 0.01em; }
-        .pl-replace-btn:hover { background: var(--parchment); color: var(--rust); }
+        .pl-replace-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; margin-right: 14px; }
+        .pl-replace-btn:hover { border-color: var(--rust); color: var(--rust); background: white; }
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
