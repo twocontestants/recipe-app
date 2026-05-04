@@ -15,7 +15,6 @@ const PROTEIN_EMOJI: Record<string, string> = {
   chicken: '🍗', beef: '🥩', pork: '🐷', lamb: '🐑',
   fish: '🐟', seafood: '🦐', tofu: '🫘', eggs: '🥚', legumes: '🫘', dairy: '🧀',
 };
-const ALL_PROTEINS = Object.keys(PROTEIN_COLORS);
 
 function ProteinBadge({ protein }: { protein?: string }) {
   if (!protein) return null;
@@ -23,9 +22,9 @@ function ProteinBadge({ protein }: { protein?: string }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '3px',
-      fontSize: '0.65rem', fontWeight: 600, textTransform: 'capitalize',
+      fontSize: '0.62rem', fontWeight: 600, textTransform: 'capitalize',
       color: 'white', background: color, borderRadius: '99px',
-      padding: '2px 7px', lineHeight: 1.4, letterSpacing: '0.02em', flexShrink: 0,
+      padding: '2px 6px', lineHeight: 1.4, letterSpacing: '0.02em', flexShrink: 0,
     }}>
       {PROTEIN_EMOJI[protein]} {protein}
     </span>
@@ -35,7 +34,6 @@ function ProteinBadge({ protein }: { protein?: string }) {
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-const DAYS_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 function getMonday(date: Date): Date {
   const d = new Date(date);
@@ -47,53 +45,37 @@ function getMonday(date: Date): Date {
 function formatDate(d: Date): string { return d.toISOString().split('T')[0]; }
 function formatWeekRange(monday: Date): string {
   const sun = new Date(monday); sun.setDate(monday.getDate() + 6);
-  const opt = (d: Date) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-  return `${opt(monday)} – ${opt(sun)}`;
+  const fmt = (d: Date) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  return `${fmt(monday)} – ${fmt(sun)}`;
 }
-function isThisWeek(monday: Date): boolean {
-  return formatDate(monday) === formatDate(getMonday(new Date()));
+function isThisWeek(monday: Date) { return formatDate(monday) === formatDate(getMonday(new Date())); }
+function isNextWeek(monday: Date) {
+  const n = getMonday(new Date()); n.setDate(n.getDate() + 7);
+  return formatDate(monday) === formatDate(n);
 }
-function isNextWeek(monday: Date): boolean {
-  const next = getMonday(new Date()); next.setDate(next.getDate() + 7);
-  return formatDate(monday) === formatDate(next);
-}
-function weekLabel(monday: Date): string {
+function weekLabel(monday: Date) {
   if (isThisWeek(monday)) return 'This week';
   if (isNextWeek(monday)) return 'Next week';
   return formatWeekRange(monday);
 }
-function getDayDate(weekStart: Date, dayIndex: number): Date {
-  const d = new Date(weekStart); d.setDate(weekStart.getDate() + dayIndex); return d;
+function getDayDate(weekStart: Date, i: number): Date {
+  const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
-function todayDayIndex(): number {
-  const d = new Date().getDay(); return d === 0 ? 6 : d - 1;
-}
+function todayDayIndex() { const d = new Date().getDay(); return d === 0 ? 6 : d - 1; }
 
-// ── Suggestion logic (client-side) ────────────────────────────────────────────
+// ── Suggestion logic ──────────────────────────────────────────────────────────
 
-function suggestForDay(
-  recipes: Recipe[],
-  plannedProteins: (string | null | undefined)[], // proteins of already-planned days
-  count = 3
-): Recipe[] {
-  if (recipes.length === 0) return [];
-  const usedProteins = new Set(plannedProteins.filter(Boolean));
-  // Prefer recipes whose protein isn't already used this week
-  const fresh = recipes.filter(r => !usedProteins.has(r.primary_protein ?? ''));
+function suggestForDay(recipes: Recipe[], usedProteins: (string|null|undefined)[], count = 3): Recipe[] {
+  if (!recipes.length) return [];
+  const used = new Set(usedProteins.filter(Boolean));
+  const fresh = recipes.filter(r => !used.has(r.primary_protein ?? ''));
   const pool = fresh.length >= count ? fresh : [...fresh, ...recipes.filter(r => !fresh.includes(r))];
-  // Shuffle
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  return [...pool].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
 // ── Magic settings ────────────────────────────────────────────────────────────
 
-interface MagicSettings {
-  variety: 'low' | 'medium' | 'high';
-  servings: number;
-  preferTags: string;
-  excludeTags: string;
-}
+interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; preferTags: string; excludeTags: string; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main component
@@ -103,135 +85,223 @@ export default function PlannerClient() {
   const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()));
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [notes, setNotes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
 
-  // Picker modal state
-  const [picker, setPicker] = useState<{ dayIndex: number; replacing?: string } | null>(null);
+  // Picker
+  const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
 
-  // Magic modal
+  // Magic
   const [showMagic, setShowMagic] = useState(false);
-  const [magicSettings, setMagicSettings] = useState<MagicSettings>({
-    variety: 'medium', servings: 4, preferTags: '', excludeTags: '',
-  });
+  const [magicSettings, setMagicSettings] = useState<MagicSettings>({ variety: 'medium', servings: 4, preferTags: '', excludeTags: '' });
   const [magicLoading, setMagicLoading] = useState(false);
 
-  // Day action menu (replace/remove)
-  const [actionMenu, setActionMenu] = useState<{ mealId: string; dayIndex: number } | null>(null);
+  // Drag state
+  const [dragging, setDragging] = useState<{ mealId: string; fromDay: number } | null>(null);
+  const [dragOverDay, setDragOverDay] = useState<number | null>(null);
+  const [dragOverTrash, setDragOverTrash] = useState(false);
+
+  // Note save debounce timers
+  const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const todayRef = useRef<HTMLDivElement>(null);
 
-  // ── Data fetching ───────────────────────────────────────────────────────────
+  // ── Fetch ───────────────────────────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [plansRes, recipesRes] = await Promise.all([
-        fetch(`/api/planner?weekStart=${formatDate(weekStart)}`),
+      const wk = formatDate(weekStart);
+      const [plansRes, recipesRes, notesRes] = await Promise.all([
+        fetch(`/api/planner?weekStart=${wk}`),
         fetch('/api/recipes'),
+        fetch(`/api/planner-notes?weekStart=${wk}`),
       ]);
       setMealPlans(await plansRes.json());
       setRecipes(await recipesRes.json());
+      setNotes(await notesRes.json());
     } catch { showToast('Failed to load planner', 'error'); }
     finally { setLoading(false); }
   }, [weekStart]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Scroll to today on first load
   useEffect(() => {
     if (!loading && todayRef.current && isThisWeek(weekStart)) {
-      todayRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => todayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     }
   }, [loading]);
 
-  // Close action menu on outside click
-  useEffect(() => {
-    if (!actionMenu) return;
-    const handler = () => setActionMenu(null);
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [actionMenu]);
-
   // ── Meal operations ─────────────────────────────────────────────────────────
 
-  const getMealForDay = (dayIndex: number) =>
-    mealPlans.find(m => m.day_of_week === dayIndex && m.meal_type === 'dinner') ?? null;
+  const getMealsForDay = (dayIndex: number) =>
+    mealPlans.filter(m => m.day_of_week === dayIndex && m.meal_type === 'dinner');
+
+  // ── Optimistic meal operations ─────────────────────────────────────────────
+  // All three mutate local state immediately so the UI responds instantly,
+  // then fire the DB write in the background. On failure they roll back and
+  // show a toast.
 
   const addMeal = async (dayIndex: number, recipeId: string) => {
+    const recipe = recipes.find(r => r.id === recipeId);
+    // Optimistic: insert a temporary meal with a fake id
+    const tempId = `tmp-${Date.now()}`;
+    const optimistic: MealPlan = {
+      id: tempId, recipe_id: recipeId, day_of_week: dayIndex,
+      meal_type: 'dinner', servings: recipe?.servings || 4,
+      week_start: formatDate(weekStart), recipe: recipe as any,
+    };
+    setMealPlans(prev => [...prev, optimistic]);
     try {
-      const recipe = recipes.find(r => r.id === recipeId);
       const res = await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          week_start: formatDate(weekStart), recipe_id: recipeId,
-          day_of_week: dayIndex, meal_type: 'dinner',
-          servings: recipe?.servings || 4,
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings: recipe?.servings || 4 }),
       });
       if (!res.ok) throw new Error();
-      await fetchData();
-    } catch { showToast('Failed to add meal', 'error'); }
+      // Replace temp entry with real one from server
+      const real = await res.json();
+      setMealPlans(prev => prev.map(m => m.id === tempId ? { ...real, recipe } : m));
+    } catch {
+      setMealPlans(prev => prev.filter(m => m.id !== tempId));
+      showToast('Failed to add meal', 'error');
+    }
   };
 
   const removeMeal = async (id: string) => {
+    const snapshot = mealPlans.find(m => m.id === id);
+    // Optimistic: remove immediately
+    setMealPlans(prev => prev.filter(m => m.id !== id));
     try {
-      await fetch(`/api/planner?id=${id}`, { method: 'DELETE' });
-      setMealPlans(prev => prev.filter(m => m.id !== id));
-    } catch { showToast('Failed to remove meal', 'error'); }
+      const res = await fetch(`/api/planner?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+    } catch {
+      if (snapshot) setMealPlans(prev => [...prev, snapshot]);
+      showToast('Failed to remove meal', 'error');
+    }
   };
 
-  const replaceMeal = async (dayIndex: number, existingId: string, newRecipeId: string) => {
-    await removeMeal(existingId);
-    await addMeal(dayIndex, newRecipeId);
+  const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
+    if (fromDay === toDay) return;
+    const meal = mealPlans.find(m => m.id === mealId);
+    if (!meal) return;
+    // Optimistic: update day_of_week in place
+    setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toDay } : m));
+    try {
+      await fetch(`/api/planner?id=${mealId}`, { method: 'DELETE' });
+      const res = await fetch('/api/planner', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: meal.recipe_id, day_of_week: toDay, meal_type: 'dinner', servings: meal.servings }),
+      });
+      if (!res.ok) throw new Error();
+      const real = await res.json();
+      setMealPlans(prev => prev.map(m => m.id === mealId
+        ? { ...real, recipe: meal.recipe }
+        : m
+      ));
+    } catch {
+      // Roll back
+      setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: fromDay } : m));
+      showToast('Failed to move meal', 'error');
+    }
   };
 
-  // ── Magic plan ──────────────────────────────────────────────────────────────
+  // ── Notes ───────────────────────────────────────────────────────────────────
+
+  const handleNoteChange = (dayIndex: number, value: string) => {
+    setNotes(prev => ({ ...prev, [dayIndex]: value }));
+    if (noteTimers.current[dayIndex]) clearTimeout(noteTimers.current[dayIndex]);
+    noteTimers.current[dayIndex] = setTimeout(async () => {
+      try {
+        await fetch(`/api/planner-notes?weekStart=${formatDate(weekStart)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dayOfWeek: dayIndex, note: value }),
+        });
+      } catch { /* silent */ }
+    }, 800);
+  };
+
+  // ── Drag handlers ───────────────────────────────────────────────────────────
+
+  const handleDragStart = (e: React.DragEvent, mealId: string, fromDay: number) => {
+    setDragging({ mealId, fromDay });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setDragging(null);
+    setDragOverDay(null);
+    setDragOverTrash(false);
+  };
+
+  const handleDayDragOver = (e: React.DragEvent, dayIndex: number) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverDay(dayIndex);
+    setDragOverTrash(false);
+  };
+
+  const handleDayDrop = async (e: React.DragEvent, dayIndex: number) => {
+    e.preventDefault();
+    if (!dragging) return;
+    await moveMeal(dragging.mealId, dragging.fromDay, dayIndex);
+    setDragging(null);
+    setDragOverDay(null);
+  };
+
+  const handleTrashDragOver = (e: React.DragEvent) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverTrash(true);
+    setDragOverDay(null);
+  };
+
+  const handleTrashDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!dragging) return;
+    await removeMeal(dragging.mealId);
+    setDragging(null);
+    setDragOverTrash(false);
+  };
+
+  // ── Magic ───────────────────────────────────────────────────────────────────
 
   const handleMagicSuggest = async () => {
-    if (recipes.length === 0) { showToast('Add some recipes first!', 'error'); return; }
+    if (!recipes.length) { showToast('Add some recipes first!', 'error'); return; }
     setMagicLoading(true);
     try {
-      for (const meal of mealPlans) await fetch(`/api/planner?id=${meal.id}`, { method: 'DELETE' });
-      const preferTags = magicSettings.preferTags.split(',').map(t => t.trim()).filter(Boolean);
-      const excludeTags = magicSettings.excludeTags.split(',').map(t => t.trim()).filter(Boolean);
-      let pool = recipes.filter(r => !excludeTags.some(t => r.tags?.includes(t)));
-      if (pool.length === 0) pool = recipes;
-      const scored = pool.map(r => ({
-        recipe: r,
-        score: Math.random() + (preferTags.some(t => r.tags?.includes(t)) ? 1 : 0),
-      })).sort((a, b) => b.score - a.score);
-
+      for (const m of mealPlans) await fetch(`/api/planner?id=${m.id}`, { method: 'DELETE' });
+      const prefer = magicSettings.preferTags.split(',').map(t => t.trim()).filter(Boolean);
+      const exclude = magicSettings.excludeTags.split(',').map(t => t.trim()).filter(Boolean);
+      let pool = recipes.filter(r => !exclude.some(t => r.tags?.includes(t)));
+      if (!pool.length) pool = recipes;
+      const scored = pool.map(r => ({ recipe: r, score: Math.random() + (prefer.some(t => r.tags?.includes(t)) ? 1 : 0) })).sort((a, b) => b.score - a.score);
       const picks: string[] = [];
       for (let day = 0; day < 7; day++) {
         let idx = 0;
         if (magicSettings.variety === 'high') {
           const used = new Set(picks);
-          const unused = scored.filter(s => !used.has(s.recipe.id));
-          const from = unused.length > 0 ? unused : scored;
-          idx = Math.floor(Math.random() * Math.min(from.length, 3));
-          picks.push(from[idx].recipe.id);
+          const from = scored.filter(s => !used.has(s.recipe.id));
+          const p = from.length ? from : scored;
+          idx = Math.floor(Math.random() * Math.min(p.length, 3));
+          picks.push(p[idx].recipe.id);
         } else if (magicSettings.variety === 'medium') {
           const recent = picks.slice(-3);
-          const from = scored.filter(s => !recent.includes(s.recipe.id));
-          const pool2 = from.length > 0 ? from : scored;
-          idx = Math.floor(Math.random() * Math.min(pool2.length, 5));
-          picks.push(pool2[idx].recipe.id);
+          const p = scored.filter(s => !recent.includes(s.recipe.id));
+          const from = p.length ? p : scored;
+          idx = Math.floor(Math.random() * Math.min(from.length, 5));
+          picks.push(from[idx].recipe.id);
         } else {
           idx = Math.floor(Math.random() * Math.min(scored.length, 3));
           picks.push(scored[idx].recipe.id);
         }
       }
-
       for (let day = 0; day < 7; day++) {
         await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            week_start: formatDate(weekStart), recipe_id: picks[day],
-            day_of_week: day, meal_type: 'dinner',
-            servings: magicSettings.servings,
-          }),
+          body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: picks[day], day_of_week: day, meal_type: 'dinner', servings: magicSettings.servings }),
         });
       }
       await fetchData();
@@ -241,32 +311,29 @@ export default function PlannerClient() {
     finally { setMagicLoading(false); }
   };
 
-  // ── Picker filter ───────────────────────────────────────────────────────────
+  // ── Derived ─────────────────────────────────────────────────────────────────
 
   const filteredRecipes = recipes.filter(r =>
-    !pickerSearch ||
-    r.title.toLowerCase().includes(pickerSearch.toLowerCase()) ||
-    r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()))
+    !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()))
   );
 
-  // Planned proteins for suggestion logic
-  const plannedProteins = DAYS.map((_, i) => getMealForDay(i)?.recipe?.primary_protein);
+  const totalMeals = mealPlans.length;
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="pl-root">
 
-      {/* ── Top bar ── */}
+      {/* Top bar */}
       <div className="pl-topbar">
         <div className="pl-topbar-left">
           <h1 className="pl-title">Meal <em>Planner</em></h1>
           <div className="pl-week-nav">
-            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() - 7); return nd; })}>
+            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n; })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
             </button>
             <span className="pl-week-label">{weekLabel(weekStart)}</span>
-            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const nd = new Date(d); nd.setDate(d.getDate() + 7); return nd; })}>
+            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
             </button>
             {!isThisWeek(weekStart) && (
@@ -275,15 +342,13 @@ export default function PlannerClient() {
           </div>
         </div>
         <div className="pl-topbar-right">
-          <span className="pl-count">{mealPlans.length} of 7 planned</span>
+          <span className="pl-count">{totalMeals} of 7 planned</span>
           <button className="pl-btn-magic" onClick={() => setShowMagic(true)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
             Auto-plan
           </button>
           <a href="/shopping-list" className="pl-btn-shop">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/>
-            </svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
             Shopping list
           </a>
         </div>
@@ -298,114 +363,102 @@ export default function PlannerClient() {
             const todayIdx = todayDayIndex();
             const isToday = isThisWeek(weekStart) && dayIndex === todayIdx;
             const isPast = isThisWeek(weekStart) && dayIndex < todayIdx;
-            const meal = getMealForDay(dayIndex);
-            const recipe = meal?.recipe ?? null;
-            const suggestions = !recipe ? suggestForDay(
-              recipes,
-              plannedProteins.filter((_, i) => i !== dayIndex),
-              3
-            ) : [];
+            const dayMeals = getMealsForDay(dayIndex);
+            const isDragTarget = dragOverDay === dayIndex && dragging?.fromDay !== dayIndex;
+            const allProteins = mealPlans.filter(m => m.day_of_week !== dayIndex).map(m => m.recipe?.primary_protein);
+            const suggestions = !dayMeals.length ? suggestForDay(recipes, allProteins, 3) : [];
 
             return (
               <div
                 key={dayIndex}
                 ref={isToday ? todayRef : undefined}
-                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}`}
+                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''} ${isDragTarget ? 'drag-target' : ''}`}
+                onDragOver={e => handleDayDragOver(e, dayIndex)}
+                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDay(null); }}
+                onDrop={e => handleDayDrop(e, dayIndex)}
               >
                 {/* Day header */}
                 <div className="pl-day-header">
                   <div className="pl-day-label">
                     {isToday && <span className="pl-today-pip">Today</span>}
                     <span className="pl-day-name">{dayName}</span>
-                    <span className="pl-day-date">
-                      {date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
-                    </span>
+                    <span className="pl-day-date">{date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>
                   </div>
-                  {recipe && (
-                    <div className="pl-day-actions" onMouseDown={e => e.stopPropagation()}>
-                      <button
-                        className="pl-action-btn"
-                        title="Replace or remove"
-                        onClick={() => setActionMenu(prev =>
-                          prev?.mealId === meal!.id ? null : { mealId: meal!.id, dayIndex }
-                        )}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="5" r="1.5" fill="currentColor"/>
-                          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
-                          <circle cx="12" cy="19" r="1.5" fill="currentColor"/>
-                        </svg>
-                      </button>
-                      {actionMenu?.mealId === meal!.id && (
-                        <div className="pl-action-menu" onMouseDown={e => e.stopPropagation()}>
-                          <button onClick={() => { setActionMenu(null); setPicker({ dayIndex, replacing: meal!.id }); setPickerSearch(''); }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            Replace recipe
-                          </button>
-                          <button className="danger" onClick={() => { setActionMenu(null); removeMeal(meal!.id); }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-                            Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <button
+                    className="pl-add-inline-btn"
+                    onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
+                    title="Add another recipe"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                  </button>
                 </div>
 
-                {/* Recipe card or empty state */}
-                {recipe ? (
-                  <div
-                    className="pl-recipe-card"
-                    onClick={() => window.open(`/recipes`, '_self')}
-                    title="View recipe"
-                  >
-                    {(recipe as any).image_url && (
-                      <div className="pl-recipe-img">
-                        <img src={(recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      </div>
-                    )}
-                    <div className="pl-recipe-info">
-                      <div className="pl-recipe-top">
-                        <span className="pl-recipe-name">{recipe.title}</span>
-                        {recipe.primary_protein && <ProteinBadge protein={recipe.primary_protein} />}
-                      </div>
-                      <div className="pl-recipe-meta">
-                        {(recipe as any).cook_time && <span>🔥 {(recipe as any).cook_time}m</span>}
-                        {(recipe as any).servings && <span>👤 {(recipe as any).servings} servings</span>}
-                        {(recipe as any).tags?.slice(0, 2).map((t: string) => (
-                          <span key={t} className="pl-recipe-tag">{t}</span>
-                        ))}
-                      </div>
-                    </div>
+                {/* Recipe cards stacked */}
+                {dayMeals.length > 0 && (
+                  <div className="pl-meal-stack">
+                    {dayMeals.map(meal => {
+                      const recipe = meal.recipe;
+                      const isDraggingThis = dragging?.mealId === meal.id;
+                      return (
+                        <div
+                          key={meal.id}
+                          className={`pl-recipe-card ${isDraggingThis ? 'is-dragging' : ''}`}
+                          draggable
+                          onDragStart={e => handleDragStart(e, meal.id, dayIndex)}
+                          onDragEnd={handleDragEnd}
+                        >
+                          <div className="pl-drag-handle" title="Drag to move">
+                            <svg width="10" height="14" viewBox="0 0 10 18" fill="currentColor">
+                              <circle cx="3" cy="3" r="1.5"/><circle cx="7" cy="3" r="1.5"/>
+                              <circle cx="3" cy="9" r="1.5"/><circle cx="7" cy="9" r="1.5"/>
+                              <circle cx="3" cy="15" r="1.5"/><circle cx="7" cy="15" r="1.5"/>
+                            </svg>
+                          </div>
+                          {(recipe as any)?.image_url && (
+                            <div className="pl-recipe-img">
+                              <img src={(recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                            </div>
+                          )}
+                          <div className="pl-recipe-info">
+                            <div className="pl-recipe-top">
+                              <span className="pl-recipe-name">{recipe?.title}</span>
+                              {recipe?.primary_protein && <ProteinBadge protein={recipe.primary_protein} />}
+                            </div>
+                            <div className="pl-recipe-meta">
+                              {(recipe as any)?.cook_time && <span>🔥 {(recipe as any).cook_time}m</span>}
+                              {(recipe as any)?.tags?.slice(0, 2).map((t: string) => (
+                                <span key={t} className="pl-recipe-tag">{t}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            className="pl-replace-btn"
+                            onClick={e => { e.stopPropagation(); setPicker({ dayIndex, replacingId: meal.id }); setPickerSearch(''); }}
+                          >
+                            Change
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <div className="pl-empty-slot">
-                    <button
-                      className="pl-add-btn"
-                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                      Add dinner
-                    </button>
+                )}
 
+                {/* Empty state with suggestions */}
+                {!dayMeals.length && (
+                  <div className="pl-empty-slot">
+                    <div className="pl-drop-hint">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14M5 12h14"/></svg>
+                      No dinner planned — drag a recipe here or
+                      <button className="pl-inline-link" onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}>pick one</button>
+                    </div>
                     {suggestions.length > 0 && (
                       <div className="pl-suggestions">
-                        <span className="pl-suggestions-label">Suggestions to vary your week</span>
+                        <span className="pl-suggestions-label">Varies your week</span>
                         <div className="pl-suggestion-pills">
                           {suggestions.map(r => (
-                            <button
-                              key={r.id}
-                              className="pl-suggestion-pill"
-                              onClick={() => addMeal(dayIndex, r.id)}
-                              title={r.title}
-                            >
-                              {r.primary_protein && (
-                                <span style={{
-                                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                                  background: PROTEIN_COLORS[r.primary_protein] || '#ccc',
-                                  display: 'inline-block',
-                                }} />
-                              )}
+                            <button key={r.id} className="pl-suggestion-pill" onClick={() => addMeal(dayIndex, r.id)} title={r.title}>
+                              {r.primary_protein && <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: PROTEIN_COLORS[r.primary_protein] || '#ccc', display: 'inline-block' }} />}
                               {r.title}
                             </button>
                           ))}
@@ -414,21 +467,46 @@ export default function PlannerClient() {
                     )}
                   </div>
                 )}
+
+                {/* Day note */}
+                <textarea
+                  className="pl-day-note"
+                  placeholder="Add a note… (e.g. out for dinner, use leftovers)"
+                  value={notes[dayIndex] ?? ''}
+                  onChange={e => handleNoteChange(dayIndex, e.target.value)}
+                  rows={1}
+                  onInput={e => {
+                    const el = e.currentTarget;
+                    el.style.height = 'auto';
+                    el.style.height = el.scrollHeight + 'px';
+                  }}
+                />
               </div>
             );
           })}
         </div>
       )}
 
-      {/* ── Recipe picker modal ── */}
+      {/* Trash drop zone — only visible while dragging */}
+      {dragging && (
+        <div
+          className={`pl-trash-bar ${dragOverTrash ? 'active' : ''}`}
+          onDragOver={handleTrashDragOver}
+          onDragLeave={() => setDragOverTrash(false)}
+          onDrop={handleTrashDrop}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          {dragOverTrash ? 'Release to remove' : 'Drop here to remove'}
+        </div>
+      )}
+
+      {/* Recipe picker modal */}
       {picker && (
         <div className="modal-overlay" onClick={() => setPicker(null)}>
           <div className="pl-picker" onClick={e => e.stopPropagation()}>
             <div className="pl-picker-header">
               <div>
-                <h2 className="pl-picker-title">
-                  {picker.replacing ? 'Replace recipe' : 'Add dinner'}
-                </h2>
+                <h2 className="pl-picker-title">{picker.replacingId ? 'Replace recipe' : 'Add dinner'}</h2>
                 <p className="pl-picker-day">{DAYS[picker.dayIndex]}</p>
               </div>
               <button className="modal-close" onClick={() => setPicker(null)}>
@@ -436,48 +514,32 @@ export default function PlannerClient() {
               </button>
             </div>
             <div className="pl-picker-search-wrap">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)', pointerEvents: 'none' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-              <input
-                autoFocus
-                type="text"
-                className="pl-picker-search"
-                placeholder="Search recipes…"
-                value={pickerSearch}
-                onChange={e => setPickerSearch(e.target.value)}
-              />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 24, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)', pointerEvents: 'none' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input autoFocus type="text" className="pl-picker-search" placeholder="Search recipes…" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} />
             </div>
             <div className="pl-picker-list">
               {filteredRecipes.length === 0 ? (
                 <div className="pl-picker-empty">
-                  {recipes.length === 0
-                    ? <><span>No recipes yet.</span> <a href="/recipes">Add some →</a></>
-                    : <span>No matches for "{pickerSearch}"</span>}
+                  {!recipes.length ? <><span>No recipes yet.</span> <a href="/recipes">Add some →</a></> : <span>No matches</span>}
                 </div>
               ) : filteredRecipes.map(r => (
-                <button
-                  key={r.id}
-                  className="pl-picker-row"
-                  onClick={async () => {
-                    if (picker.replacing) {
-                      await replaceMeal(picker.dayIndex, picker.replacing, r.id);
-                    } else {
-                      await addMeal(picker.dayIndex, r.id);
-                    }
-                    setPicker(null);
-                  }}
-                >
+                <button key={r.id} className="pl-picker-row" onClick={async () => {
+                  if (picker.replacingId) {
+                    await removeMeal(picker.replacingId);
+                    await addMeal(picker.dayIndex, r.id);
+                  } else {
+                    await addMeal(picker.dayIndex, r.id);
+                  }
+                  setPicker(null);
+                }}>
                   <div className="pl-picker-thumb">
-                    {(r as any).image_url
-                      ? <img src={(r as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      : <span>🍽</span>}
+                    {(r as any).image_url ? <img src={(r as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <span>🍽</span>}
                   </div>
                   <div className="pl-picker-info">
                     <span className="pl-picker-name">{r.title}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginTop: 3 }}>
                       {r.primary_protein && <ProteinBadge protein={r.primary_protein} />}
-                      <span className="pl-picker-meta">
-                        {[(r as any).cook_time && `${(r as any).cook_time}m`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}
-                      </span>
+                      <span className="pl-picker-meta">{[(r as any).cook_time && `${(r as any).cook_time}m`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}</span>
                     </div>
                   </div>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--border)', flexShrink: 0 }}><path d="M9 18l6-6-6-6"/></svg>
@@ -488,7 +550,7 @@ export default function PlannerClient() {
         </div>
       )}
 
-      {/* ── Magic modal ── */}
+      {/* Magic modal */}
       {showMagic && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
           <div className="magic-modal">
@@ -504,14 +566,12 @@ export default function PlannerClient() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
-
             <div className="magic-fields">
               <div className="magic-field">
                 <label>Variety</label>
                 <div className="toggle-group">
                   {(['low','medium','high'] as const).map(v => (
-                    <button key={v} className={`toggle-btn ${magicSettings.variety === v ? 'active' : ''}`}
-                      onClick={() => setMagicSettings(p => ({ ...p, variety: v }))}>
+                    <button key={v} className={`toggle-btn ${magicSettings.variety === v ? 'active' : ''}`} onClick={() => setMagicSettings(p => ({ ...p, variety: v }))}>
                       {v === 'low' ? 'Favourites' : v === 'medium' ? 'Some variety' : 'Max variety'}
                     </button>
                   ))}
@@ -522,7 +582,6 @@ export default function PlannerClient() {
                   {magicSettings.variety === 'high' && 'Each recipe used at most once'}
                 </p>
               </div>
-
               <div className="magic-field">
                 <label>Servings per meal</label>
                 <div className="servings-row">
@@ -532,18 +591,15 @@ export default function PlannerClient() {
                   <span className="servings-lbl">people</span>
                 </div>
               </div>
-
               <div className="magic-field">
                 <label>Prefer tags</label>
                 <input className="magic-input" placeholder="e.g. italian, quick, vegetarian" value={magicSettings.preferTags} onChange={e => setMagicSettings(p => ({ ...p, preferTags: e.target.value }))} />
               </div>
-
               <div className="magic-field">
                 <label>Avoid tags</label>
                 <input className="magic-input" placeholder="e.g. spicy, heavy" value={magicSettings.excludeTags} onChange={e => setMagicSettings(p => ({ ...p, excludeTags: e.target.value }))} />
               </div>
             </div>
-
             <div className="magic-footer">
               <p className="magic-warn">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -552,9 +608,7 @@ export default function PlannerClient() {
               <div style={{ display: 'flex', gap: '0.75rem' }}>
                 <button className="btn-cancel" onClick={() => setShowMagic(false)}>Cancel</button>
                 <button className="btn-magic-go" onClick={handleMagicSuggest} disabled={magicLoading}>
-                  {magicLoading
-                    ? <span className="loading-dots"><span/><span/><span/></span>
-                    : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>Plan my week</>}
+                  {magicLoading ? <span className="loading-dots"><span/><span/><span/></span> : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>Plan my week</>}
                 </button>
               </div>
             </div>
@@ -563,198 +617,120 @@ export default function PlannerClient() {
       )}
 
       <style>{`
-        /* ── Layout ── */
         .pl-root { max-width: 680px; }
 
-        /* ── Top bar ── */
-        .pl-topbar {
-          display: flex; align-items: flex-start; justify-content: space-between;
-          gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap;
-        }
-        .pl-title {
-          font-family: var(--font-display); font-size: 2.8rem; font-weight: 300;
-          line-height: 1; color: var(--ink); margin-bottom: 0.75rem;
-        }
+        /* Top bar */
+        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap; }
+        .pl-title { font-family: var(--font-display); font-size: 2.8rem; font-weight: 300; line-height: 1; color: var(--ink); margin-bottom: 0.75rem; }
         .pl-title em { font-style: italic; color: var(--rust); }
         .pl-week-nav { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-        .pl-nav-btn {
-          background: white; border: 1px solid var(--border); border-radius: 6px;
-          padding: 0.35rem 0.5rem; cursor: pointer; color: var(--ink-muted);
-          display: flex; align-items: center; transition: all 0.15s;
-        }
+        .pl-nav-btn { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.5rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
         .pl-nav-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
         .pl-week-label { font-size: 0.88rem; color: var(--ink-soft); padding: 0 0.25rem; }
-        .pl-today-btn {
-          background: none; border: none; font-size: 0.78rem; color: var(--rust);
-          cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px;
-          font-family: var(--font-body); transition: all 0.15s;
-        }
+        .pl-today-btn { background: none; border: none; font-size: 0.78rem; color: var(--rust); cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px; font-family: var(--font-body); transition: all 0.15s; }
         .pl-today-btn:hover { background: var(--parchment); }
         .pl-topbar-right { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
         .pl-count { font-size: 0.78rem; color: var(--ink-muted); }
-        .pl-btn-magic {
-          display: inline-flex; align-items: center; gap: 0.4rem;
-          padding: 0.5rem 0.9rem; background: var(--ink); color: var(--cream);
-          border: none; border-radius: 6px; font-size: 0.8rem;
-          font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
-        }
+        .pl-btn-magic { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem; background: var(--ink); color: var(--cream); border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s; }
         .pl-btn-magic:hover { opacity: 0.85; }
-        .pl-btn-shop {
-          display: inline-flex; align-items: center; gap: 0.4rem;
-          padding: 0.5rem 0.9rem; background: var(--rust); color: white;
-          border: none; border-radius: 6px; font-size: 0.8rem;
-          font-family: var(--font-body); cursor: pointer; text-decoration: none;
-          transition: opacity 0.15s;
-        }
+        .pl-btn-shop { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem; background: var(--rust); color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; text-decoration: none; transition: opacity 0.15s; }
         .pl-btn-shop:hover { opacity: 0.88; }
 
-        /* ── Day list ── */
-        .pl-days { display: flex; flex-direction: column; gap: 0; }
-
-        .pl-day {
-          padding: 1.25rem 0;
-          border-bottom: 1px solid var(--border);
-          transition: opacity 0.2s;
-        }
+        /* Day list */
+        .pl-days { display: flex; flex-direction: column; }
+        .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); transition: background 0.15s; }
         .pl-day:first-child { border-top: 1px solid var(--border); }
-        .pl-day.is-past { opacity: 0.45; }
-        .pl-day.is-today { opacity: 1; }
+        .pl-day.is-past { opacity: 0.42; }
+        .pl-day.drag-target { background: rgba(181,69,27,0.04); border-radius: 8px; outline: 2px dashed var(--rust); outline-offset: -4px; }
 
         /* Day header */
-        .pl-day-header {
-          display: flex; align-items: center; justify-content: space-between;
-          margin-bottom: 0.75rem;
-        }
-        .pl-day-label { display: flex; align-items: baseline; gap: 0.6rem; }
-        .pl-today-pip {
-          font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
-          letter-spacing: 0.1em; color: white; background: var(--rust);
-          border-radius: 99px; padding: 2px 7px; line-height: 1.4;
-        }
-        .pl-day-name {
-          font-family: var(--font-display); font-size: 1.35rem; font-weight: 300;
-          color: var(--ink); line-height: 1;
-        }
+        .pl-day-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
+        .pl-day-label { display: flex; align-items: center; gap: 0.6rem; }
+        .pl-today-pip { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: white; background: var(--rust); border-radius: 99px; padding: 2px 7px; line-height: 1.4; }
+        .pl-day-name { font-family: var(--font-display); font-size: 1.35rem; font-weight: 300; color: var(--ink); line-height: 1; }
         .pl-day.is-today .pl-day-name { color: var(--rust); }
         .pl-day-date { font-size: 0.8rem; color: var(--ink-muted); }
+        .pl-add-inline-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0.28rem 0.65rem; background: none; border: 1px solid var(--border); border-radius: 99px; font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
+        .pl-add-inline-btn:hover { border-color: var(--rust); color: var(--rust); }
 
-        /* Day action menu */
-        .pl-day-actions { position: relative; }
-        .pl-action-btn {
-          background: none; border: 1px solid var(--border); border-radius: 6px;
-          padding: 0.3rem 0.45rem; color: var(--ink-muted); cursor: pointer;
-          display: flex; align-items: center; transition: all 0.15s;
-        }
-        .pl-action-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
-        .pl-action-menu {
-          position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
-          background: white; border: 1px solid var(--border); border-radius: 8px;
-          box-shadow: 0 4px 20px rgba(26,22,18,0.12); overflow: hidden; min-width: 160px;
-        }
-        .pl-action-menu button {
-          display: flex; align-items: center; gap: 0.5rem; width: 100%;
-          padding: 0.65rem 1rem; background: none; border: none; font-size: 0.83rem;
-          font-family: var(--font-body); color: var(--ink-soft); cursor: pointer;
-          text-align: left; transition: background 0.12s;
-        }
-        .pl-action-menu button:hover { background: var(--parchment); }
-        .pl-action-menu button.danger { color: #c0392b; }
-        .pl-action-menu button.danger:hover { background: #fef2f2; }
+        /* Recipe stack */
+        .pl-meal-stack { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
 
         /* Recipe card */
-        .pl-recipe-card {
-          display: flex; gap: 1rem; align-items: center;
-          background: white; border: 1px solid var(--border); border-radius: 10px;
-          overflow: hidden; cursor: pointer; transition: all 0.15s;
-        }
-        .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 12px rgba(181,69,27,0.1); }
-        .pl-recipe-img {
-          width: 90px; height: 72px; flex-shrink: 0;
-          background: var(--parchment); overflow: hidden;
-        }
+        .pl-recipe-card { display: flex; align-items: center; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: grab; }
+        .pl-recipe-card:active { cursor: grabbing; }
+        .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
+        .pl-recipe-card.is-dragging { opacity: 0.35; }
+        .pl-drag-handle { padding: 0 0.55rem; color: var(--border); display: flex; align-items: center; flex-shrink: 0; cursor: grab; transition: color 0.15s; }
+        .pl-recipe-card:hover .pl-drag-handle { color: var(--ink-muted); }
+        .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
-        .pl-recipe-info { flex: 1; min-width: 0; padding: 0.75rem 1rem 0.75rem 0; }
-        .pl-recipe-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
-        .pl-recipe-name { font-size: 0.95rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
-        .pl-recipe-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--ink-muted); }
-        .pl-recipe-tag {
-          background: var(--parchment); border: 1px solid var(--border);
-          border-radius: 99px; padding: 1px 7px; font-size: 0.68rem; color: var(--ink-soft);
-        }
+        .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; }
+        .pl-recipe-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+        .pl-recipe-name { font-size: 0.9rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
+        .pl-recipe-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.72rem; color: var(--ink-muted); }
+        .pl-recipe-tag { background: var(--parchment); border: 1px solid var(--border); border-radius: 99px; padding: 1px 6px; font-size: 0.66rem; color: var(--ink-soft); }
+        .pl-replace-btn { background: none; border: none; border-left: 1px solid var(--border); color: var(--ink-muted); cursor: pointer; padding: 0 1rem; min-width: 64px; height: 100%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; align-self: stretch; font-size: 0.78rem; font-family: var(--font-body); font-weight: 500; letter-spacing: 0.01em; }
+        .pl-replace-btn:hover { background: var(--parchment); color: var(--rust); }
 
         /* Empty slot */
-        .pl-empty-slot { display: flex; flex-direction: column; gap: 0.75rem; }
-        .pl-add-btn {
-          display: inline-flex; align-items: center; gap: 0.4rem;
-          padding: 0.55rem 1rem; background: none; border: 1.5px dashed var(--border);
-          border-radius: 8px; font-size: 0.82rem; color: var(--ink-muted);
-          font-family: var(--font-body); cursor: pointer; transition: all 0.15s;
-          align-self: flex-start;
-        }
-        .pl-add-btn:hover { border-color: var(--rust); color: var(--rust); }
+        .pl-empty-slot { margin-bottom: 0.75rem; }
+        .pl-drop-hint { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--ink-muted); padding: 0.6rem 0; flex-wrap: wrap; }
+        .pl-inline-link { background: none; border: none; color: var(--rust); font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+        .pl-suggestions { margin-top: 0.6rem; }
+        .pl-suggestions-label { font-size: 0.65rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem; }
+        .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .pl-suggestion-pill { display: inline-flex; align-items: center; gap: 5px; padding: 0.28rem 0.65rem; background: white; border: 1px solid var(--border); border-radius: 99px; font-size: 0.73rem; color: var(--ink-soft); font-family: var(--font-body); cursor: pointer; transition: all 0.15s; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pl-suggestion-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.03); }
 
-        /* Suggestions */
-        .pl-suggestions { }
-        .pl-suggestions-label {
-          font-size: 0.68rem; color: var(--ink-muted); text-transform: uppercase;
-          letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem;
+        /* Day note textarea */
+        .pl-day-note {
+          width: 100%; box-sizing: border-box;
+          border: none; border-top: 1px solid var(--border);
+          background: transparent; resize: none; overflow: hidden;
+          font-size: 0.82rem; font-family: var(--font-body); color: var(--ink-soft);
+          line-height: 1.6; padding: 0.65rem 0 0; margin-top: 0.85rem;
+          outline: none; transition: color 0.15s;
+          min-height: 30px;
         }
-        .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-        .pl-suggestion-pill {
-          display: inline-flex; align-items: center; gap: 5px;
-          padding: 0.3rem 0.7rem; background: white; border: 1px solid var(--border);
-          border-radius: 99px; font-size: 0.75rem; color: var(--ink-soft);
-          font-family: var(--font-body); cursor: pointer; transition: all 0.15s;
-          max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .pl-suggestion-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.04); }
+        .pl-day-note::placeholder { color: var(--ink-muted); font-style: italic; }
+        .pl-day-note:focus { color: var(--ink); }
+        .pl-day-note:focus::placeholder { color: var(--ink-soft); }
 
-        /* ── Picker modal ── */
-        .pl-picker {
-          background: white; border-radius: 12px; width: 440px; max-width: 95vw;
-          max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
-          box-shadow: 0 8px 40px rgba(26,22,18,0.15);
+        /* Trash bar */
+        .pl-trash-bar {
+          position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+          display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+          padding: 1rem; background: white; border-top: 1.5px solid var(--border);
+          font-size: 0.85rem; color: var(--ink-muted);
+          box-shadow: 0 -4px 20px rgba(26,22,18,0.08);
+          transition: background 0.15s, color 0.15s, border-color 0.15s;
+          animation: slideUp 0.2s ease;
         }
-        .pl-picker-header {
-          display: flex; align-items: flex-start; justify-content: space-between;
-          padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment);
-        }
+        .pl-trash-bar.active { background: #FEF2F2; border-color: #C0392B; color: #C0392B; }
+        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+        /* Picker */
+        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
+        .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); }
         .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
         .pl-picker-day { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
         .pl-picker-search-wrap { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--parchment); }
-        .pl-picker-search {
-          width: 100%; padding: 0.55rem 0.85rem 0.55rem 2.2rem;
-          border: 1px solid var(--border); border-radius: 8px;
-          font-size: 0.88rem; font-family: var(--font-body); color: var(--ink);
-          outline: none; transition: border-color 0.15s; box-sizing: border-box;
-        }
+        .pl-picker-search { width: 100%; padding: 0.55rem 0.85rem 0.55rem 2.4rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
         .pl-picker-search:focus { border-color: var(--rust); }
         .pl-picker-list { overflow-y: auto; flex: 1; padding: 0.5rem; }
         .pl-picker-empty { padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
         .pl-picker-empty a { color: var(--rust); }
-        .pl-picker-row {
-          display: flex; align-items: center; gap: 0.75rem;
-          padding: 0.65rem 0.75rem; border-radius: 8px; border: none;
-          background: none; cursor: pointer; width: 100%; text-align: left;
-          transition: background 0.12s; font-family: var(--font-body);
-        }
+        .pl-picker-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); }
         .pl-picker-row:hover { background: var(--parchment); }
-        .pl-picker-thumb {
-          width: 44px; height: 44px; border-radius: 6px; overflow: hidden;
-          background: var(--parchment); flex-shrink: 0;
-          display: flex; align-items: center; justify-content: center; font-size: 20px;
-        }
+        .pl-picker-thumb { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--parchment); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
         .pl-picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
         .pl-picker-info { flex: 1; min-width: 0; }
-        .pl-picker-name { display: block; font-size: 0.9rem; color: var(--ink); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pl-picker-name { display: block; font-size: 0.9rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .pl-picker-meta { font-size: 0.72rem; color: var(--ink-muted); }
 
-        /* ── Magic modal ── */
-        .magic-modal {
-          background: white; border-radius: 12px; padding: 2rem;
-          width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
-          box-shadow: 0 8px 40px rgba(26,22,18,0.15);
-        }
+        /* Magic modal */
+        .magic-modal { background: white; border-radius: 12px; padding: 2rem; width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
         .magic-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.75rem; }
         .magic-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 300; color: var(--ink); display: flex; align-items: center; }
         .magic-sub { font-size: 0.8rem; color: var(--ink-muted); margin-top: 4px; }
@@ -782,18 +758,18 @@ export default function PlannerClient() {
 
         .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
 
-        /* ── Mobile ── */
+        /* Mobile */
         @media (max-width: 600px) {
           .pl-title { font-size: 2rem; }
           .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; }
-          .pl-topbar-right { gap: 0.4rem; }
           .pl-btn-magic, .pl-btn-shop { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
           .pl-day { padding: 1rem 0; }
           .pl-day-name { font-size: 1.1rem; }
-          .pl-recipe-img { width: 70px; height: 58px; }
-          .pl-recipe-name { font-size: 0.88rem; }
+          .pl-recipe-img { width: 64px; height: 56px; }
+          .pl-recipe-name { font-size: 0.85rem; }
           .pl-picker { max-height: 92dvh; border-radius: 16px 16px 0 0; }
           .modal-overlay { align-items: flex-end; }
+          .pl-trash-bar { padding: 1.25rem 1rem 2rem; }
         }
       `}</style>
     </div>

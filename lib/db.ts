@@ -90,6 +90,15 @@ export async function setupDatabase() {
     )
   `);
   await pool().query(`ALTER TABLE shopping_list_edits ADD COLUMN IF NOT EXISTS checked_state JSONB NOT NULL DEFAULT '{}'`);
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS planner_notes (
+      week_start DATE NOT NULL,
+      day_of_week INTEGER NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (week_start, day_of_week)
+    )
+  `);
 }
 
 export interface ShoppingListEdits {
@@ -299,4 +308,27 @@ function normalizeRecipe(row: Record<string, unknown>): Recipe {
     steps: Array.isArray(row.steps) ? row.steps : [],
     tags: Array.isArray(row.tags) ? row.tags : [],
   } as Recipe;
+}
+
+export async function getPlannerNotes(weekStart: string): Promise<Record<number, string>> {
+  const result = await pool().query(
+    'SELECT day_of_week, note FROM planner_notes WHERE week_start = $1',
+    [weekStart]
+  );
+  const map: Record<number, string> = {};
+  for (const row of result.rows) map[row.day_of_week] = row.note;
+  return map;
+}
+
+export async function setPlannerNote(weekStart: string, dayOfWeek: number, note: string): Promise<void> {
+  if (!note.trim()) {
+    await pool().query('DELETE FROM planner_notes WHERE week_start = $1 AND day_of_week = $2', [weekStart, dayOfWeek]);
+  } else {
+    await pool().query(
+      `INSERT INTO planner_notes (week_start, day_of_week, note)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (week_start, day_of_week) DO UPDATE SET note = $3, updated_at = NOW()`,
+      [weekStart, dayOfWeek, note.trim()]
+    );
+  }
 }
