@@ -404,9 +404,8 @@ export default function PlannerClient() {
                         <div
                           key={meal.id}
                           className={`pl-recipe-card ${isDraggingThis ? 'is-dragging' : ''}`}
-                          draggable
-                          onDragStart={e => handleDragStart(e, meal.id, dayIndex)}
-                          onDragEnd={handleDragEnd}
+                          onClick={() => window.location.href = '/recipes'}
+                          title="View recipe"
                         >
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
@@ -425,16 +424,34 @@ export default function PlannerClient() {
                               ))}
                             </div>
                           </div>
-                          <button
-                            className="pl-replace-btn"
-                            title="Replace recipe"
-                            onClick={e => { e.stopPropagation(); setPicker({ dayIndex, replacingId: meal.id }); setPickerSearch(''); }}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="1 4 1 10 7 10"/>
-                              <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
-                            </svg>
-                          </button>
+                          <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
+                            <button
+                              className="pl-card-btn"
+                              title="Replace recipe"
+                              onClick={() => { setPicker({ dayIndex, replacingId: meal.id }); setPickerSearch(''); }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="1 4 1 10 7 10"/>
+                                <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+                              </svg>
+                            </button>
+                            <div
+                              className="pl-card-btn pl-drag-handle"
+                              title="Drag to move to another day"
+                              draggable
+                              onDragStart={e => { e.stopPropagation(); handleDragStart(e, meal.id, dayIndex); }}
+                              onDragEnd={handleDragEnd}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="5 9 2 12 5 15"/>
+                                <polyline points="19 9 22 12 19 15"/>
+                                <polyline points="9 5 12 2 15 5"/>
+                                <polyline points="9 19 12 22 15 19"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <line x1="12" y1="2" x2="12" y2="22"/>
+                              </svg>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
@@ -654,8 +671,7 @@ export default function PlannerClient() {
         .pl-meal-stack { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
 
         /* Recipe card */
-        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: grab; }
-        .pl-recipe-card:active { cursor: grabbing; }
+        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
         .pl-recipe-card.is-dragging { opacity: 0.35; }
         .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
@@ -665,8 +681,11 @@ export default function PlannerClient() {
         .pl-recipe-name { font-size: 0.9rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
         .pl-recipe-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.72rem; color: var(--ink-muted); }
         .pl-recipe-tag { background: var(--parchment); border: 1px solid var(--border); border-radius: 99px; padding: 1px 6px; font-size: 0.66rem; color: var(--ink-soft); }
-        .pl-replace-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; margin-right: 14px; }
-        .pl-replace-btn:hover { border-color: var(--rust); color: var(--rust); background: white; }
+        .pl-card-actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; flex-shrink: 0; align-self: center; }
+        .pl-card-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; padding: 0; }
+        .pl-card-btn:hover { border-color: var(--rust); color: var(--rust); }
+        .pl-drag-handle { cursor: grab; }
+        .pl-drag-handle:active { cursor: grabbing; }
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
@@ -681,10 +700,10 @@ export default function PlannerClient() {
         /* Day note textarea */
         .pl-day-note {
           width: 100%; box-sizing: border-box;
-          border: none; border-top: 1px solid var(--border);
+          border: none;
           background: transparent; resize: none; overflow: hidden;
           font-size: 0.82rem; font-family: var(--font-body); color: var(--ink-soft);
-          line-height: 1.6; padding: 0.65rem 0 0; margin-top: 0.85rem;
+          line-height: 1.5; padding: 0; margin-top: 4px;
           outline: none; transition: color 0.15s;
           min-height: 30px;
         }
