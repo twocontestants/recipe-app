@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 
@@ -128,6 +129,16 @@ export default function RecipesPage() {
   }, []);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
+
+  // Auto-open recipe from ?open=<id> query param (linked from planner)
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (openId && recipes.length > 0) {
+      const recipe = recipes.find(r => r.id === openId);
+      if (recipe) setViewRecipe(recipe);
+    }
+  }, [searchParams, recipes]);
 
   const openAddModal = () => {
     setEditingRecipe(null);

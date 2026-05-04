@@ -98,6 +98,7 @@ export default function PlannerClient() {
   const [magicLoading, setMagicLoading] = useState(false);
 
   // Drag state
+  const [suggestions, setSuggestions] = useState<Record<number, Recipe[]>>({});
   const [dragging, setDragging] = useState<{ mealId: string; fromDay: number } | null>(null);
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
   const [dragOverTrash, setDragOverTrash] = useState(false);
@@ -118,9 +119,20 @@ export default function PlannerClient() {
         fetch('/api/recipes'),
         fetch(`/api/planner-notes?weekStart=${wk}`),
       ]);
-      setMealPlans(await plansRes.json());
-      setRecipes(await recipesRes.json());
-      setNotes(await notesRes.json());
+  const [plans, recs, nts] = await Promise.all([plansRes.json(), recipesRes.json(), notesRes.json()]);
+      setMealPlans(plans);
+      setRecipes(recs);
+      setNotes(nts);
+      // Compute suggestions once — stable until next full fetch
+      const newSuggestions: Record<number, Recipe[]> = {};
+      for (let d = 0; d < 7; d++) {
+        const dayMeals = plans.filter((m: any) => m.day_of_week === d && m.meal_type === 'dinner');
+        if (!dayMeals.length) {
+          const otherProteins = plans.filter((m: any) => m.day_of_week !== d).map((m: any) => m.recipe?.primary_protein);
+          newSuggestions[d] = suggestForDay(recs, otherProteins, 3);
+        }
+      }
+      setSuggestions(newSuggestions);
     } catch { showToast('Failed to load planner', 'error'); }
     finally { setLoading(false); }
   }, [weekStart]);
@@ -365,8 +377,7 @@ export default function PlannerClient() {
             const isPast = isThisWeek(weekStart) && dayIndex < todayIdx;
             const dayMeals = getMealsForDay(dayIndex);
             const isDragTarget = dragOverDay === dayIndex && dragging?.fromDay !== dayIndex;
-            const allProteins = mealPlans.filter(m => m.day_of_week !== dayIndex).map(m => m.recipe?.primary_protein);
-            const suggestions = !dayMeals.length ? suggestForDay(recipes, allProteins, 3) : [];
+            const daySuggestions = suggestions[dayIndex] ?? [];
 
             return (
               <div
@@ -404,7 +415,7 @@ export default function PlannerClient() {
                         <div
                           key={meal.id}
                           className={`pl-recipe-card ${isDraggingThis ? 'is-dragging' : ''}`}
-                          onClick={() => window.location.href = '/recipes'}
+                          onClick={() => { if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`; }}
                           title="View recipe"
                         >
                           {(recipe as any)?.image_url && (
@@ -461,16 +472,18 @@ export default function PlannerClient() {
                 {/* Empty state with suggestions */}
                 {!dayMeals.length && (
                   <div className="pl-empty-slot">
-                    <div className="pl-drop-hint">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14M5 12h14"/></svg>
-                      No dinner planned — drag a recipe here or
-                      <button className="pl-inline-link" onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}>pick one</button>
-                    </div>
-                    {suggestions.length > 0 && (
+                    <button
+                      className="pl-add-dinner-pill"
+                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                      Add dinner
+                    </button>
+                    {daySuggestions.length > 0 && (
                       <div className="pl-suggestions">
-                        <span className="pl-suggestions-label">Varies your week</span>
+                        <span className="pl-suggestions-label">This week's suggestions</span>
                         <div className="pl-suggestion-pills">
-                          {suggestions.map(r => (
+                          {daySuggestions.map(r => (
                             <button key={r.id} className="pl-suggestion-pill" onClick={() => addMeal(dayIndex, r.id)} title={r.title}>
                               {r.primary_protein && <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: PROTEIN_COLORS[r.primary_protein] || '#ccc', display: 'inline-block' }} />}
                               {r.title}
@@ -689,8 +702,14 @@ export default function PlannerClient() {
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
-        .pl-drop-hint { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--ink-muted); padding: 0.6rem 0; flex-wrap: wrap; }
-        .pl-inline-link { background: none; border: none; color: var(--rust); font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+        .pl-add-dinner-pill {
+          display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+          width: 100%; padding: 0.7rem 1rem;
+          background: none; border: 1.5px dashed var(--border);
+          border-radius: 10px; font-size: 0.82rem; color: var(--ink-muted);
+          font-family: var(--font-body); cursor: pointer; transition: all 0.15s;
+        }
+        .pl-add-dinner-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.03); }
         .pl-suggestions { margin-top: 0.6rem; }
         .pl-suggestions-label { font-size: 0.65rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem; }
         .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
