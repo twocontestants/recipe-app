@@ -90,6 +90,24 @@ export async function setupDatabase() {
     )
   `);
   await pool().query(`ALTER TABLE shopping_list_edits ADD COLUMN IF NOT EXISTS checked_state JSONB NOT NULL DEFAULT '{}'`);
+  // Named shopping lists
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS shopping_lists (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      week_starts TEXT[] NOT NULL DEFAULT '{}',
+      recipe_ids TEXT[] NOT NULL DEFAULT '{}',
+      generated_at TIMESTAMPTZ DEFAULT NOW(),
+      item_overrides   JSONB NOT NULL DEFAULT '{}',
+      custom_items     JSONB NOT NULL DEFAULT '[]',
+      category_labels  JSONB NOT NULL DEFAULT '{}',
+      category_order   JSONB NOT NULL DEFAULT '[]',
+      item_order       JSONB NOT NULL DEFAULT '{}',
+      checked_state    JSONB NOT NULL DEFAULT '{}'
+    )
+  `);
+
   await pool().query(`
     CREATE TABLE IF NOT EXISTS planner_notes (
       week_start DATE NOT NULL,
@@ -331,4 +349,92 @@ export async function setPlannerNote(weekStart: string, dayOfWeek: number, note:
       [weekStart, dayOfWeek, note.trim()]
     );
   }
+}
+
+export interface ShoppingList {
+  id: string;
+  name: string;
+  subtitle: string;
+  week_starts: string[];
+  recipe_ids: string[];
+  generated_at: string;
+  item_overrides:  Record<string, unknown>;
+  custom_items:    unknown[];
+  category_labels: Record<string, string>;
+  category_order:  string[];
+  item_order:      Record<string, string[]>;
+  checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
+}
+
+export async function getAllShoppingLists(): Promise<ShoppingList[]> {
+  const result = await pool().query(
+    'SELECT * FROM shopping_lists ORDER BY generated_at DESC'
+  );
+  return result.rows.map(r => ({
+    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
+    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
+    generated_at: r.generated_at,
+    item_overrides: r.item_overrides ?? {}, custom_items: r.custom_items ?? [],
+    category_labels: r.category_labels ?? {}, category_order: r.category_order ?? [],
+    item_order: r.item_order ?? {}, checked_state: r.checked_state ?? {},
+  }));
+}
+
+export async function createShoppingList(data: {
+  name: string; subtitle: string; week_starts: string[]; recipe_ids: string[];
+}): Promise<ShoppingList> {
+  const result = await pool().query(
+    `INSERT INTO shopping_lists (name, subtitle, week_starts, recipe_ids)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [data.name, data.subtitle, data.week_starts, data.recipe_ids]
+  );
+  const r = result.rows[0];
+  return {
+    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
+    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
+    generated_at: r.generated_at,
+    item_overrides: {}, custom_items: [], category_labels: {},
+    category_order: [], item_order: {}, checked_state: {},
+  };
+}
+
+export async function updateShoppingListEdits(id: string, edits: {
+  item_overrides?: Record<string, unknown>;
+  custom_items?: unknown[];
+  category_labels?: Record<string, string>;
+  category_order?: string[];
+  item_order?: Record<string, string[]>;
+  checked_state?: Record<string, unknown>;
+  subtitle?: string;
+}): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [id];
+  let i = 2;
+  if (edits.item_overrides !== undefined) { sets.push(`item_overrides=$${i++}::jsonb`); vals.push(JSON.stringify(edits.item_overrides)); }
+  if (edits.custom_items !== undefined) { sets.push(`custom_items=$${i++}::jsonb`); vals.push(JSON.stringify(edits.custom_items)); }
+  if (edits.category_labels !== undefined) { sets.push(`category_labels=$${i++}::jsonb`); vals.push(JSON.stringify(edits.category_labels)); }
+  if (edits.category_order !== undefined) { sets.push(`category_order=$${i++}::jsonb`); vals.push(JSON.stringify(edits.category_order)); }
+  if (edits.item_order !== undefined) { sets.push(`item_order=$${i++}::jsonb`); vals.push(JSON.stringify(edits.item_order)); }
+  if (edits.checked_state !== undefined) { sets.push(`checked_state=$${i++}::jsonb`); vals.push(JSON.stringify(edits.checked_state)); }
+  if (edits.subtitle !== undefined) { sets.push(`subtitle=$${i++}`); vals.push(edits.subtitle); }
+  if (!sets.length) return;
+  await pool().query(`UPDATE shopping_lists SET ${sets.join(',')} WHERE id=$1`, vals);
+}
+
+export async function deleteShoppingList(id: string): Promise<void> {
+  await pool().query('DELETE FROM shopping_lists WHERE id = $1', [id]);
+}
+
+export async function getShoppingListById(id: string): Promise<ShoppingList | null> {
+  const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1', [id]);
+  if (!result.rows.length) return null;
+  const r = result.rows[0];
+  return {
+    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
+    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
+    generated_at: r.generated_at,
+    item_overrides: r.item_overrides ?? {}, custom_items: r.custom_items ?? [],
+    category_labels: r.category_labels ?? {}, category_order: r.category_order ?? [],
+    item_order: r.item_order ?? {}, checked_state: r.checked_state ?? {},
+  };
 }

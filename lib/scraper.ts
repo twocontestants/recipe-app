@@ -550,58 +550,106 @@ function heuristicScrape($: cheerio.CheerioAPI, url: string): ScrapedRecipe {
 function parseIngredientLine(line: string): Ingredient {
   return _parseIngredientLine(line);
 }
+
+// Strip parenthetical notes from ingredient names.
+// e.g. "Garam masala (note 1)" → "Garam masala"
+//      "cayenne pepper (or red, Note 2)" → "cayenne pepper"
+// Keeps parentheses that look like quantities: "(500g)" or fractions "(1/2)"
+function stripNotes(s: string): string {
+  // Remove parenthetical content that looks like a note/annotation:
+  // - starts with "note", "or ", "see ", "optional", a number-only ref, etc.
+  // - but preserve purely numeric content like "(500g)" or "(2)"
+  return s
+    .replace(/\s*\(+\s*(note\s*\d*|see\s+note|or\s+[a-z]|optional|adjust\s|to\s+taste|if\s+|can\s+use|substitute|alt[a-z]*)[^)]*\)*/gi, '')
+    .replace(/\s*\(\(\s*note[^)]*\)*\)*/gi, '')  // double-paren notes like ((note 1)
+    .replace(/\s*\(\s*note\s*\d*\s*\)*/gi, '')   // (note 1) or (note)
+    .replace(/\s*,\s*(note\s*\d*|see\s+note)[^,)]*$/gi, '') // trailing ", note 1"
+    .replace(/\s+,/, ',')
+    .trim();
+}
+
 function _parseIngredientLine(line: string): Ingredient {
-  // Strip leading/trailing punctuation artifacts (parens, slashes, bullets, etc.)
-  const cleaned = line
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s\/\(\)\[\]\-\*\•\·]+/, '')   // leading junk
-    .replace(/[\s\/\(\)\[\]]+$/, '');           // trailing junk
+  // 1. Basic whitespace normalisation
+  let cleaned = line.trim().replace(/\s+/g, ' ');
+
+  // 2. Strip leading bullets/punctuation (but NOT leading parens that are part of amounts)
+  cleaned = cleaned.replace(/^[\s\-\*\•\·\/]+/, '');
+
+  // 3. Strip trailing unbalanced parentheses and annotation fragments
+  //    e.g. "masala ((note 1" → "masala"
+  cleaned = cleaned
+    .replace(/\s*\(+[^)]*$/, '')        // unclosed ( at end
+    .replace(/[\s,;]+$/, '')             // trailing punctuation
+    .trim();
 
   if (!cleaned) return { amount: '', unit: '', name: '' };
 
-  // Unit list — deliberately excludes size words (large/medium/small) so they
-  // stay as part of the ingredient name, not parsed as the unit.
-  const unitPattern = [
-    'cups?', 'tbsps?', 'tbsp', 'tsps?', 'tsp',
-    'tablespoons?', 'teaspoons?',
-    'fl\\.?\\s*oz', 'ounces?', 'oz',
-    'pounds?', 'lbs?',
-    'grams?', 'g', 'kilograms?', 'kg',
-    'millilitres?', 'milliliters?', 'ml',
-    'litres?', 'liters?',
-    'cloves?', 'cans?', 'packages?', 'pkgs?',
-    'pinch(?:es)?', 'handfuls?', 'bunch(?:es)?',
-    'slices?', 'pieces?', 'strips?',
-    'inches?', 'cm',
-  ].join('|');
+  // 4. Handle glued units like "100g", "200ml", "1.5kg" before full regex
+  cleaned = cleaned.replace(/(\d)(g|kg|ml|l|oz|lb|lbs)\b/gi, '$1 $2');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
-  const match = cleaned.match(
-    new RegExp(
-      `^([\\d\\s¼½¾⅓⅔⅛⅜⅝⅞/\\-\\.]+)?\\s*(${unitPattern})\\.?\\s*(.+)`,
-      'i'
-    )
+  // 5. Unit list — ordered longest-first so alternation is greedy.
+  //    Single-letter units (g, l) come LAST and use \b word boundaries
+  //    in the full regex so they can't match mid-word (e.g. "Green", "large").
+  const UNITS = [
+    'tablespoons?', 'tbsps?', 'tbsp',
+    'teaspoons?',   'tsps?',  'tsp',
+    'fl\\.?\\s*oz',
+    'millilitres?', 'milliliters?', 'mls?',
+    'kilograms?',   'kgs?',
+    'ounces?',      'ozs?', 'oz',
+    'pounds?',      'lbs?',
+    'litres?',      'liters?',
+    'cups?',
+    'grams?',
+    // Count units — no boundary issues
+    'bunche?s?', 'handfuls?', 'pinch(?:es)?',
+    'packages?', 'pkgs?', 'cans?', 'tins?',
+    'slices?', 'pieces?', 'strips?', 'sheets?',
+    'stalks?', 'sprigs?', 'heads?',
+    'rashers?', 'fillets?', 'cloves?',
+    'inches?', 'cms?',
+    // Single-letter units LAST — rely on word boundary in regex
+    'kg', 'ml', 'oz', 'lb', 'lbs',
+    'g',                               // must be last — most likely to false-match
+  ];
+
+  // Build regex: word boundary before AND after the unit so "g" can't match
+  // the start of "Green" or "garam"
+  const unitAlt = UNITS.join('|');
+  const ingRe = new RegExp(
+    `^([\\d\\s¼½¾⅓⅔⅛⅜⅝⅞/\\-\\.]+)?` +  // optional amount
+    `\\s*\\b(${unitAlt})\\.?\\b` +         // unit with word boundaries
+    `\\s*(.+)`,                             // name
+    'i'
   );
 
+  const match = cleaned.match(ingRe);
+
   if (match) {
-    return fixSizeWordUnit({
-      amount: (match[1] || '').trim(),
-      unit:   (match[2] || '').trim(),
-      name:   (match[3] || cleaned).trim(),
-    });
+    const rawAmount = (match[1] || '').trim();
+    const rawUnit   = (match[2] || '').trim();
+    let   rawName   = (match[3] || cleaned).trim();
+
+    // Strip note annotations from name
+    rawName = stripNotes(rawName);
+    if (!rawName) rawName = cleaned.replace(/^[\d\s¼½¾⅓⅔⅛⅜⅝⅞/\-\.]+/, '').trim();
+
+    const result = fixSizeWordUnit({ amount: rawAmount, unit: rawUnit, name: rawName });
+    if (result.name) return result;
   }
 
-  // No unit matched — try to split leading number from name
+  // 6. No unit — try splitting leading number from name
   const numOnly = cleaned.match(/^([\d\s¼½¾⅓⅔⅛⅜⅝⅞\/\-\.]+)\s+(.+)/);
   if (numOnly) {
     return {
       amount: numOnly[1].trim(),
       unit:   '',
-      name:   numOnly[2].trim(),
+      name:   stripNotes(numOnly[2].trim()),
     };
   }
 
-  return { amount: '', unit: '', name: cleaned };
+  return { amount: '', unit: '', name: stripNotes(cleaned) };
 }
 
 // Size words that must never end up as units

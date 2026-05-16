@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
+import GenerateListModal from '@/components/GenerateListModal';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ export default function PlannerClient() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
+  const [showGenerateList, setShowGenerateList] = useState(false);
 
   // Picker
   const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
@@ -359,10 +361,10 @@ export default function PlannerClient() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
             Auto-plan
           </button>
-          <a href="/shopping-list" className="pl-btn-shop">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+          <button className="pl-btn-gen" onClick={() => setShowGenerateList(true)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
             Shopping list
-          </a>
+          </button>
         </div>
       </div>
 
@@ -578,6 +580,14 @@ export default function PlannerClient() {
       )}
 
       {/* Magic modal */}
+      {showGenerateList && (
+        <GenerateListModal
+          onClose={() => setShowGenerateList(false)}
+          onCreated={(id) => { setShowGenerateList(false); window.location.href = '/shopping-list'; }}
+          defaultWeekStart={formatDate(weekStart)}
+        />
+      )}
+
       {showMagic && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
           <div className="magic-modal">
@@ -660,8 +670,8 @@ export default function PlannerClient() {
         .pl-count { font-size: 0.78rem; color: var(--ink-muted); }
         .pl-btn-magic { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem; background: var(--ink); color: var(--cream); border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s; }
         .pl-btn-magic:hover { opacity: 0.85; }
-        .pl-btn-shop { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem; background: var(--rust); color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; text-decoration: none; transition: opacity 0.15s; }
-        .pl-btn-shop:hover { opacity: 0.88; }
+        .pl-btn-gen { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem; background: var(--sage, #5a7a52); color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s; }
+        .pl-btn-gen:hover { opacity: 0.85; }
 
         /* Day list */
         .pl-days { display: flex; flex-direction: column; }
@@ -795,7 +805,7 @@ export default function PlannerClient() {
         @media (max-width: 600px) {
           .pl-title { font-size: 2rem; }
           .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; }
-          .pl-btn-magic, .pl-btn-shop { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
+          .pl-btn-magic, .pl-btn-gen { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
           .pl-day { padding: 1rem 0; }
           .pl-day-name { font-size: 1.1rem; }
           .pl-recipe-img { width: 64px; height: 56px; }
