@@ -1,5 +1,90 @@
 import * as cheerio from 'cheerio';
+import dns from 'dns/promises';
+import net from 'net';
 import type { Ingredient } from './db';
+
+const FETCH_TIMEOUT_MS = 10_000;
+const MAX_REDIRECTS = 5;
+
+// ── SSRF protection ──────────────────────────────────────────────────────────
+// The scrape endpoint fetches a user-supplied URL server-side, so we must stop
+// it being pointed at internal/cloud-metadata addresses. We allow only http(s),
+// block private/reserved IP ranges, and re-validate on every redirect hop.
+
+function isPrivateIp(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const p = ip.split('.').map(Number);
+    if (p[0] === 0 || p[0] === 10 || p[0] === 127) return true;
+    if (p[0] === 169 && p[1] === 254) return true;              // link-local + 169.254.169.254 metadata
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;  // 172.16/12
+    if (p[0] === 192 && p[1] === 168) return true;              // 192.168/16
+    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // 100.64/10 CGNAT
+    return false;
+  }
+  const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  if (lower === '::1' || lower === '::') return true;           // loopback / unspecified
+  if (lower.startsWith('fe80')) return true;                   // link-local
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
+  if (lower.startsWith('::ffff:')) return isPrivateIp(lower.slice(7)); // v4-mapped
+  return false;
+}
+
+async function assertSafeUrl(raw: string): Promise<URL> {
+  let u: URL;
+  try { u = new URL(raw); } catch { throw new Error('Invalid URL'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    throw new Error('Only http(s) URLs can be imported');
+  }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) {
+    throw new Error('That host is not allowed');
+  }
+  if (net.isIP(host)) {
+    if (isPrivateIp(host)) throw new Error('That address is not allowed');
+    return u;
+  }
+  let addrs: string[];
+  try {
+    addrs = (await dns.lookup(host, { all: true })).map(a => a.address);
+  } catch {
+    throw new Error('Could not resolve that host');
+  }
+  if (addrs.length === 0 || addrs.some(isPrivateIp)) {
+    throw new Error('That host resolves to a private address');
+  }
+  return u;
+}
+
+// Fetch with a timeout, following redirects manually so each hop is re-checked
+// against the SSRF rules (a public URL could otherwise 302 to an internal one).
+async function safeFetch(rawUrl: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    let url = (await assertSafeUrl(rawUrl)).toString();
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const res = await fetch(url, {
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-AU,en-GB;q=0.9,en;q=0.8',
+          'Cache-Control': 'no-cache',
+        },
+      });
+      if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        const next = new URL(res.headers.get('location') as string, url);
+        url = (await assertSafeUrl(next.toString())).toString();
+        continue;
+      }
+      return res;
+    }
+    throw new Error('Too many redirects');
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface ScrapedRecipe {
   title: string;
@@ -13,15 +98,7 @@ interface ScrapedRecipe {
 }
 
 export async function scrapeRecipe(url: string): Promise<ScrapedRecipe> {
-  const response = await fetch(url, {
-    headers: {
-      // Use a real browser UA — many sites block obvious bot strings
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-AU,en-GB;q=0.9,en;q=0.8',
-      'Cache-Control': 'no-cache',
-    },
-  });
+  const response = await safeFetch(url);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch URL: ${response.status}`);
@@ -503,7 +580,11 @@ function heuristicScrape($: cheerio.CheerioAPI, url: string): ScrapedRecipe {
     const items = $(sel);
     if (items.length >= 2) {
       items.each((_, el) => {
-        const text = $(el).text().trim();
+        // Drop screen-reader-only markers (e.g. WPRM's "▢ " checkbox glyph) and
+        // faded note spans so they don't pollute the parsed ingredient text.
+        const $el = $(el).clone();
+        $el.find('.sr-only, .screen-reader-text, [class*="screen-reader"], [class*="sr-only"], [class*="ingredient-notes"]').remove();
+        const text = $el.text().replace(/\s+/g, ' ').trim();
         if (text && text.length < 200)
           ingredients.push(parseIngredientLine(text));
       });
@@ -551,29 +632,44 @@ function parseIngredientLine(line: string): Ingredient {
   return _parseIngredientLine(line);
 }
 
+// Normalise whitespace and comma artifacts left behind after edits.
+function tidyName(s: string): string {
+  return s
+    .replace(/\s+/g, ' ')
+    .replace(/\s+,/g, ',')             // " ," → ","
+    .replace(/,\s*(?:,\s*)+/g, ', ')   // ",," / ", ," → ", "
+    .replace(/\(\s*\)/g, '')           // empty parens left behind
+    .replace(/^[\s,;]+/, '')           // leading punctuation
+    .replace(/[\s,;]+$/, '')           // trailing punctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Strip parenthetical notes from ingredient names.
 // e.g. "Garam masala (note 1)" → "Garam masala"
 //      "cayenne pepper (or red, Note 2)" → "cayenne pepper"
-// Keeps parentheses that look like quantities: "(500g)" or fractions "(1/2)"
+// Keeps parentheses that look like quantities: "(500g)" or fractions "(1/2)".
+// tidyName() then removes any comma left dangling where a note was removed,
+// so we don't emit "chicken,, diced" or "salt,".
 function stripNotes(s: string): string {
-  // Remove parenthetical content that looks like a note/annotation:
-  // - starts with "note", "or ", "see ", "optional", a number-only ref, etc.
-  // - but preserve purely numeric content like "(500g)" or "(2)"
-  return s
-    .replace(/\s*\(+\s*(note\s*\d*|see\s+note|or\s+[a-z]|optional|adjust\s|to\s+taste|if\s+|can\s+use|substitute|alt[a-z]*)[^)]*\)*/gi, '')
-    .replace(/\s*\(\(\s*note[^)]*\)*\)*/gi, '')  // double-paren notes like ((note 1)
-    .replace(/\s*\(\s*note\s*\d*\s*\)*/gi, '')   // (note 1) or (note)
-    .replace(/\s*,\s*(note\s*\d*|see\s+note)[^,)]*$/gi, '') // trailing ", note 1"
-    .replace(/\s+,/, ',')
-    .trim();
+  const out = s
+    // Any parenthetical that contains a note/annotation keyword — the keyword
+    // need not be the first word, so "(5 star, note 2)" and "(or 1 tsp powder)"
+    // are both caught. Quantity parens like "(500g)"/"(about 200g)" contain no
+    // keyword and are preserved.
+    .replace(/\s*\(+[^)]*\b(?:note\s*\d*|see\s+note|optional|to\s+taste|adjust|substitute|can\s+use|alt\w*|or\s+\S)[^)]*\)*/gi, '')
+    // Trailing ", note 1" / ", see note" without parens.
+    .replace(/\s*,\s*(?:note\s*\d*|see\s+note)\b[^,)]*$/gi, '');
+  return tidyName(out);
 }
 
 function _parseIngredientLine(line: string): Ingredient {
   // 1. Basic whitespace normalisation
   let cleaned = line.trim().replace(/\s+/g, ' ');
 
-  // 2. Strip leading bullets/punctuation (but NOT leading parens that are part of amounts)
-  cleaned = cleaned.replace(/^[\s\-\*\•\·\/]+/, '');
+  // 2. Strip leading bullets/checkbox glyphs/punctuation (but NOT leading parens
+  //    that are part of amounts). Covers WPRM screen-reader markers like "▢ ".
+  cleaned = cleaned.replace(/^[\s\-\*\•\·\/▢☐□✓✔◻◼▪▫◦‣]+/, '');
 
   // 3. Strip trailing unbalanced parentheses and annotation fragments
   //    e.g. "masala ((note 1" → "masala"
@@ -630,6 +726,17 @@ function _parseIngredientLine(line: string): Ingredient {
     const rawAmount = (match[1] || '').trim();
     const rawUnit   = (match[2] || '').trim();
     let   rawName   = (match[3] || cleaned).trim();
+
+    // Drop a redundant alternate measurement that follows a slash, i.e. the
+    // metric/imperial dual amounts used by RecipeTin Eats / WPRM:
+    //   "600 g / 1.2 lb scotch fillet…"  → amount=600 unit=g, name "/ 1.2 lb …"
+    //   → strip "/ 1.2 lb " so the name is just "scotch fillet…".
+    // Only fires when the slash is immediately followed by number(s) + a unit,
+    // so an alternate *ingredient* like "beef / chicken" is left untouched.
+    rawName = rawName.replace(
+      new RegExp(`^\\s*/\\s*[\\d¼½¾⅓⅔⅛⅜⅝⅞.,/\\s-]*\\b(?:${unitAlt})\\.?\\b\\s*`, 'i'),
+      ''
+    );
 
     // Strip note annotations from name
     rawName = stripNotes(rawName);

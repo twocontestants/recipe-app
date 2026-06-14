@@ -45,10 +45,10 @@ interface ItemRowProps {
   onNameChange: (v: string) => void; onAmountChange: (v: string) => void;
   onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void;
   onDragOverItem: (e: React.DragEvent) => void; onDropOnItem: (e: React.DragEvent) => void;
-  onEnterAtEnd: () => void; recipes?: string[];
+  onEnterAtEnd: () => void; recipes?: string[]; recipeLinks?: Record<string, string>;
 }
 
-function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes }: ItemRowProps) {
+function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
 
@@ -80,7 +80,18 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
         <div className="shop-item-name-wrap">
           {recipes && recipes.length > 0 && (
             <div className="recipe-source-bar" title={recipes.join(', ')}>
-              {recipes.map((r, i) => <span key={i} className="recipe-source-pip">{r}</span>)}
+              {recipes.map((r, i) => {
+                const url = recipeLinks?.[r];
+                return url ? (
+                  <a key={i} className="recipe-source-pip recipe-source-link" href={url} target="_blank" rel="noopener noreferrer"
+                     onClick={e => e.stopPropagation()} title={`Open original recipe: ${r}`}>
+                    {r}
+                    <svg className="recipe-source-ext" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  </a>
+                ) : (
+                  <span key={i} className="recipe-source-pip">{r}</span>
+                );
+              })}
             </div>
           )}
           <span ref={nameRef} className={`shop-item-name ${isChecked ? 'checked-text' : ''}`} contentEditable={!isChecked} suppressContentEditableWarning onBlur={e => onNameChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleNameKeyDown} spellCheck={false} />
@@ -88,7 +99,6 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
         <div className="shop-item-amount-wrap">
           <span ref={amountRef} className="shop-item-amount" contentEditable={!isChecked} suppressContentEditableWarning data-placeholder="qty" onBlur={e => onAmountChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleAmountKeyDown} spellCheck={false} />
         </div>
-        {isChecked && checkedBy && <span className="shop-item-checker">{checkedBy}</span>}
         <button className="item-delete-btn no-print" onClick={onDelete}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
     </div>
@@ -142,6 +152,9 @@ export default function ShoppingListClient() {
   const [activeShoppers, setActiveShoppers] = useState(1);
   const [shopperName] = useState<string>(() => typeof window !== 'undefined' ? getShopperName() : 'You');
   const [recentActivity, setRecentActivity] = useState<string | null>(null);
+  // title → original source URL, for linking recipe pills to the real recipe
+  const [recipeSources, setRecipeSources] = useState<Record<string, string>>({});
+  const [hideChecked, setHideChecked] = useState(false);
 
   const [editingCat, setEditingCat] = useState<string | null>(null);
   const [editingCatValue, setEditingCatValue] = useState('');
@@ -182,7 +195,15 @@ export default function ShoppingListClient() {
   // ── Socket ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const socket = io({ path: '/api/socketio', transports: ['websocket', 'polling'] });
+    // Connect ALL clients to the single socket server (Render). Vercel is
+    // serverless and can't host the long-lived Socket.IO server, and two
+    // separate processes don't share rooms — so every client, whichever
+    // platform served the page, must point at the same origin for live sync.
+    // Set NEXT_PUBLIC_SOCKET_URL to the Render URL. When unset (local dev), it
+    // falls back to same-origin, which is correct because `npm run dev` runs
+    // server.js locally.
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
+    const socket = io(socketUrl, { path: '/api/socketio', transports: ['websocket', 'polling'] });
     socketRef.current = socket;
     socket.on('connect', () => {
       setConnected(true);
@@ -207,7 +228,7 @@ export default function ShoppingListClient() {
         return next;
       });
       if (checkedBy !== shopperName) {
-        const msg = isChecked ? `${checkedBy} checked ${itemName}` : `${checkedBy} unchecked ${itemName}`;
+        const msg = isChecked ? `${itemName} checked off` : `${itemName} unchecked`;
         setRecentActivity(msg);
         if (activityTimer.current) clearTimeout(activityTimer.current);
         activityTimer.current = setTimeout(() => setRecentActivity(null), 3000);
@@ -265,6 +286,22 @@ export default function ShoppingListClient() {
   }, [activeId]);
 
   useEffect(() => { fetchLists(); }, []);
+
+  // Build a title → original-source-URL map so shopping-list recipe pills can
+  // link straight to the real recipe (not our parsed copy).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/recipes');
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const map: Record<string, string> = {};
+          for (const r of data) if (r?.title && r?.source_url) map[r.title] = r.source_url;
+          setRecipeSources(map);
+        }
+      } catch { /* links just won't render; pills still show */ }
+    })();
+  }, []);
 
   // ── Fetch active list items ───────────────────────────────────────────────
 
@@ -497,6 +534,7 @@ export default function ShoppingListClient() {
           </div>
           {activeId && <button className="btn btn-secondary btn-sm no-print" onClick={handleCopy}>Copy</button>}
           {activeId && <button className="btn btn-secondary btn-sm no-print" onClick={() => window.print()}>Print</button>}
+          {checkedCount > 0 && <button className={`btn btn-ghost btn-sm no-print ${hideChecked ? 'toggle-on' : ''}`} onClick={() => setHideChecked(v => !v)}>{hideChecked ? 'Show checked' : 'Hide checked'}</button>}
           {checkedCount > 0 && <button className="btn btn-ghost btn-sm no-print" onClick={clearAll}>Uncheck all</button>}
           <button className="btn btn-primary btn-sm no-print" onClick={() => setShowGenerate(true)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -579,13 +617,15 @@ export default function ShoppingListClient() {
             <div className="progress-bar-track"><div className="progress-bar-fill" style={{ width: `${progress}%` }} /></div>
           </div>
           {recentActivity && <div className="activity-toast no-print">{recentActivity}</div>}
-          <div className="shopper-label no-print">Shopping as <strong>{shopperName}</strong></div>
           <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder</p>
 
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
             if (!catItems.length && insertingIn?.cat !== cat) return null;
             const checkedCat = catItems.filter(i => checked[i.key]?.checked);
+            const visibleItems = hideChecked ? catItems.filter(i => !checked[i.key]?.checked) : catItems;
+            // When hiding checked items, drop categories that have nothing left to show.
+            if (hideChecked && !visibleItems.length && insertingIn?.cat !== cat) return null;
             const isCatDragging = dragCat === cat;
             const isDropTarget = dropCat?.key === cat;
 
@@ -614,7 +654,7 @@ export default function ShoppingListClient() {
                   </button>
                 </div>
                 <div className="shop-items">
-                  {catItems.map(item => (
+                  {visibleItems.map(item => (
                     <div key={item.key}>
                       <ItemRow
                         item={item} isChecked={!!checked[item.key]?.checked} checkedBy={checked[item.key]?.checkedBy}
@@ -628,6 +668,7 @@ export default function ShoppingListClient() {
                         onDropOnItem={e => { if (dragItem) handleItemDropOnItem(e, item.key, cat); }}
                         onEnterAtEnd={() => setInsertingIn({ cat, afterKey: item.key })}
                         recipes={item.recipes}
+                        recipeLinks={recipeSources}
                       />
                       {insertingIn?.cat === cat && insertingIn.afterKey === item.key && (
                         <NewItemRow autoFocus onCommit={(n, a) => { addItem(cat, n, a, item.key); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
@@ -641,6 +682,16 @@ export default function ShoppingListClient() {
               </div>
             );
           })}
+
+          {hideChecked && totalCount > 0 && checkedCount === totalCount && (
+            <div className="all-done no-print">
+              <span className="all-done-emoji">🎉</span>
+              <div>
+                <strong>All checked off!</strong>
+                <button className="sl-inline-link" onClick={() => setHideChecked(false)}>Show checked items</button>
+              </div>
+            </div>
+          )}
 
           <div className="bottom-controls no-print">
             {showAddCategory ? (
@@ -754,6 +805,14 @@ export default function ShoppingListClient() {
         .shop-item-name-wrap { flex: 1; min-width: 0; }
         .recipe-source-bar { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 2px; }
         .recipe-source-pip { font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; line-height: 1.4; font-style: italic; }
+        a.recipe-source-link { display: inline-flex; align-items: center; gap: 3px; text-decoration: none; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+        a.recipe-source-link:hover { color: var(--rust); border-color: var(--rust); background: rgba(181,69,27,0.06); }
+        .recipe-source-ext { flex-shrink: 0; opacity: 0.6; }
+        a.recipe-source-link:hover .recipe-source-ext { opacity: 1; }
+        .btn.toggle-on { background: var(--sage-light); border-color: var(--sage); color: var(--sage); }
+        .all-done { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; background: var(--sage-light); border: 1px solid #cdd6c3; border-radius: 10px; margin: 1rem 0; }
+        .all-done-emoji { font-size: 1.5rem; }
+        .all-done strong { display: block; color: var(--sage); font-size: 0.95rem; margin-bottom: 2px; }
         .shop-item-name { font-size: clamp(16px, 0.9rem, 18px); color: var(--ink); display: block; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; outline: none; transition: background 0.12s, box-shadow 0.12s; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .shop-item-name.checked-text { text-decoration: line-through; }
         .shop-item-name[contenteditable="true"]:hover { background: rgba(181,69,27,0.06); }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scrapeRecipe } from '@/lib/scraper';
+import { autoTag } from '@/lib/autotag';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +18,8 @@ export async function POST(req: NextRequest) {
     }
 
     const recipe = await scrapeRecipe(url);
-    return NextResponse.json({ ...recipe, source_url: url });
+    const { primary_protein, tags } = autoTag(recipe.title, recipe.ingredients);
+    return NextResponse.json({ ...recipe, source_url: url, primary_protein: primary_protein ?? '', tags });
   } catch (error) {
     console.error('Scrape error:', error);
     return NextResponse.json(

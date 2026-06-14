@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { autoTag } from './autotag';
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
 // We use the raw `pg` driver to avoid @vercel/postgres wrapper confusion.
@@ -125,6 +126,13 @@ export async function getRecipeById(id: string): Promise<Recipe | null> {
 export async function createRecipe(
   data: Omit<Recipe, 'id' | 'created_at' | 'updated_at'>
 ): Promise<Recipe> {
+  // Auto-tag on save: infer the primary protein when the caller didn't set one,
+  // and enrich tags. This is the universal chokepoint, so every recipe — scraped,
+  // pasted, or hand-entered — gets tagged even if the client sent nothing.
+  const auto = autoTag(data.title, data.ingredients || [], data.tags || []);
+  const primaryProtein = data.primary_protein || auto.primary_protein || null;
+  const tags = auto.tags;
+
   const result = await pool().query(
     `INSERT INTO recipes (title, description, source_url, image_url, servings, prep_time, cook_time, ingredients, steps, tags, primary_protein)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,
@@ -140,8 +148,8 @@ export async function createRecipe(
       data.cook_time || null,
       JSON.stringify(data.ingredients),
       JSON.stringify(data.steps),
-      JSON.stringify(data.tags || []),
-      data.primary_protein || null,
+      JSON.stringify(tags),
+      primaryProtein,
     ]
   );
   return normalizeRecipe(result.rows[0]);

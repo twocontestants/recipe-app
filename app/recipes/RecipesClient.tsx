@@ -266,8 +266,10 @@ export default function RecipesPage() {
         cook_time: data.cook_time,
         ingredients: data.ingredients?.length > 0 ? data.ingredients : [{ amount: '', unit: '', name: '' }],
         steps: data.steps?.length > 0 ? data.steps : [''],
+        tags: data.tags || [],
+        primary_protein: data.primary_protein || '',
       }));
-      showToast('Recipe scraped! Review and save.', 'success');
+      showToast(data.primary_protein ? `Recipe scraped! Auto-tagged as ${data.primary_protein}. Review and save.` : 'Recipe scraped! Review and save.', 'success');
     } catch (e) {
       showToast(`Scrape failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
     } finally {
