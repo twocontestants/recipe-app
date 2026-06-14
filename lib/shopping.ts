@@ -68,6 +68,20 @@ function categorizeIngredient(name: string): string {
   // bare spice words — must come after compound phrases above
   if (/\b(paprika|saffron|fenugreek|anise|mace|juniper|caraway|poppy seed|celery seed|fennel seed|mustard seed|coriander seed|cumin seed)\b/.test(lower)) return 'Spices';
 
+  // ── Pantry-priority: modifier words that override any fruit/veg match ──────
+  // Check the FORM of the ingredient, not what it came from.
+  // "apple cider vinegar" → vinegar → Pantry. "ginger paste" → paste → Pantry.
+  // This avoids enumerating every fruit/veg + modifier combination.
+  if (/\bvinegar\b/.test(lower)) return 'Pantry';
+  if (/\bjuice\b/.test(lower)) return 'Pantry';
+  if (/\bzest\b|\brind\b/.test(lower)) return 'Pantry';
+  if (/\bpaste\b/.test(lower)) return 'Pantry';
+  if (/\bpowder\b/.test(lower)) return 'Spices';
+  if (/\bextract\b/.test(lower)) return 'Pantry';
+  if (/\bpuree\b|\bpurée\b/.test(lower)) return 'Pantry';
+  if (/\bsyrup\b/.test(lower)) return 'Pantry';
+  if (/\boil\b/.test(lower)) return 'Pantry';
+
   // ── Pantry-priority tomatoes (paste/puree/canned) before fresh produce ──
   if (/\b(tomato paste|tomato puree|passata|crushed tomato|diced tomato|tinned tomato|canned tomato|sun.dried tomato|sundried tomato)\b/.test(lower)) return 'Pantry';
 
@@ -197,13 +211,24 @@ export function generateShoppingList(mealPlans: MealPlan[]): ShoppingItem[] {
 }
 
 function normalizeIngredientName(name: string): string {
+  // If the name contains a slash, normalize each part and pick the longest
+  // e.g. "cooking/kosher salt" -> "kosher salt" (not just "cooking")
+  if (name.includes('/')) {
+    const parts = name.split('/').map((p: string) => normalizeIngredientName(p.trim())).filter(Boolean);
+    return parts.sort((a: string, b: string) => b.length - a.length)[0] ?? '';
+  }
   return name
     .toLowerCase()
-    .replace(/\(.*?\)/g, '')
-    .replace(/,.*$/, '')
+    .replace(/\(.*?\)/g, '')    // remove matched parentheticals
+    .replace(/[()]/g, '')       // remove unmatched brackets
+    .replace(/,.*$/, '')        // remove anything after a comma
+    .replace(/[^a-z0-9\s]/g, '') // strip leftover punctuation
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/\b(fresh|dried|frozen|canned|chopped|diced|sliced|minced|grated|peeled|large|medium|small|whole|boneless|skinless)\b/gi, '')
+    // Strip adjectives/adverbs that don't change ingredient identity
+    .replace(/\b(finely|roughly|coarsely|thinly|thickly|lightly|freshly|well|very|extra|just)\b/gi, '')
+    .replace(/\b(fresh|dried|frozen|canned|chopped|diced|sliced|minced|grated|peeled|crushed|pressed|squeezed|zested)\b/gi, '')
+    .replace(/\b(large|medium|small|whole|boneless|skinless|lean|trimmed|rinsed|drained|packed)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }

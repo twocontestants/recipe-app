@@ -157,9 +157,25 @@ export default function ShoppingListClient() {
   const socketRef = useRef<Socket | null>(null);
   const activityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkedSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstLoad = useRef(true);
   const catInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // Stable handle on the current list id for socket callbacks (whose effect
+  // runs once with [] deps and would otherwise capture a stale activeId).
+  const activeIdRef = useRef<string | null>(activeId);
+  activeIdRef.current = activeId;
+  // The DB is the source of truth for everything. Sockets only relay live
+  // updates so other connected clients stay in sync between reads. These
+  // signatures track the last-persisted value of each slice so we skip
+  // redundant saves: the no-op resave right after a load, the ping-pong from a
+  // remote refetch, and re-persisting a delta a remote client already saved.
+  const lastStructSig = useRef<string>('');
+  const lastSubtitleSig = useRef<string>('');
+  const lastCheckedSig = useRef<string>('');
+  // Tracks whether the socket has connected before, so we can tell a genuine
+  // reconnect (which may have missed live updates) from the first connect.
+  const everConnected = useRef(false);
 
   const activeList = lists.find(l => l.id === activeId) ?? null;
 
@@ -168,11 +184,28 @@ export default function ShoppingListClient() {
   useEffect(() => {
     const socket = io({ path: '/api/socketio', transports: ['websocket', 'polling'] });
     socketRef.current = socket;
-    socket.on('connect', () => { setConnected(true); if (activeId) socket.emit('join-week', activeId); });
+    socket.on('connect', () => {
+      setConnected(true);
+      if (activeIdRef.current) {
+        socket.emit('join-list', activeIdRef.current);
+        // A reconnect may have missed live deltas while we were offline —
+        // silently re-read the full list (incl. checked) from the DB to catch up.
+        if (everConnected.current) fetchActiveList(activeIdRef.current, false, true);
+      }
+      everConnected.current = true;
+    });
     socket.on('disconnect', () => setConnected(false));
-    socket.on('full-state', (state: CheckedState) => setChecked(state));
+    // A check/uncheck from another client. Apply it locally; record the
+    // resulting signature so our own save effect treats it as already-persisted
+    // (the originating client already wrote it to the DB) and doesn't re-save.
     socket.on('item-updated', ({ itemName, checked: isChecked, checkedBy }: any) => {
-      setChecked(prev => { const next = { ...prev }; if (isChecked) next[itemName] = { checked: true, checkedBy, checkedAt: Date.now() }; else delete next[itemName]; return next; });
+      setChecked(prev => {
+        const next = { ...prev };
+        if (isChecked) next[itemName] = { checked: true, checkedBy, checkedAt: Date.now() };
+        else delete next[itemName];
+        lastCheckedSig.current = JSON.stringify(next);
+        return next;
+      });
       if (checkedBy !== shopperName) {
         const msg = isChecked ? `${checkedBy} checked ${itemName}` : `${checkedBy} unchecked ${itemName}`;
         setRecentActivity(msg);
@@ -180,13 +213,35 @@ export default function ShoppingListClient() {
         activityTimer.current = setTimeout(() => setRecentActivity(null), 3000);
       }
     });
+    // Another client cleared all checks.
+    socket.on('cleared', () => { setChecked(() => { lastCheckedSig.current = JSON.stringify({}); return {}; }); });
+    // Another client changed the list structure (add/delete/rename/reorder/
+    // subtitle) and persisted it. Re-pull the structural state from the DB.
+    socket.on('list-changed', () => { if (activeIdRef.current) fetchActiveList(activeIdRef.current, true); });
     socket.on('shopper-count', (count: number) => setActiveShoppers(count));
     return () => { socket.disconnect(); };
   }, []);
 
   useEffect(() => {
-    if (socketRef.current?.connected && activeId) socketRef.current.emit('join-week', activeId);
+    if (socketRef.current?.connected && activeId) socketRef.current.emit('join-list', activeId);
   }, [activeId]);
+
+  // Self-heal: when the tab regains focus/visibility it may have missed live
+  // updates (background tabs get throttled and sockets can drop). Silently
+  // re-read the full list from the DB — the source of truth — to resync.
+  useEffect(() => {
+    const resync = () => {
+      if (document.visibilityState === 'visible' && activeIdRef.current) {
+        fetchActiveList(activeIdRef.current, false, true);
+      }
+    };
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', resync);
+    return () => {
+      window.removeEventListener('focus', resync);
+      document.removeEventListener('visibilitychange', resync);
+    };
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -213,9 +268,12 @@ export default function ShoppingListClient() {
 
   // ── Fetch active list items ───────────────────────────────────────────────
 
-  const fetchActiveList = useCallback(async (id: string) => {
-    setLoadingItems(true);
-    isFirstLoad.current = true;
+  // refresh=true: structural-only (used for remote `list-changed`; leaves
+  //   checked state to live deltas). refresh=false: full read incl. checked.
+  // silent=true: skip the loading spinner (used for background self-heal).
+  const fetchActiveList = useCallback(async (id: string, refresh = false, silent = false) => {
+    if (!refresh && !silent) { setLoadingItems(true); }
+    if (!refresh) { isFirstLoad.current = true; }
     try {
       const res = await fetch(`/api/shopping-lists?id=${id}`);
       const data = await res.json();
@@ -229,11 +287,28 @@ export default function ShoppingListClient() {
         ? data.category_order
         : CATEGORY_ORDER.filter((c: string) => (data.items ?? []).some((i: ShoppingItem) => i.category === c));
       setCategoryOrder(order);
-      if (data.checked_state && Object.keys(data.checked_state).length > 0) setChecked(data.checked_state);
-      else setChecked({});
+      // Record what we just loaded so the auto-save effect treats it as a no-op
+      // (prevents the post-load resave and the remote-refresh ping-pong).
+      lastStructSig.current = JSON.stringify({
+        item_overrides: data.item_overrides ?? {},
+        custom_items: data.custom_items ?? [],
+        category_labels: data.category_labels ?? {},
+        category_order: order,
+        item_order: data.item_order ?? {},
+      });
+      lastSubtitleSig.current = JSON.stringify(data.subtitle ?? '');
+      // The DB is authoritative for checked state too. Seed it on the initial
+      // open and record its signature so the save effect doesn't immediately
+      // re-write it. On a remote structural refresh we leave it untouched —
+      // live check/uncheck deltas keep it current between full reads.
+      if (!refresh) {
+        const initialChecked = (data.checked_state && Object.keys(data.checked_state).length > 0) ? data.checked_state : {};
+        setChecked(initialChecked);
+        lastCheckedSig.current = JSON.stringify(initialChecked);
+      }
       isFirstLoad.current = false;
     } catch { showToast('Failed to load list', 'error'); }
-    finally { setLoadingItems(false); }
+    finally { if (!refresh && !silent) setLoadingItems(false); }
   }, []);
 
   useEffect(() => { if (activeId) fetchActiveList(activeId); }, [activeId]);
@@ -241,27 +316,58 @@ export default function ShoppingListClient() {
   // ── Auto-save edits ───────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (isFirstLoad.current || !activeId) return;
+    if (!activeId) return;
+    // checked_state is excluded here — it has its own dedicated save effect.
+    const payload = { item_overrides: itemOverrides, custom_items: customItems, category_labels: categoryLabels, category_order: categoryOrder, item_order: itemOrder };
+    const sig = JSON.stringify(payload);
+    if (sig === lastStructSig.current) return; // nothing actually changed
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
         await fetch(`/api/shopping-lists?id=${activeId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_overrides: itemOverrides, custom_items: customItems, category_labels: categoryLabels, category_order: categoryOrder, item_order: itemOrder, checked_state: checked }),
+          body: JSON.stringify(payload),
         });
+        lastStructSig.current = sig;
+        // Tell other devices to re-pull the structural state.
+        socketRef.current?.emit('list-changed', { listId: activeId });
       } catch { /* silent */ }
     }, 800);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [itemOverrides, customItems, categoryLabels, categoryOrder, itemOrder, checked, activeId]);
+  }, [itemOverrides, customItems, categoryLabels, categoryOrder, itemOrder, activeId]);
 
   // Save subtitle separately
   useEffect(() => {
-    if (isFirstLoad.current || !activeId) return;
+    if (!activeId) return;
+    const sig = JSON.stringify(subtitle);
+    if (sig === lastSubtitleSig.current) return;
     const t = setTimeout(async () => {
-      try { await fetch(`/api/shopping-lists?id=${activeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subtitle }) }); } catch { /* silent */ }
+      try {
+        await fetch(`/api/shopping-lists?id=${activeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subtitle }) });
+        lastSubtitleSig.current = sig;
+        socketRef.current?.emit('list-changed', { listId: activeId });
+      } catch { /* silent */ }
     }, 600);
     return () => clearTimeout(t);
   }, [subtitle, activeId]);
+
+  // Persist checked state to the DB (the source of truth). The live socket
+  // delta is emitted separately in the toggle/clear handlers. When a delta
+  // arrives from another client, its handler pre-sets lastCheckedSig so this
+  // effect no-ops — the originating client already saved it.
+  useEffect(() => {
+    if (!activeId) return;
+    const sig = JSON.stringify(checked);
+    if (sig === lastCheckedSig.current) return;
+    if (checkedSaveTimer.current) clearTimeout(checkedSaveTimer.current);
+    checkedSaveTimer.current = setTimeout(async () => {
+      try {
+        await fetch(`/api/shopping-lists?id=${activeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checked_state: checked }) });
+        lastCheckedSig.current = sig;
+      } catch { /* silent */ }
+    }, 500);
+    return () => { if (checkedSaveTimer.current) clearTimeout(checkedSaveTimer.current); };
+  }, [checked, activeId]);
 
   useEffect(() => {
     if (editingCat && catInputRef.current) { catInputRef.current.focus(); catInputRef.current.select(); }
@@ -306,15 +412,25 @@ export default function ShoppingListClient() {
   const toggleItem = (item: ResolvedItem) => {
     const key = item.key; const isNowChecked = !checked[key]?.checked;
     setChecked(prev => { const next = { ...prev }; if (isNowChecked) next[key] = { checked: true, checkedBy: shopperName, checkedAt: Date.now() }; else delete next[key]; return next; });
-    if (!item.isCustom && item.originalServerName) socketRef.current?.emit('check-item', { weekKey: activeId, itemName: item.originalServerName, checked: isNowChecked, checkedBy: shopperName });
+    // Persisted to the DB by the checked-save effect; emit the live delta to
+    // other clients. Key by item.key (custom items included) so it round-trips
+    // consistently with how checked state is keyed everywhere else.
+    socketRef.current?.emit('check-item', { listId: activeId, itemName: key, checked: isNowChecked, checkedBy: shopperName });
   };
-  const clearAll = () => { setChecked({}); socketRef.current?.emit('clear-all', { weekKey: activeId }); };
+  const clearAll = () => { setChecked({}); socketRef.current?.emit('clear-all', { listId: activeId }); };
 
   // ── Edits ─────────────────────────────────────────────────────────────────
 
   const updateItemName = (item: ResolvedItem, val: string) => { if (!val) return; if (item.isCustom) setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayName: val } : c)); else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayName: val } })); };
   const updateItemAmount = (item: ResolvedItem, val: string) => { if (item.isCustom) setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayAmount: val } : c)); else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayAmount: val } })); };
-  const deleteItem = (item: ResolvedItem) => { if (item.isCustom) setCustomItems(prev => prev.filter(c => c.id !== item.key)); else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } })); setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; }); };
+  const deleteItem = (item: ResolvedItem) => {
+    if (item.isCustom) setCustomItems(prev => prev.filter(c => c.id !== item.key));
+    else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } }));
+    setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; });
+    // Drop it from checked state too and broadcast the uncheck, so a deleted
+    // item doesn't linger as an orphaned checked entry on other clients.
+    if (checked[item.key]?.checked) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
+  };
 
   const addItem = (cat: string, name: string, amount: string, afterKey: string | null) => {
     const id = genId();

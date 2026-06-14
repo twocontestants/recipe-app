@@ -12,18 +12,8 @@ export async function GET(req: NextRequest) {
     if (id) {
       const list = await getShoppingListById(id);
       if (!list) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-      // Generate items from the recipe_ids across all week_starts
-      let allPlans: any[] = [];
-      for (const weekStart of list.week_starts) {
-        const plans = await getMealPlanForWeek(weekStart);
-        allPlans = allPlans.concat(plans);
-      }
-      // Filter to only included recipe_ids
-      const filtered = allPlans.filter(p => list.recipe_ids.includes(p.recipe_id));
-      const items = generateShoppingList(filtered);
-
-      return NextResponse.json({ ...list, items });
+      // Items were snapshotted at creation — serve them directly, no regeneration
+      return NextResponse.json(list);
     }
     const lists = await getAllShoppingLists();
     return NextResponse.json(lists);
@@ -32,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/shopping-lists — create new list
+// POST /api/shopping-lists — create new list, snapshot items at this moment
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -40,14 +30,26 @@ export async function POST(req: NextRequest) {
     if (!name || !recipe_ids?.length) {
       return NextResponse.json({ error: 'name and recipe_ids required' }, { status: 400 });
     }
-    const list = await createShoppingList({ name, subtitle: subtitle ?? '', week_starts: week_starts ?? [], recipe_ids });
+
+    // Generate and snapshot items now, from the current meal plans
+    let allPlans: any[] = [];
+    for (const weekStart of (week_starts ?? [])) {
+      const plans = await getMealPlanForWeek(weekStart);
+      allPlans = allPlans.concat(plans);
+    }
+    const filtered = allPlans.filter(p => recipe_ids.includes(p.recipe_id));
+    const items = generateShoppingList(filtered);
+
+    const list = await createShoppingList({
+      name, subtitle: subtitle ?? '', week_starts: week_starts ?? [], recipe_ids, items,
+    });
     return NextResponse.json(list, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
 
-// PUT /api/shopping-lists?id=X — update edits/checked/subtitle
+// PUT /api/shopping-lists?id=X — save user edits
 export async function PUT(req: NextRequest) {
   try {
     const id = new URL(req.url).searchParams.get('id');

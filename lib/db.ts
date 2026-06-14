@@ -5,7 +5,9 @@ import { Pool } from 'pg';
 let _pool: Pool | null = null;
 function pool(): Pool {
   if (!_pool) {
-    _pool = new Pool({ connectionString: 'postgresql://neondb_owner:npg_Da4LVXg8EdHB@ep-purple-glitter-a773calm.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require' });
+    const connectionString = process.env.POSTGRES_URL ||
+      'postgresql://neondb_owner:npg_Da4LVXg8EdHB@ep-purple-glitter-a773calm.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+    _pool = new Pool({ connectionString });
   }
   return _pool;
 }
@@ -77,20 +79,8 @@ export async function setupDatabase() {
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_meal_plans_week ON meal_plans(week_start)`);
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_created ON recipes(created_at DESC)`);
   await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS primary_protein TEXT`);
-  await pool().query(`
-    CREATE TABLE IF NOT EXISTS shopping_list_edits (
-      week_start DATE PRIMARY KEY,
-      item_overrides   JSONB NOT NULL DEFAULT '{}',
-      custom_items     JSONB NOT NULL DEFAULT '[]',
-      category_labels  JSONB NOT NULL DEFAULT '{}',
-      category_order   JSONB NOT NULL DEFAULT '[]',
-      item_order       JSONB NOT NULL DEFAULT '{}',
-      checked_state    JSONB NOT NULL DEFAULT '{}',
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  await pool().query(`ALTER TABLE shopping_list_edits ADD COLUMN IF NOT EXISTS checked_state JSONB NOT NULL DEFAULT '{}'`);
-  // Named shopping lists
+  // Named shopping lists. checked_state lives here too and is owned by the
+  // socket layer (server.js); structural edit columns are owned by the HTTP API.
   await pool().query(`
     CREATE TABLE IF NOT EXISTS shopping_lists (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -104,9 +94,11 @@ export async function setupDatabase() {
       category_labels  JSONB NOT NULL DEFAULT '{}',
       category_order   JSONB NOT NULL DEFAULT '[]',
       item_order       JSONB NOT NULL DEFAULT '{}',
-      checked_state    JSONB NOT NULL DEFAULT '{}'
+      checked_state    JSONB NOT NULL DEFAULT '{}',
+      items            JSONB NOT NULL DEFAULT '[]'
     )
   `);
+  await pool().query(`ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'`);
 
   await pool().query(`
     CREATE TABLE IF NOT EXISTS planner_notes (
@@ -117,60 +109,6 @@ export async function setupDatabase() {
       PRIMARY KEY (week_start, day_of_week)
     )
   `);
-}
-
-export interface ShoppingListEdits {
-  item_overrides:  Record<string, unknown>;
-  custom_items:    unknown[];
-  category_labels: Record<string, string>;
-  category_order:  string[];
-  item_order:      Record<string, string[]>;
-  checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
-}
-
-export async function getShoppingListEdits(weekStart: string): Promise<ShoppingListEdits | null> {
-  const result = await pool().query(
-    'SELECT * FROM shopping_list_edits WHERE week_start = $1',
-    [weekStart]
-  );
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0];
-  return {
-    item_overrides:  row.item_overrides  ?? {},
-    custom_items:    row.custom_items    ?? [],
-    category_labels: row.category_labels ?? {},
-    category_order:  row.category_order  ?? [],
-    item_order:      row.item_order      ?? {},
-    checked_state:   row.checked_state   ?? {},
-  };
-}
-
-export async function saveShoppingListEdits(
-  weekStart: string,
-  edits: ShoppingListEdits
-): Promise<void> {
-  await pool().query(
-    `INSERT INTO shopping_list_edits
-       (week_start, item_overrides, custom_items, category_labels, category_order, item_order, checked_state, updated_at)
-     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, NOW())
-     ON CONFLICT (week_start) DO UPDATE SET
-       item_overrides  = EXCLUDED.item_overrides,
-       custom_items    = EXCLUDED.custom_items,
-       category_labels = EXCLUDED.category_labels,
-       category_order  = EXCLUDED.category_order,
-       item_order      = EXCLUDED.item_order,
-       checked_state   = EXCLUDED.checked_state,
-       updated_at      = NOW()`,
-    [
-      weekStart,
-      JSON.stringify(edits.item_overrides),
-      JSON.stringify(edits.custom_items),
-      JSON.stringify(edits.category_labels),
-      JSON.stringify(edits.category_order),
-      JSON.stringify(edits.item_order),
-      JSON.stringify(edits.checked_state ?? {}),
-    ]
-  );
 }
 
 export async function getAllRecipes(): Promise<Recipe[]> {
@@ -358,6 +296,7 @@ export interface ShoppingList {
   week_starts: string[];
   recipe_ids: string[];
   generated_at: string;
+  items:           unknown[];
   item_overrides:  Record<string, unknown>;
   custom_items:    unknown[];
   category_labels: Record<string, string>;
@@ -366,39 +305,39 @@ export interface ShoppingList {
   checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
 }
 
-export async function getAllShoppingLists(): Promise<ShoppingList[]> {
-  const result = await pool().query(
-    'SELECT * FROM shopping_lists ORDER BY generated_at DESC'
-  );
-  return result.rows.map(r => ({
-    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
-    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
-    generated_at: r.generated_at,
-    item_overrides: r.item_overrides ?? {}, custom_items: r.custom_items ?? [],
-    category_labels: r.category_labels ?? {}, category_order: r.category_order ?? [],
-    item_order: r.item_order ?? {}, checked_state: r.checked_state ?? {},
-  }));
-}
-
-export async function createShoppingList(data: {
-  name: string; subtitle: string; week_starts: string[]; recipe_ids: string[];
-}): Promise<ShoppingList> {
-  const result = await pool().query(
-    `INSERT INTO shopping_lists (name, subtitle, week_starts, recipe_ids)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [data.name, data.subtitle, data.week_starts, data.recipe_ids]
-  );
-  const r = result.rows[0];
+function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
   return {
-    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
-    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
-    generated_at: r.generated_at,
-    item_overrides: {}, custom_items: [], category_labels: {},
-    category_order: [], item_order: {}, checked_state: {},
+    id: r.id as string, name: r.name as string, subtitle: (r.subtitle as string) ?? '',
+    week_starts: (r.week_starts as string[]) ?? [], recipe_ids: (r.recipe_ids as string[]) ?? [],
+    generated_at: r.generated_at as string,
+    items: (r.items as unknown[]) ?? [],
+    item_overrides: (r.item_overrides as Record<string, unknown>) ?? {},
+    custom_items: (r.custom_items as unknown[]) ?? [],
+    category_labels: (r.category_labels as Record<string, string>) ?? {},
+    category_order: (r.category_order as string[]) ?? [],
+    item_order: (r.item_order as Record<string, string[]>) ?? {},
+    checked_state: (r.checked_state as Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>) ?? {},
   };
 }
 
+export async function getAllShoppingLists(): Promise<ShoppingList[]> {
+  const result = await pool().query('SELECT * FROM shopping_lists ORDER BY generated_at DESC');
+  return result.rows.map(rowToShoppingList);
+}
+
+export async function createShoppingList(data: {
+  name: string; subtitle: string; week_starts: string[]; recipe_ids: string[]; items: unknown[];
+}): Promise<ShoppingList> {
+  const result = await pool().query(
+    `INSERT INTO shopping_lists (name, subtitle, week_starts, recipe_ids, items)
+     VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING *`,
+    [data.name, data.subtitle, data.week_starts, data.recipe_ids, JSON.stringify(data.items)]
+  );
+  return rowToShoppingList(result.rows[0]);
+}
+
 export async function updateShoppingListEdits(id: string, edits: {
+  items?: unknown[];
   item_overrides?: Record<string, unknown>;
   custom_items?: unknown[];
   category_labels?: Record<string, string>;
@@ -410,6 +349,7 @@ export async function updateShoppingListEdits(id: string, edits: {
   const sets: string[] = [];
   const vals: unknown[] = [id];
   let i = 2;
+  if (edits.items !== undefined) { sets.push(`items=$${i++}::jsonb`); vals.push(JSON.stringify(edits.items)); }
   if (edits.item_overrides !== undefined) { sets.push(`item_overrides=$${i++}::jsonb`); vals.push(JSON.stringify(edits.item_overrides)); }
   if (edits.custom_items !== undefined) { sets.push(`custom_items=$${i++}::jsonb`); vals.push(JSON.stringify(edits.custom_items)); }
   if (edits.category_labels !== undefined) { sets.push(`category_labels=$${i++}::jsonb`); vals.push(JSON.stringify(edits.category_labels)); }
@@ -428,13 +368,5 @@ export async function deleteShoppingList(id: string): Promise<void> {
 export async function getShoppingListById(id: string): Promise<ShoppingList | null> {
   const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1', [id]);
   if (!result.rows.length) return null;
-  const r = result.rows[0];
-  return {
-    id: r.id, name: r.name, subtitle: r.subtitle ?? '',
-    week_starts: r.week_starts ?? [], recipe_ids: r.recipe_ids ?? [],
-    generated_at: r.generated_at,
-    item_overrides: r.item_overrides ?? {}, custom_items: r.custom_items ?? [],
-    category_labels: r.category_labels ?? {}, category_order: r.category_order ?? [],
-    item_order: r.item_order ?? {}, checked_state: r.checked_state ?? {},
-  };
+  return rowToShoppingList(result.rows[0]);
 }
