@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { setupDatabase } from '@/lib/db';
 
+// Creates/migrates DB tables — must run per-request, never at build.
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     await setupDatabase();

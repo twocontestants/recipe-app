@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getAllShoppingLists, createShoppingList, updateShoppingListEdits,
-  deleteShoppingList, getShoppingListById, getMealPlanForWeek
+  deleteShoppingList, getShoppingListById, getMealPlanForWeek, applyShoppingListOps
 } from '@/lib/db';
 import { generateShoppingList } from '@/lib/shopping';
+import type { ShoppingOp } from '@/lib/shoppingOps';
 
 // GET /api/shopping-lists — list all, or ?id=X for one with items
 export async function GET(req: NextRequest) {
@@ -56,6 +57,22 @@ export async function PUT(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
     const body = await req.json();
     await updateShoppingListEdits(id, body);
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+}
+
+// PATCH /api/shopping-lists?id=X — apply a batch of targeted operations.
+// Body: { ops: ShoppingOp[] }. Each op composes with concurrent edits instead
+// of overwriting the whole list.
+export async function PATCH(req: NextRequest) {
+  try {
+    const id = new URL(req.url).searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+    const body = await req.json();
+    const ops: ShoppingOp[] = Array.isArray(body?.ops) ? body.ops : [];
+    if (ops.length) await applyShoppingListOps(id, ops);
     return NextResponse.json({ success: true });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

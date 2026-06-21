@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getAllRecipes, updateRecipe } from '@/lib/db';
 import { autoTag } from '@/lib/autotag';
 
+// Hits the DB and mutates data — must run per-request, never at build/prerender.
+export const dynamic = 'force-dynamic';
+
 /**
  * One-shot backfill: runs the auto-tagger over every existing recipe, filling in
  * a primary protein where one is missing and enriching tags. Existing proteins

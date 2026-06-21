@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+// Reads from the DB — render per request, don't prerender at build.
+export const dynamic = 'force-dynamic';
 import { getAllRecipes, createRecipe } from '@/lib/db';
 
 export async function GET() {

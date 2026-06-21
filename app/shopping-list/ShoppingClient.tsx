@@ -6,6 +6,7 @@ import { CATEGORY_ORDER, CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
+import type { ShoppingOp } from '@/lib/shoppingOps';
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
@@ -169,8 +170,6 @@ export default function ShoppingListClient() {
 
   const socketRef = useRef<Socket | null>(null);
   const activityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const checkedSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstLoad = useRef(true);
   const catInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -183,12 +182,44 @@ export default function ShoppingListClient() {
   // signatures track the last-persisted value of each slice so we skip
   // redundant saves: the no-op resave right after a load, the ping-pong from a
   // remote refetch, and re-persisting a delta a remote client already saved.
-  const lastStructSig = useRef<string>('');
+  // Subtitle is still debounced (it's typed), so it keeps a small signature.
   const lastSubtitleSig = useRef<string>('');
-  const lastCheckedSig = useRef<string>('');
+  const subtitleRef = useRef(subtitle); subtitleRef.current = subtitle;
+  // Op-based sync: structural + checked edits are sent as targeted operations.
+  // `pendingOps` counts queued/in-flight op requests; while > 0 a resync must
+  // not overwrite local state (it has unconfirmed edits). `opQueue` chains
+  // requests so ops apply in the order they were made.
+  const pendingOps = useRef(0);
+  const opQueue = useRef<Promise<void>>(Promise.resolve());
   // Tracks whether the socket has connected before, so we can tell a genuine
   // reconnect (which may have missed live updates) from the first connect.
   const everConnected = useRef(false);
+
+  // Send a batch of operations to the server. Optimistic local state is applied
+  // by the caller first; this persists the change as targeted ops (which compose
+  // with concurrent edits instead of overwriting) and notifies other devices.
+  // Requests are chained so ops land in order; keepalive lets an in-flight op
+  // finish even if the tab is closed right after. While ops are pending, a
+  // resync won't clobber local state.
+  const sendOps = useCallback((ops: ShoppingOp[]) => {
+    const id = activeIdRef.current;
+    if (!id || ops.length === 0) return;
+    pendingOps.current += 1;
+    opQueue.current = opQueue.current.then(async () => {
+      try {
+        const res = await fetch(`/api/shopping-lists?id=${id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ops }), keepalive: true,
+        });
+        if (!res.ok) throw new Error('save failed');
+        socketRef.current?.emit('list-changed', { listId: id });
+      } catch {
+        showToast('Couldn\u2019t save a change \u2014 it\u2019ll reconcile on refresh', 'error');
+      } finally {
+        pendingOps.current -= 1;
+      }
+    });
+  }, []);
 
   const activeList = lists.find(l => l.id === activeId) ?? null;
 
@@ -216,15 +247,13 @@ export default function ShoppingListClient() {
       everConnected.current = true;
     });
     socket.on('disconnect', () => setConnected(false));
-    // A check/uncheck from another client. Apply it locally; record the
-    // resulting signature so our own save effect treats it as already-persisted
-    // (the originating client already wrote it to the DB) and doesn't re-save.
+    // A check/uncheck from another client — apply it locally. The originating
+    // client already persisted it via a check op, so we don't re-save.
     socket.on('item-updated', ({ itemName, checked: isChecked, checkedBy }: any) => {
       setChecked(prev => {
         const next = { ...prev };
         if (isChecked) next[itemName] = { checked: true, checkedBy, checkedAt: Date.now() };
         else delete next[itemName];
-        lastCheckedSig.current = JSON.stringify(next);
         return next;
       });
       if (checkedBy !== shopperName) {
@@ -235,7 +264,7 @@ export default function ShoppingListClient() {
       }
     });
     // Another client cleared all checks.
-    socket.on('cleared', () => { setChecked(() => { lastCheckedSig.current = JSON.stringify({}); return {}; }); });
+    socket.on('cleared', () => { setChecked({}); });
     // Another client changed the list structure (add/delete/rename/reorder/
     // subtitle) and persisted it. Re-pull the structural state from the DB.
     socket.on('list-changed', () => { if (activeIdRef.current) fetchActiveList(activeIdRef.current, true); });
@@ -250,6 +279,7 @@ export default function ShoppingListClient() {
   // Self-heal: when the tab regains focus/visibility it may have missed live
   // updates (background tabs get throttled and sockets can drop). Silently
   // re-read the full list from the DB — the source of truth — to resync.
+  // (fetchActiveList preserves any unsaved local edits, so this can't revert.)
   useEffect(() => {
     const resync = () => {
       if (document.visibilityState === 'visible' && activeIdRef.current) {
@@ -261,6 +291,28 @@ export default function ShoppingListClient() {
     return () => {
       window.removeEventListener('focus', resync);
       document.removeEventListener('visibilitychange', resync);
+    };
+  }, []);
+
+  // Structural and checked edits are sent immediately as keepalive ops, so they
+  // survive a close on their own. Subtitle is debounced (it's typed), so flush
+  // its pending value when leaving the tab.
+  useEffect(() => {
+    const flush = () => {
+      if (!activeIdRef.current) return;
+      if (JSON.stringify(subtitleRef.current) !== lastSubtitleSig.current) {
+        sendOps([{ t: 'setSubtitle', subtitle: subtitleRef.current }]);
+        lastSubtitleSig.current = JSON.stringify(subtitleRef.current);
+      }
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('blur', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('blur', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -305,46 +357,50 @@ export default function ShoppingListClient() {
 
   // ── Fetch active list items ───────────────────────────────────────────────
 
-  // refresh=true: structural-only (used for remote `list-changed`; leaves
-  //   checked state to live deltas). refresh=false: full read incl. checked.
-  // silent=true: skip the loading spinner (used for background self-heal).
+  // refresh=true: structural-only (remote `list-changed`; leaves checked to
+  //   live deltas). refresh=false: full read incl. checked. silent=true: no
+  //   spinner (background self-heal).
+  // CRITICAL: after the first load, never overwrite a slice that has unsaved
+  // local edits (its live signature differs from the last-saved signature).
+  // Otherwise a focus/visibility resync would revert edits that hadn't finished
+  // their debounced save yet.
   const fetchActiveList = useCallback(async (id: string, refresh = false, silent = false) => {
     if (!refresh && !silent) { setLoadingItems(true); }
     if (!refresh) { isFirstLoad.current = true; }
     try {
       const res = await fetch(`/api/shopping-lists?id=${id}`);
       const data = await res.json();
-      setServerItems(data.items ?? []);
-      setItemOverrides(data.item_overrides ?? {});
-      setCustomItems(data.custom_items ?? []);
-      setCategoryLabels(data.category_labels ?? {});
-      setItemOrder(data.item_order ?? {});
-      setSubtitle(data.subtitle ?? '');
+      setServerItems(data.items ?? []); // snapshot — constant for the list's life
+
+      // Don't clobber local state while we have unconfirmed ops in flight — the
+      // DB may not reflect them yet. Once the queue drains, a later resync (or
+      // the list-changed that our ops trigger) adopts the merged truth.
+      const busy = pendingOps.current > 0;
+
       const order = data.category_order?.length > 0
         ? data.category_order
         : CATEGORY_ORDER.filter((c: string) => (data.items ?? []).some((i: ShoppingItem) => i.category === c));
-      setCategoryOrder(order);
-      // Record what we just loaded so the auto-save effect treats it as a no-op
-      // (prevents the post-load resave and the remote-refresh ping-pong).
-      lastStructSig.current = JSON.stringify({
-        item_overrides: data.item_overrides ?? {},
-        custom_items: data.custom_items ?? [],
-        category_labels: data.category_labels ?? {},
-        category_order: order,
-        item_order: data.item_order ?? {},
-      });
-      lastSubtitleSig.current = JSON.stringify(data.subtitle ?? '');
-      // The DB is authoritative for checked state too. Seed it on the initial
-      // open and record its signature so the save effect doesn't immediately
-      // re-write it. On a remote structural refresh we leave it untouched —
-      // live check/uncheck deltas keep it current between full reads.
-      if (!refresh) {
-        const initialChecked = (data.checked_state && Object.keys(data.checked_state).length > 0) ? data.checked_state : {};
-        setChecked(initialChecked);
-        lastCheckedSig.current = JSON.stringify(initialChecked);
+      if (!busy) {
+        setItemOverrides(data.item_overrides ?? {});
+        setCustomItems((data.custom_items ?? []) as CustomItem[]);
+        setCategoryLabels(data.category_labels ?? {});
+        setItemOrder(data.item_order ?? {});
+        setCategoryOrder(order);
       }
+
+      // subtitle is debounced, so guard it with its own signature
+      const dbSub = data.subtitle ?? '';
+      const subUnsaved = JSON.stringify(subtitleRef.current) !== lastSubtitleSig.current;
+      if (!subUnsaved) { setSubtitle(dbSub); lastSubtitleSig.current = JSON.stringify(dbSub); }
+
+      // checked: skip on remote refresh (live deltas own it); otherwise adopt
+      // unless we have ops in flight
+      if (!refresh && !busy) {
+        setChecked((data.checked_state && Object.keys(data.checked_state).length > 0) ? data.checked_state : {});
+      }
+
       isFirstLoad.current = false;
-    } catch { showToast('Failed to load list', 'error'); }
+    } catch { if (!silent) showToast('Failed to load list', 'error'); }
     finally { if (!refresh && !silent) setLoadingItems(false); }
   }, []);
 
@@ -352,59 +408,19 @@ export default function ShoppingListClient() {
 
   // ── Auto-save edits ───────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!activeId) return;
-    // checked_state is excluded here — it has its own dedicated save effect.
-    const payload = { item_overrides: itemOverrides, custom_items: customItems, category_labels: categoryLabels, category_order: categoryOrder, item_order: itemOrder };
-    const sig = JSON.stringify(payload);
-    if (sig === lastStructSig.current) return; // nothing actually changed
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        await fetch(`/api/shopping-lists?id=${activeId}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        lastStructSig.current = sig;
-        // Tell other devices to re-pull the structural state.
-        socketRef.current?.emit('list-changed', { listId: activeId });
-      } catch { /* silent */ }
-    }, 800);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [itemOverrides, customItems, categoryLabels, categoryOrder, itemOrder, activeId]);
-
-  // Save subtitle separately
+  // Subtitle is the only debounced edit left (it's typed char-by-char). Send it
+  // as a setSubtitle op once typing settles. Structural and checked edits are
+  // sent immediately as ops by their handlers.
   useEffect(() => {
     if (!activeId) return;
     const sig = JSON.stringify(subtitle);
     if (sig === lastSubtitleSig.current) return;
-    const t = setTimeout(async () => {
-      try {
-        await fetch(`/api/shopping-lists?id=${activeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subtitle }) });
-        lastSubtitleSig.current = sig;
-        socketRef.current?.emit('list-changed', { listId: activeId });
-      } catch { /* silent */ }
+    const t = setTimeout(() => {
+      sendOps([{ t: 'setSubtitle', subtitle }]);
+      lastSubtitleSig.current = sig;
     }, 600);
     return () => clearTimeout(t);
-  }, [subtitle, activeId]);
-
-  // Persist checked state to the DB (the source of truth). The live socket
-  // delta is emitted separately in the toggle/clear handlers. When a delta
-  // arrives from another client, its handler pre-sets lastCheckedSig so this
-  // effect no-ops — the originating client already saved it.
-  useEffect(() => {
-    if (!activeId) return;
-    const sig = JSON.stringify(checked);
-    if (sig === lastCheckedSig.current) return;
-    if (checkedSaveTimer.current) clearTimeout(checkedSaveTimer.current);
-    checkedSaveTimer.current = setTimeout(async () => {
-      try {
-        await fetch(`/api/shopping-lists?id=${activeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checked_state: checked }) });
-        lastCheckedSig.current = sig;
-      } catch { /* silent */ }
-    }, 500);
-    return () => { if (checkedSaveTimer.current) clearTimeout(checkedSaveTimer.current); };
-  }, [checked, activeId]);
+  }, [subtitle, activeId, sendOps]);
 
   useEffect(() => {
     if (editingCat && catInputRef.current) { catInputRef.current.focus(); catInputRef.current.select(); }
@@ -448,47 +464,90 @@ export default function ShoppingListClient() {
 
   const toggleItem = (item: ResolvedItem) => {
     const key = item.key; const isNowChecked = !checked[key]?.checked;
-    setChecked(prev => { const next = { ...prev }; if (isNowChecked) next[key] = { checked: true, checkedBy: shopperName, checkedAt: Date.now() }; else delete next[key]; return next; });
-    // Persisted to the DB by the checked-save effect; emit the live delta to
-    // other clients. Key by item.key (custom items included) so it round-trips
-    // consistently with how checked state is keyed everywhere else.
+    const value = isNowChecked ? { checked: true, checkedBy: shopperName, checkedAt: Date.now() } : null;
+    setChecked(prev => { const next = { ...prev }; if (value) next[key] = value; else delete next[key]; return next; });
+    // Live delta to other clients for instant feedback…
     socketRef.current?.emit('check-item', { listId: activeId, itemName: key, checked: isNowChecked, checkedBy: shopperName });
+    // …and a check op for durable, composable persistence.
+    sendOps([{ t: 'check', key, value }]);
   };
-  const clearAll = () => { setChecked({}); socketRef.current?.emit('clear-all', { listId: activeId }); };
+  const clearAll = () => { setChecked({}); socketRef.current?.emit('clear-all', { listId: activeId }); sendOps([{ t: 'clearChecked' }]); };
 
   // ── Edits ─────────────────────────────────────────────────────────────────
 
-  const updateItemName = (item: ResolvedItem, val: string) => { if (!val) return; if (item.isCustom) setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayName: val } : c)); else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayName: val } })); };
-  const updateItemAmount = (item: ResolvedItem, val: string) => { if (item.isCustom) setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayAmount: val } : c)); else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayAmount: val } })); };
+  const updateItemName = (item: ResolvedItem, val: string) => {
+    if (!val) return;
+    if (item.isCustom) { setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayName: val } : c)); sendOps([{ t: 'updateCustom', id: item.key, patch: { displayName: val } }]); }
+    else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayName: val } })); sendOps([{ t: 'override', key: item.key, patch: { displayName: val } }]); }
+  };
+  const updateItemAmount = (item: ResolvedItem, val: string) => {
+    if (item.isCustom) { setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayAmount: val } : c)); sendOps([{ t: 'updateCustom', id: item.key, patch: { displayAmount: val } }]); }
+    else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayAmount: val } })); sendOps([{ t: 'override', key: item.key, patch: { displayAmount: val } }]); }
+  };
   const deleteItem = (item: ResolvedItem) => {
-    if (item.isCustom) setCustomItems(prev => prev.filter(c => c.id !== item.key));
-    else setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } }));
-    setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; });
-    // Drop it from checked state too and broadcast the uncheck, so a deleted
-    // item doesn't linger as an orphaned checked entry on other clients.
+    const ops: ShoppingOp[] = [];
+    if (item.isCustom) { setCustomItems(prev => prev.filter(c => c.id !== item.key)); ops.push({ t: 'removeCustom', id: item.key }); }
+    else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } })); ops.push({ t: 'override', key: item.key, patch: { hidden: true } }); }
+    // Drop it from checked state too (and broadcast) so it doesn't linger.
     if (checked[item.key]?.checked) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
+    setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; });
+    ops.push({ t: 'check', key: item.key, value: null });
+    sendOps(ops);
   };
 
   const addItem = (cat: string, name: string, amount: string, afterKey: string | null) => {
     const id = genId();
-    setCustomItems(prev => [...prev, { id, displayName: name, category: cat, displayAmount: amount }]);
-    setCategoryOrder(prev => prev.includes(cat) ? prev : [...prev, cat]);
-    setItemOrder(prev => { const current = (prev[cat] ?? getItemsForCat(cat).map(i => i.key)); if (afterKey === null) return { ...prev, [cat]: [...current, id] }; const idx = current.indexOf(afterKey); const next = [...current]; next.splice(idx < 0 ? current.length : idx + 1, 0, id); return { ...prev, [cat]: next }; });
+    const item: CustomItem = { id, displayName: name, category: cat, displayAmount: amount };
+    setCustomItems(prev => [...prev, item]);
+
+    const ops: ShoppingOp[] = [{ t: 'addCustom', item: item as unknown as Record<string, unknown> }];
+
+    const catExists = categoryOrder.includes(cat);
+    if (!catExists) { setCategoryOrder(prev => prev.includes(cat) ? prev : [...prev, cat]); ops.push({ t: 'setCategoryOrder', order: [...categoryOrder, cat] }); }
+
+    const current = (itemOrder[cat] ?? getItemsForCat(cat).map(i => i.key));
+    let nextOrder: string[];
+    if (afterKey === null) nextOrder = [...current, id];
+    else { const idx = current.indexOf(afterKey); nextOrder = [...current]; nextOrder.splice(idx < 0 ? current.length : idx + 1, 0, id); }
+    setItemOrder(prev => ({ ...prev, [cat]: nextOrder }));
+    ops.push({ t: 'setItemOrder', cat, order: nextOrder });
+
+    sendOps(ops);
   };
 
-  const commitEditCat = () => { if (!editingCat) return; const trimmed = editingCatValue.trim(); if (trimmed) setCategoryLabels(prev => ({ ...prev, [editingCat]: trimmed })); else setCategoryLabels(prev => { const n = { ...prev }; delete n[editingCat!]; return n; }); setEditingCat(null); };
-  const commitAddCategory = () => { const trimmed = newCategoryName.trim(); if (!trimmed) { setShowAddCategory(false); return; } setCategoryLabels(prev => ({ ...prev, [trimmed]: trimmed })); setCategoryOrder(prev => [...prev, trimmed]); setShowAddCategory(false); setNewCategoryName(''); setInsertingIn({ cat: trimmed, afterKey: null }); };
+  const commitEditCat = () => {
+    if (!editingCat) return;
+    const trimmed = editingCatValue.trim();
+    if (trimmed) { setCategoryLabels(prev => ({ ...prev, [editingCat]: trimmed })); sendOps([{ t: 'setLabel', cat: editingCat, label: trimmed }]); }
+    else { setCategoryLabels(prev => { const n = { ...prev }; delete n[editingCat!]; return n; }); sendOps([{ t: 'setLabel', cat: editingCat, label: null }]); }
+    setEditingCat(null);
+  };
+  const commitAddCategory = () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) { setShowAddCategory(false); return; }
+    setCategoryLabels(prev => ({ ...prev, [trimmed]: trimmed }));
+    setCategoryOrder(prev => [...prev, trimmed]);
+    sendOps([{ t: 'setLabel', cat: trimmed, label: trimmed }, { t: 'setCategoryOrder', order: [...categoryOrder, trimmed] }]);
+    setShowAddCategory(false); setNewCategoryName(''); setInsertingIn({ cat: trimmed, afterKey: null });
+  };
 
   // ── Drag ──────────────────────────────────────────────────────────────────
 
   const handleCatDragStart = (e: React.DragEvent, cat: string) => { e.stopPropagation(); setDragCat(cat); setDragItem(null); e.dataTransfer.effectAllowed = 'move'; };
   const handleCatDragOver = (e: React.DragEvent, cat: string) => { if (!dragCat || dragCat === cat) return; e.preventDefault(); e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setDropCat({ key: cat, position: e.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); };
-  const handleCatDrop = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragCat || dragCat === cat) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; setCategoryOrder(prev => { const order = prev.length > 0 ? [...prev] : [...orderedCats]; const fromIdx = order.indexOf(dragCat); if (fromIdx === -1) return order; const next = [...order]; next.splice(fromIdx, 1); const insertAt = next.indexOf(cat) + (pos === 'after' ? 1 : 0); next.splice(insertAt, 0, dragCat); return next; }); resetDrag(); };
+  const handleCatDrop = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragCat || dragCat === cat) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; const order = categoryOrder.length > 0 ? [...categoryOrder] : [...orderedCats]; const fromIdx = order.indexOf(dragCat); if (fromIdx === -1) { resetDrag(); return; } const next = [...order]; next.splice(fromIdx, 1); const insertAt = next.indexOf(cat) + (pos === 'after' ? 1 : 0); next.splice(insertAt, 0, dragCat); setCategoryOrder(next); sendOps([{ t: 'setCategoryOrder', order: next }]); resetDrag(); };
   const handleItemDragStart = (e: React.DragEvent, itemKey: string) => { e.stopPropagation(); setDragItem(itemKey); setDragCat(null); e.dataTransfer.effectAllowed = 'move'; };
   const handleItemDragOverItem = (e: React.DragEvent, itemKey: string) => { if (!dragItem || dragItem === itemKey) return; e.preventDefault(); e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setDropItemTarget({ key: itemKey, position: e.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); setDropItemCat(null); };
-  const handleItemDropOnItem = (e: React.DragEvent, targetKey: string, targetCat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem || dragItem === targetKey) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; moveItemToCategory(dragItem, targetCat); setItemOrder(prev => { const catItems = getItemsForCat(targetCat).map(i => i.key).filter(k => k !== dragItem); const insertAt = catItems.indexOf(targetKey) + (pos === 'after' ? 1 : 0); catItems.splice(insertAt, 0, dragItem); return { ...prev, [targetCat]: catItems }; }); resetDrag(); };
+  const handleItemDropOnItem = (e: React.DragEvent, targetKey: string, targetCat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem || dragItem === targetKey) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; const moved = dragItem; moveItemToCategory(moved, targetCat); const catItems = getItemsForCat(targetCat).map(i => i.key).filter(k => k !== moved); const insertAt = catItems.indexOf(targetKey) + (pos === 'after' ? 1 : 0); catItems.splice(insertAt, 0, moved); setItemOrder(prev => ({ ...prev, [targetCat]: catItems })); sendOps([{ t: 'setItemOrder', cat: targetCat, order: catItems }]); resetDrag(); };
   const handleItemDropOnCat = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem) { resetDrag(); return; } moveItemToCategory(dragItem, cat); resetDrag(); };
-  const moveItemToCategory = (itemKey: string, newCat: string) => { const ci = customItems.find(c => c.id === itemKey); if (ci) setCustomItems(prev => prev.map(c => c.id === itemKey ? { ...c, category: newCat } : c)); else setItemOverrides(prev => ({ ...prev, [itemKey]: { ...prev[itemKey], category: newCat } })); setCategoryOrder(prev => prev.includes(newCat) ? prev : [...prev, newCat]); };
+  const moveItemToCategory = (itemKey: string, newCat: string) => {
+    const ci = customItems.find(c => c.id === itemKey);
+    const ops: ShoppingOp[] = [];
+    if (ci) { setCustomItems(prev => prev.map(c => c.id === itemKey ? { ...c, category: newCat } : c)); ops.push({ t: 'updateCustom', id: itemKey, patch: { category: newCat } }); }
+    else { setItemOverrides(prev => ({ ...prev, [itemKey]: { ...prev[itemKey], category: newCat } })); ops.push({ t: 'override', key: itemKey, patch: { category: newCat } }); }
+    if (!categoryOrder.includes(newCat)) { setCategoryOrder(prev => prev.includes(newCat) ? prev : [...prev, newCat]); ops.push({ t: 'setCategoryOrder', order: [...categoryOrder, newCat] }); }
+    sendOps(ops);
+  };
   const resetDrag = () => { setDragCat(null); setDragItem(null); setDropCat(null); setDropItemTarget(null); setDropItemCat(null); };
 
   // ── Delete list ───────────────────────────────────────────────────────────
@@ -702,7 +761,7 @@ export default function ShoppingListClient() {
               </div>
             ) : (
               <div className="bottom-actions">
-                <button className="bottom-btn" onClick={() => { const cat = orderedCats[orderedCats.length - 1] || 'Other'; setCategoryOrder(prev => prev.includes(cat) ? prev : [...prev, cat]); setInsertingIn({ cat, afterKey: null }); }}>
+                <button className="bottom-btn" onClick={() => { const cat = orderedCats[orderedCats.length - 1] || 'Other'; if (!categoryOrder.includes(cat)) { const next = [...categoryOrder, cat]; setCategoryOrder(next); sendOps([{ t: 'setCategoryOrder', order: next }]); } setInsertingIn({ cat, afterKey: null }); }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>Add item
                 </button>
                 <button className="bottom-btn" onClick={() => setShowAddCategory(true)}>

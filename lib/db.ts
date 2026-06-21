@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { autoTag } from './autotag';
+import type { ShoppingOp } from './shoppingOps';
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
 // We use the raw `pg` driver to avoid @vercel/postgres wrapper confusion.
@@ -367,6 +368,117 @@ export async function updateShoppingListEdits(id: string, edits: {
   if (edits.subtitle !== undefined) { sets.push(`subtitle=$${i++}`); vals.push(edits.subtitle); }
   if (!sets.length) return;
   await pool().query(`UPDATE shopping_lists SET ${sets.join(',')} WHERE id=$1`, vals);
+}
+
+// Apply a sequence of targeted operations to a shopping list. Each op is a
+// single atomic JSONB UPDATE, so concurrent edits to different keys/items
+// compose instead of clobbering each other (the whole point of op-based sync).
+export async function applyShoppingListOps(id: string, ops: ShoppingOp[]): Promise<void> {
+  for (const op of ops) {
+    switch (op.t) {
+      case 'override':
+        // merge patch into item_overrides[key]
+        await pool().query(
+          `UPDATE shopping_lists
+             SET item_overrides = jsonb_set(
+               COALESCE(item_overrides, '{}'::jsonb), ARRAY[$2],
+               COALESCE(item_overrides->$2, '{}'::jsonb) || $3::jsonb, true)
+           WHERE id = $1`,
+          [id, op.key, JSON.stringify(op.patch)]
+        );
+        break;
+      case 'addCustom': {
+        // upsert by id: drop any existing element with this id, then append
+        const itemId = String((op.item as { id?: unknown }).id ?? '');
+        await pool().query(
+          `UPDATE shopping_lists
+             SET custom_items = (
+               SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
+               WHERE e->>'id' <> $2
+             ) || jsonb_build_array($3::jsonb)
+           WHERE id = $1`,
+          [id, itemId, JSON.stringify(op.item)]
+        );
+        break;
+      }
+      case 'updateCustom':
+        // merge patch into the element whose id matches, in place
+        await pool().query(
+          `UPDATE shopping_lists
+             SET custom_items = (
+               SELECT COALESCE(jsonb_agg(
+                 CASE WHEN e->>'id' = $2 THEN e || $3::jsonb ELSE e END), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
+             )
+           WHERE id = $1`,
+          [id, op.id, JSON.stringify(op.patch)]
+        );
+        break;
+      case 'removeCustom':
+        await pool().query(
+          `UPDATE shopping_lists
+             SET custom_items = (
+               SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
+               WHERE e->>'id' <> $2
+             )
+           WHERE id = $1`,
+          [id, op.id]
+        );
+        break;
+      case 'setLabel':
+        if (op.label === null) {
+          await pool().query(
+            `UPDATE shopping_lists SET category_labels = COALESCE(category_labels, '{}'::jsonb) - $2 WHERE id = $1`,
+            [id, op.cat]
+          );
+        } else {
+          await pool().query(
+            `UPDATE shopping_lists
+               SET category_labels = jsonb_set(COALESCE(category_labels, '{}'::jsonb), ARRAY[$2], to_jsonb($3::text), true)
+             WHERE id = $1`,
+            [id, op.cat, op.label]
+          );
+        }
+        break;
+      case 'setCategoryOrder':
+        await pool().query(
+          `UPDATE shopping_lists SET category_order = $2::jsonb WHERE id = $1`,
+          [id, JSON.stringify(op.order)]
+        );
+        break;
+      case 'setItemOrder':
+        await pool().query(
+          `UPDATE shopping_lists
+             SET item_order = jsonb_set(COALESCE(item_order, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
+           WHERE id = $1`,
+          [id, op.cat, JSON.stringify(op.order)]
+        );
+        break;
+      case 'check':
+        if (op.value === null) {
+          await pool().query(
+            `UPDATE shopping_lists SET checked_state = COALESCE(checked_state, '{}'::jsonb) - $2 WHERE id = $1`,
+            [id, op.key]
+          );
+        } else {
+          await pool().query(
+            `UPDATE shopping_lists
+               SET checked_state = jsonb_set(COALESCE(checked_state, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
+             WHERE id = $1`,
+            [id, op.key, JSON.stringify(op.value)]
+          );
+        }
+        break;
+      case 'clearChecked':
+        await pool().query(`UPDATE shopping_lists SET checked_state = '{}'::jsonb WHERE id = $1`, [id]);
+        break;
+      case 'setSubtitle':
+        await pool().query(`UPDATE shopping_lists SET subtitle = $2 WHERE id = $1`, [id, op.subtitle]);
+        break;
+    }
+  }
 }
 
 export async function deleteShoppingList(id: string): Promise<void> {
