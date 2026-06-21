@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getAllShoppingLists, createShoppingList, updateShoppingListEdits,
-  deleteShoppingList, getShoppingListById, getMealPlanForWeek, applyShoppingListOps
+  deleteShoppingList, getShoppingListById, getMealPlanForWeek, applyShoppingListOps,
+  getCategoryDictionary
 } from '@/lib/db';
 import { generateShoppingList } from '@/lib/shopping';
 import type { ShoppingOp } from '@/lib/shoppingOps';
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest) {
       allPlans = allPlans.concat(plans);
     }
     const filtered = allPlans.filter(p => recipe_ids.includes(p.recipe_id));
-    const items = generateShoppingList(filtered);
+    const categoryDict = await getCategoryDictionary();
+    const items = generateShoppingList(filtered, categoryDict);
 
     const list = await createShoppingList({
       name, subtitle: subtitle ?? '', week_starts: week_starts ?? [], recipe_ids, items,

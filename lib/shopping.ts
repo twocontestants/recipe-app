@@ -1,11 +1,38 @@
 import type { MealPlan } from './db';
 
+// A single recipe's original contribution to a merged shopping item. `name` is
+// exactly what that recipe wrote ("Large onion, diced"); the merged item keeps
+// one of these per contributing line so the UI can show the real wording.
+export interface ShoppingContribution {
+  name: string;     // raw recipe wording, e.g. "Large onion, diced"
+  amount: string;   // formatted amount for this one line, e.g. "1"
+  unit: string;
+  recipe: string;   // recipe title this line came from
+}
+
 export interface ShoppingItem {
+  // Stable unique id assigned at generation time. This — not the name — is the
+  // identity used for checking, reordering, overrides and category moves, so
+  // recipe-derived and custom items share one identity model.
+  id: string;
+  // Standardised name: drives the merge key and the category. e.g. "onion".
   name: string;
+  // Headline text shown in the UI. For a single-source item this is the recipe's
+  // own wording ("Large onion, diced"); for a multi-source merge it's the
+  // standardised name ("Onion") and the wordings live in `contributions`.
+  displayName: string;
   totalAmount: string;
   unit: string;
   recipes: string[];
+  // One entry per contributing recipe line, in original wording. Length 1 for a
+  // single-source item; length > 1 when several recipes merged into this item.
+  contributions: ShoppingContribution[];
   category: string;
+}
+
+// Short random id for shopping items (recipe-derived and custom alike).
+function genItemId(): string {
+  return Math.random().toString(36).slice(2, 10);
 }
 
 export interface ShoppingCategory {
@@ -153,9 +180,12 @@ type GroupedItem = {
   totalCount?: number;
   unit: string;
   recipes: string[];
+  contributions: ShoppingContribution[];
 };
 
-export function generateShoppingList(mealPlans: MealPlan[]): ShoppingItem[] {
+export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: Record<string, string>): ShoppingItem[] {
+  // Keyed by the STANDARDISED name (what categorisation + merging run on). The
+  // raw recipe wording is preserved per-contribution, not in the key.
   const grouped = new Map<string, GroupedItem>();
 
   for (const plan of mealPlans) {
@@ -165,7 +195,8 @@ export function generateShoppingList(mealPlans: MealPlan[]): ShoppingItem[] {
 
     for (const ingredient of plan.recipe.ingredients) {
       const key = normalizeIngredientName(ingredient.name);
-      const existing = grouped.get(key) || { unit: ingredient.unit, recipes: [] };
+      if (!key) continue;
+      const existing = grouped.get(key) || { unit: ingredient.unit, recipes: [], contributions: [] };
 
       if (!existing.recipes.includes(recipeName)) existing.recipes.push(recipeName);
 
@@ -185,23 +216,46 @@ export function generateShoppingList(mealPlans: MealPlan[]): ShoppingItem[] {
         existing.totalCount = (existing.totalCount || 0) + amount;
         existing.unit = unit || existing.unit;
       }
+
+      // Record this line's original wording + its own (scaled) amount so the UI
+      // can show exactly what the recipe said.
+      existing.contributions.push({
+        name: cleanDisplayName(ingredient.name),
+        amount: formatDecimal(amount),
+        unit,
+        recipe: recipeName,
+      });
+
       grouped.set(key, existing);
     }
   }
 
   const result: ShoppingItem[] = [];
   grouped.forEach((data, name) => {
-    const displayName = capitalize(name);
+    // Headline: one distinct wording → show it; several → show the standardised
+    // name and let the row expand to the individual wordings.
+    const distinctWordings = [...new Set(data.contributions.map(c => c.name).filter(Boolean))];
+    const displayName = distinctWordings.length === 1 ? distinctWordings[0] : capitalize(name);
+
+    const base = {
+      id: genItemId(),
+      name,                       // standardised
+      displayName,
+      recipes: data.recipes,
+      contributions: data.contributions,
+      category: resolveCategory(name, categoryOverrides),
+    };
+
     if (data.totalG !== undefined) {
-      result.push({ name: displayName, totalAmount: formatWeight(data.totalG), unit: data.totalG >= 1000 ? 'kg' : 'g', recipes: data.recipes, category: categorizeIngredient(name) });
+      result.push({ ...base, totalAmount: formatWeight(data.totalG), unit: data.totalG >= 1000 ? 'kg' : 'g' });
     } else if (data.totalMl !== undefined) {
-      result.push({ name: displayName, totalAmount: formatVolume(data.totalMl), unit: data.totalMl >= 1000 ? 'L' : 'ml', recipes: data.recipes, category: categorizeIngredient(name) });
+      result.push({ ...base, totalAmount: formatVolume(data.totalMl), unit: data.totalMl >= 1000 ? 'L' : 'ml' });
     } else {
-      result.push({ name: displayName, totalAmount: data.totalCount ? formatDecimal(data.totalCount) : '', unit: data.unit || '', recipes: data.recipes, category: categorizeIngredient(name) });
+      result.push({ ...base, totalAmount: data.totalCount ? formatDecimal(data.totalCount) : '', unit: data.unit || '' });
     }
   });
 
-  // Sort by category order, then alphabetically within category
+  // Sort by category order, then alphabetically by standardised name
   return result.sort((a, b) => {
     const ai = CATEGORY_ORDER.indexOf(a.category);
     const bi = CATEGORY_ORDER.indexOf(b.category);
@@ -210,14 +264,56 @@ export function generateShoppingList(mealPlans: MealPlan[]): ShoppingItem[] {
   });
 }
 
-function normalizeIngredientName(name: string): string {
+// Tidy a raw recipe ingredient string for display without standardising it:
+// collapse whitespace, drop wrapping punctuation, and capitalise the first
+// letter. Keeps size words and prep notes ("Large onion, diced") intact.
+function cleanDisplayName(raw: string): string {
+  const cleaned = (raw || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;.\-]+|[\s,;.\-]+$/g, '')
+    .trim();
+  return cleaned ? capitalize(cleaned) : cleaned;
+}
+
+// Words that, as a leading qualifier, usually don't change what you'd buy, so
+// they're dropped for merging ("brown onion" → "onion"). Deliberately
+// conservative: "white"/"green" are excluded because they flip meaning for some
+// items (white pepper = spice, green onion = distinct), and anything in
+// VARIETY_PROTECTED keeps its qualifier.
+const VARIETY_WORDS = ['brown', 'red', 'yellow', 'purple', 'golden', 'spanish'];
+const VARIETY_PROTECTED = new Set([
+  'spring onion', 'green onion', 'sweet potato', 'cherry tomato', 'grape tomato',
+  'white pepper', 'red pepper flakes', 'red pepper flake',
+]);
+// -s endings that are not plurals; never singularise these.
+const SINGULAR_IGNORE = new Set(['asparagus', 'hummus', 'couscous', 'molasses', 'watercress', 'swiss', 'bass']);
+
+function singulariseWord(w: string): string {
+  if (SINGULAR_IGNORE.has(w)) return w;
+  if (/[^aeiou]ies$/.test(w)) return w.replace(/ies$/, 'y');             // berries → berry
+  if (/oes$/.test(w)) return w.replace(/oes$/, 'o');                     // tomatoes → tomato
+  if (/(ches|shes|sses|xes|zes)$/.test(w)) return w.replace(/es$/, '');  // dishes → dish
+  if (/(us|ss|is)$/.test(w)) return w;                                   // hummus, glass, basis
+  if (/s$/.test(w) && w.length > 3) return w.replace(/s$/, '');          // onions → onion
+  return w;
+}
+
+function stripVariety(name: string): string {
+  const words = name.split(' ').filter(Boolean);
+  if (words.length >= 2 && VARIETY_WORDS.includes(words[0]) && !VARIETY_PROTECTED.has(name)) {
+    return words.slice(1).join(' ');
+  }
+  return name;
+}
+
+export function normalizeIngredientName(name: string): string {
   // If the name contains a slash, normalize each part and pick the longest
   // e.g. "cooking/kosher salt" -> "kosher salt" (not just "cooking")
   if (name.includes('/')) {
     const parts = name.split('/').map((p: string) => normalizeIngredientName(p.trim())).filter(Boolean);
     return parts.sort((a: string, b: string) => b.length - a.length)[0] ?? '';
   }
-  return name
+  let out = name
     .toLowerCase()
     .replace(/\(.*?\)/g, '')    // remove matched parentheticals
     .replace(/[()]/g, '')       // remove unmatched brackets
@@ -225,12 +321,25 @@ function normalizeIngredientName(name: string): string {
     .replace(/[^a-z0-9\s]/g, '') // strip leftover punctuation
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/^\d+(?:\.\d+)?\s+/, '') // drop a leading quantity that leaked into the name ("2 onions")
     // Strip adjectives/adverbs that don't change ingredient identity
     .replace(/\b(finely|roughly|coarsely|thinly|thickly|lightly|freshly|well|very|extra|just)\b/gi, '')
     .replace(/\b(fresh|dried|frozen|canned|chopped|diced|sliced|minced|grated|peeled|crushed|pressed|squeezed|zested)\b/gi, '')
     .replace(/\b(large|medium|small|whole|boneless|skinless|lean|trimmed|rinsed|drained|packed)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+  // Singularise each word so plurals merge ("onions" → "onion").
+  out = out.split(' ').map(singulariseWord).join(' ').replace(/\s+/g, ' ').trim();
+  // Drop a leading colour/variety word unless the compound is meaningfully distinct.
+  out = stripVariety(out).trim();
+  return out;
+}
+
+// Effective category for a normalised name: a user dictionary override wins,
+// otherwise fall back to the built-in rule-based categorisation.
+export function resolveCategory(normalisedName: string, overrides?: Record<string, string>): string {
+  if (overrides && overrides[normalisedName]) return overrides[normalisedName];
+  return categorizeIngredient(normalisedName);
 }
 
 function parseAmount(amount: string): number {

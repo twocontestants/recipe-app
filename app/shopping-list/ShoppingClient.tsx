@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ShoppingItem } from '@/lib/shopping';
+import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
 import { CATEGORY_ORDER, CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
@@ -21,6 +21,7 @@ interface ResolvedItem {
   key: string; displayName: string; displayAmount: string;
   resolvedCategory: string; isCustom: boolean;
   originalServerName?: string; recipes?: string[];
+  contributions?: ShoppingContribution[];
 }
 interface ShoppingListMeta {
   id: string; name: string; subtitle: string;
@@ -73,13 +74,21 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
     }
   };
 
+  // A merged item (the same standardised ingredient drawn from several recipes)
+  // shows the standardised name on the main row and each recipe's own wording
+  // as a sub-line beneath it. A single-source item just shows its one wording.
+  const contributions = item.contributions ?? [];
+  const isGrouped = contributions.length > 1;
+  const fmtContribAmount = (c: ShoppingContribution) =>
+    `${c.amount}${c.unit ? ' ' + c.unit : ''}`.trim();
+
   return (
     <div className={`shop-item-wrap ${isDragging ? 'item-dragging' : ''} ${isDropBefore ? 'drop-before-item' : ''} ${isDropAfter ? 'drop-after-item' : ''}`} onDragOver={onDragOverItem} onDrop={onDropOnItem}>
       <div className={`shop-item ${isChecked ? 'is-checked' : ''}`}>
         <div className="item-drag-handle no-print" draggable onDragStart={onDragStart} onDragEnd={onDragEnd}><DragHandle size={11} /></div>
         <div className="shop-checkbox" onClick={onToggle}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
         <div className="shop-item-name-wrap">
-          {recipes && recipes.length > 0 && (
+          {!isGrouped && recipes && recipes.length > 0 && (
             <div className="recipe-source-bar" title={recipes.join(', ')}>
               {recipes.map((r, i) => {
                 const url = recipeLinks?.[r];
@@ -102,6 +111,27 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
         </div>
         <button className="item-delete-btn no-print" onClick={onDelete}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
+      {isGrouped && (
+        <div className={`shop-subitems ${isChecked ? 'is-checked' : ''}`}>
+          {contributions.map((c, i) => {
+            const url = c.recipe ? recipeLinks?.[c.recipe] : undefined;
+            return (
+              <div className="shop-subitem" key={i}>
+                <span className="shop-subitem-name">{c.name}</span>
+                {fmtContribAmount(c) && <span className="shop-subitem-amount">{fmtContribAmount(c)}</span>}
+                {c.recipe && (url ? (
+                  <a className="shop-subitem-recipe recipe-source-link" href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={`Open original recipe: ${c.recipe}`}>
+                    {c.recipe}
+                    <svg className="recipe-source-ext" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  </a>
+                ) : (
+                  <span className="shop-subitem-recipe">{c.recipe}</span>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -194,6 +224,10 @@ export default function ShoppingListClient() {
   // Tracks whether the socket has connected before, so we can tell a genuine
   // reconnect (which may have missed live updates) from the first connect.
   const everConnected = useRef(false);
+  // key (item id) → current display name, kept fresh each render so socket
+  // callbacks (set up once) can show a readable name in the activity toast
+  // instead of the raw id.
+  const keyToNameRef = useRef<Record<string, string>>({});
 
   // Send a batch of operations to the server. Optimistic local state is applied
   // by the caller first; this persists the change as targeted ops (which compose
@@ -257,7 +291,8 @@ export default function ShoppingListClient() {
         return next;
       });
       if (checkedBy !== shopperName) {
-        const msg = isChecked ? `${itemName} checked off` : `${itemName} unchecked`;
+        const label = keyToNameRef.current[itemName] ?? itemName;
+        const msg = isChecked ? `${label} checked off` : `${label} unchecked`;
         setRecentActivity(msg);
         if (activityTimer.current) clearTimeout(activityTimer.current);
         activityTimer.current = setTimeout(() => setRecentActivity(null), 3000);
@@ -431,10 +466,22 @@ export default function ShoppingListClient() {
   const getResolvedItems = (): ResolvedItem[] => {
     const results: ResolvedItem[] = [];
     for (const si of serverItems) {
-      const ov = itemOverrides[si.name] || {};
+      // Identity is the item's id now (not its name), so recipe and custom items
+      // share one keying scheme for checks, ordering, overrides and moves.
+      const key = si.id ?? si.name;
+      const ov = itemOverrides[key] || {};
       if (ov.hidden) continue;
       const rawAmount = si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : '';
-      results.push({ key: si.name, displayName: ov.displayName ?? si.name, displayAmount: ov.displayAmount ?? rawAmount, resolvedCategory: ov.category ?? si.category, isCustom: false, originalServerName: si.name, recipes: si.recipes });
+      results.push({
+        key,
+        displayName: ov.displayName ?? si.displayName ?? si.name,
+        displayAmount: ov.displayAmount ?? rawAmount,
+        resolvedCategory: ov.category ?? si.category,
+        isCustom: false,
+        originalServerName: si.name,
+        recipes: si.recipes,
+        contributions: si.contributions,
+      });
     }
     for (const ci of customItems) {
       results.push({ key: ci.id, displayName: ci.displayName, displayAmount: ci.displayAmount, resolvedCategory: ci.category, isCustom: true });
@@ -443,6 +490,7 @@ export default function ShoppingListClient() {
   };
 
   const resolvedItems = getResolvedItems();
+  keyToNameRef.current = Object.fromEntries(resolvedItems.map(i => [i.key, i.displayName]));
   const allActiveCats = [...new Set(resolvedItems.map(i => i.resolvedCategory))];
   const orderedCats = [...categoryOrder.filter(c => allActiveCats.includes(c)), ...allActiveCats.filter(c => !categoryOrder.includes(c))];
 
@@ -868,6 +916,17 @@ export default function ShoppingListClient() {
         a.recipe-source-link:hover { color: var(--rust); border-color: var(--rust); background: rgba(181,69,27,0.06); }
         .recipe-source-ext { flex-shrink: 0; opacity: 0.6; }
         a.recipe-source-link:hover .recipe-source-ext { opacity: 1; }
+
+        /* Merged-item sub-lines: each contributing recipe's original wording,
+           indented to line up under the item name. Kept deliberately quiet. */
+        .shop-subitems { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px + 0.5rem); }
+        .shop-subitems.is-checked { opacity: 0.42; }
+        .shop-subitem { display: flex; align-items: baseline; gap: 0.5rem; padding: 1px 0; line-height: 1.45; }
+        .shop-subitem::before { content: '–'; color: var(--border); flex-shrink: 0; }
+        .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; }
+        .shop-subitem-amount { font-family: var(--font-display); font-size: 0.8rem; color: var(--rust); white-space: nowrap; flex-shrink: 0; opacity: 0.85; }
+        .shop-subitem-recipe { font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font-style: italic; flex-shrink: 0; }
+        a.shop-subitem-recipe { text-decoration: none; }
         .btn.toggle-on { background: var(--sage-light); border-color: var(--sage); color: var(--sage); }
         .all-done { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; background: var(--sage-light); border: 1px solid #cdd6c3; border-radius: 10px; margin: 1rem 0; }
         .all-done-emoji { font-size: 1.5rem; }

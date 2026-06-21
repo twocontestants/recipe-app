@@ -111,6 +111,48 @@ export async function setupDatabase() {
       PRIMARY KEY (week_start, day_of_week)
     )
   `);
+
+  // User-editable dictionary mapping a normalised ingredient name to a category.
+  // An entry here overrides the built-in rule-based categorisation at list
+  // generation time. Keyed by the normalised name (the same value used as the
+  // merge key), so one row covers every surface form that normalises to it.
+  await ensureIngredientCategoriesTable();
+}
+
+let _ingredientCategoriesReady = false;
+async function ensureIngredientCategoriesTable(): Promise<void> {
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS ingredient_categories (
+      name       TEXT PRIMARY KEY,
+      category   TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  _ingredientCategoriesReady = true;
+}
+
+// Returns the dictionary as a plain { normalisedName: category } map.
+export async function getCategoryDictionary(): Promise<Record<string, string>> {
+  if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
+  const result = await pool().query('SELECT name, category FROM ingredient_categories');
+  const map: Record<string, string> = {};
+  for (const row of result.rows) map[row.name] = row.category;
+  return map;
+}
+
+export async function setCategoryDictionaryEntry(name: string, category: string): Promise<void> {
+  if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
+  await pool().query(
+    `INSERT INTO ingredient_categories (name, category)
+     VALUES ($1, $2)
+     ON CONFLICT (name) DO UPDATE SET category = $2, updated_at = NOW()`,
+    [name, category]
+  );
+}
+
+export async function deleteCategoryDictionaryEntry(name: string): Promise<void> {
+  if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
+  await pool().query('DELETE FROM ingredient_categories WHERE name = $1', [name]);
 }
 
 export async function getAllRecipes(): Promise<Recipe[]> {
@@ -488,5 +530,72 @@ export async function deleteShoppingList(id: string): Promise<void> {
 export async function getShoppingListById(id: string): Promise<ShoppingList | null> {
   const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1', [id]);
   if (!result.rows.length) return null;
-  return rowToShoppingList(result.rows[0]);
+  const list = rowToShoppingList(result.rows[0]);
+  const { list: migrated, changed } = migrateListShape(list);
+  // Lists created before items had ids are upgraded in place on first read, so
+  // every later edit keys off the new id rather than the name.
+  if (changed) {
+    try {
+      await updateShoppingListEdits(id, {
+        items: migrated.items,
+        item_overrides: migrated.item_overrides,
+        checked_state: migrated.checked_state,
+        item_order: migrated.item_order,
+      });
+    } catch { /* best-effort: still serve the migrated shape even if write-back fails */ }
+  }
+  return migrated;
+}
+
+function migrateListId(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+// Upgrade a pre-id shopping list: give each snapshot item a stable id and carry
+// the old name-keyed overrides / checked state / ordering across to those ids.
+// Returns the list unchanged (changed=false) when items already have ids.
+function migrateListShape(list: ShoppingList): { list: ShoppingList; changed: boolean } {
+  const items = (list.items as Array<Record<string, unknown>>) ?? [];
+  const needsIds = items.some(it => it && typeof it === 'object' && !it.id);
+  if (!needsIds) return { list, changed: false };
+
+  const nameToId = new Map<string, string>();
+  const migratedItems = items.map(it => {
+    const obj = (it && typeof it === 'object') ? it : {};
+    const name = (obj.name as string) ?? '';
+    const id = migrateListId();
+    if (name) nameToId.set(name, id);
+    const displayName = (obj.displayName as string) ?? name;
+    const recipes = Array.isArray(obj.recipes) ? (obj.recipes as string[]) : [];
+    const contributions = Array.isArray(obj.contributions) && obj.contributions.length
+      ? obj.contributions
+      : (name ? [{ name: displayName, amount: (obj.totalAmount as string) ?? '', unit: (obj.unit as string) ?? '', recipe: recipes[0] ?? '' }] : []);
+    return {
+      id, name, displayName,
+      totalAmount: (obj.totalAmount as string) ?? '',
+      unit: (obj.unit as string) ?? '',
+      recipes, contributions,
+      category: (obj.category as string) ?? 'Pantry',
+    };
+  });
+
+  // Recipe-item keys were names; remap them. Custom-item ids and anything we
+  // don't recognise pass through untouched.
+  const remap = (k: string) => nameToId.get(k) ?? k;
+
+  const item_overrides: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(list.item_overrides ?? {})) item_overrides[remap(k)] = v;
+
+  const checked_state: ShoppingList['checked_state'] = {};
+  for (const [k, v] of Object.entries(list.checked_state ?? {})) checked_state[remap(k)] = v;
+
+  const item_order: Record<string, string[]> = {};
+  for (const [cat, keys] of Object.entries(list.item_order ?? {})) {
+    item_order[cat] = (keys as string[]).map(remap);
+  }
+
+  return {
+    list: { ...list, items: migratedItems, item_overrides, checked_state, item_order },
+    changed: true,
+  };
 }
