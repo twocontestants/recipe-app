@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.7.1';
 
 const navItems = [
   {

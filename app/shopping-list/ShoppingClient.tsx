@@ -54,9 +54,10 @@ interface ItemRowProps {
   onDragOverItem: (e: React.DragEvent) => void; onDropOnItem: (e: React.DragEvent) => void;
   onEnterAtEnd: () => void; recipes?: string[]; recipeLinks?: Record<string, string>;
   onSubDragStart?: (e: React.DragEvent, contribId: string) => void; onSubDragEnd?: () => void;
+  onMoveClick?: (e: React.MouseEvent) => void; onSubMoveClick?: (e: React.MouseEvent, contribId: string) => void;
 }
 
-function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd }: ItemRowProps) {
+function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd, onMoveClick, onSubMoveClick }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
 
@@ -115,6 +116,11 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
         <div className="shop-item-amount-wrap">
           <span ref={amountRef} className="shop-item-amount" contentEditable={!isChecked} suppressContentEditableWarning data-placeholder="qty" onBlur={e => onAmountChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleAmountKeyDown} spellCheck={false} />
         </div>
+        {onMoveClick && !isChecked && (
+          <button className="item-move-btn no-print" onClick={onMoveClick} title="Move to another aisle">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/><line x1="3" y1="12" x2="15" y2="12"/></svg>
+          </button>
+        )}
         <button className="item-delete-btn no-print" onClick={onDelete}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
       {isGrouped && (
@@ -129,7 +135,8 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
                   draggable={canDrag}
                   onDragStart={e => canDrag && onSubDragStart!(e, c.id)}
                   onDragEnd={() => onSubDragEnd?.()}
-                  title="Drag to move this one out into another aisle"
+                  onClick={e => canDrag && onSubMoveClick?.(e, c.id)}
+                  title="Click to move into another aisle, or drag it out"
                 ><DragHandle size={9} /></div>
                 <span className="shop-subitem-name">{c.name}</span>
                 {fmtContribAmount(c) && <span className="shop-subitem-amount">{fmtContribAmount(c)}</span>}
@@ -506,7 +513,7 @@ export default function ShoppingListClient() {
       // Give each contribution a stable id (deterministic from the parent id +
       // index, so it survives reloads without storing extra data).
       const contribs: ResolvedContribution[] = (si.contributions ?? []).map((c, i) => ({ ...c, id: `${parentKey}#${i}` }));
-      const remaining = contribs.filter(c => !itemOverrides[c.id]?.detached);
+      const remaining = contribs.filter(c => !itemOverrides[c.id]?.detached && !itemOverrides[c.id]?.hidden);
       const detachedHere = contribs.filter(c => itemOverrides[c.id]?.detached);
 
       // The group itself (unless every contribution has been detached away).
@@ -515,8 +522,8 @@ export default function ShoppingListClient() {
         // Headline name/amount reflect only the contributions still in the group.
         const distinct = [...new Set(remaining.map(c => c.name).filter(Boolean))];
         const fallbackName = distinct.length === 1 ? distinct[0] : (si.displayName ?? si.name);
-        const rawAmount = detachedHere.length > 0
-          ? amountString(aggregateContributions(remaining))   // recompute since the set shrank
+        const rawAmount = remaining.length !== contribs.length
+          ? amountString(aggregateContributions(remaining))   // recompute since the set shrank (detach or delete)
           : (si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : '');
         results.push({
           key: parentKey,
@@ -660,9 +667,9 @@ export default function ShoppingListClient() {
   const handleItemDropOnItem = (e: React.DragEvent, targetKey: string, targetCat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem || dragItem === targetKey) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; const moved = dragItem; moveItemToCategory(moved, targetCat); const catItems = getItemsForCat(targetCat).map(i => i.key).filter(k => k !== moved); const insertAt = catItems.indexOf(targetKey) + (pos === 'after' ? 1 : 0); catItems.splice(insertAt, 0, moved); setItemOrder(prev => ({ ...prev, [targetCat]: catItems })); sendOps([{ t: 'setItemOrder', cat: targetCat, order: catItems }]); resetDrag(); };
   const handleItemDropOnCat = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem) { resetDrag(); return; } moveItemToCategory(dragItem, cat); resetDrag(); };
 
-  const moveItemToCategory = (itemKey: string, newCat: string) => {
+  const moveItemToCategory = (itemKey: string, newCat: string, forceDetach = false) => {
     const ops: ShoppingOp[] = [];
-    const detaching = pendingDetachRef.current === itemKey && !itemOverrides[itemKey]?.detached;
+    const detaching = (forceDetach || pendingDetachRef.current === itemKey) && !itemOverrides[itemKey]?.detached;
 
     // Work out the standardised name + previous category for the save-preference
     // prompt, before any state changes.
@@ -705,6 +712,41 @@ export default function ShoppingListClient() {
     }
   };
   const resetDrag = () => { setDragCat(null); setDragItem(null); setDropCat(null); setDropItemTarget(null); setDropItemCat(null); pendingDetachRef.current = null; };
+
+  // ── Click-to-move menu (alternative to dragging across a long page) ──────────
+  const [moveMenu, setMoveMenu] = useState<{ key: string; isSubLine: boolean; currentCat: string; x: number; y: number; up: boolean } | null>(null);
+  const openMoveMenu = (e: React.MouseEvent, key: string, isSubLine: boolean, currentCat: string) => {
+    e.preventDefault(); e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    // Flip the menu above the button when it's in the lower part of the viewport.
+    const up = rect.bottom > window.innerHeight * 0.6;
+    setMoveMenu({ key, isSubLine, currentCat, x: rect.left, y: up ? rect.top : rect.bottom, up });
+  };
+  const doMove = (cat: string) => {
+    if (!moveMenu) return;
+    const { key, isSubLine, currentCat } = moveMenu;
+    setMoveMenu(null);
+    if (cat === currentCat && !isSubLine) return; // no-op
+    moveItemToCategory(key, cat, isSubLine);
+  };
+  // Delete from the menu. For a sub-line that's still in a group we synthesise a
+  // minimal item; deleteItem then hides it (the group recomputes without it).
+  const doDelete = () => {
+    if (!moveMenu) return;
+    const { key } = moveMenu;
+    setMoveMenu(null);
+    const item = resolvedRef.current.find(i => i.key === key) ?? ({ key, isCustom: false } as ResolvedItem);
+    deleteItem(item);
+  };
+  useEffect(() => {
+    if (!moveMenu) return;
+    const close = () => setMoveMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoveMenu(null); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('keydown', onKey); };
+  }, [moveMenu]);
 
   // ── Save-category preference ────────────────────────────────────────────────
   const persistCategoryPref = async (name: string, category: string) => {
@@ -852,7 +894,7 @@ export default function ShoppingListClient() {
             <div className="progress-bar-track"><div className="progress-bar-fill" style={{ width: `${progress}%` }} /></div>
           </div>
           {recentActivity && <div className="activity-toast no-print">{recentActivity}</div>}
-          <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder · Drag a sub-line out to split it off</p>
+          <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder · Use the <kbd>›</kbd> button (or drag) to move an item to another aisle</p>
 
           {pendingPref && (
             <div className="cat-pref-prompt no-print" role="dialog" aria-live="polite">
@@ -922,6 +964,8 @@ export default function ShoppingListClient() {
                         recipeLinks={recipeSources}
                         onSubDragStart={handleSubDragStart}
                         onSubDragEnd={resetDrag}
+                        onMoveClick={e => openMoveMenu(e, item.key, false, cat)}
+                        onSubMoveClick={(e, cid) => openMoveMenu(e, cid, true, cat)}
                       />
                       {insertingIn?.cat === cat && insertingIn.afterKey === item.key && (
                         <NewItemRow autoFocus onCommit={(n, a) => { addItem(cat, n, a, item.key); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
@@ -976,6 +1020,34 @@ export default function ShoppingListClient() {
             setActiveId(id);
           }}
         />
+      )}
+
+      {moveMenu && (
+        <>
+          <div className="move-menu-backdrop no-print" onClick={() => setMoveMenu(null)} />
+          <div
+            className={`move-menu no-print ${moveMenu.up ? 'is-up' : ''}`}
+            style={{ left: Math.min(moveMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 196), top: moveMenu.y }}
+            role="menu"
+          >
+            <div className="move-menu-title">{moveMenu.isSubLine ? 'Split out into…' : 'Move to…'}</div>
+            {[...new Set([...orderedCats, ...CATEGORY_ORDER])].map(cat => {
+              const isCurrent = cat === moveMenu.currentCat && !moveMenu.isSubLine;
+              return (
+                <button key={cat} className={`move-menu-item ${isCurrent ? 'is-current' : ''}`} onClick={() => doMove(cat)} role="menuitem">
+                  <span className="move-menu-emoji">{CATEGORY_EMOJI[cat] || '🛒'}</span>
+                  <span className="move-menu-label">{categoryLabels[cat] || cat}</span>
+                  {isCurrent && <span className="move-menu-check">✓</span>}
+                </button>
+              );
+            })}
+            <div className="move-menu-sep" />
+            <button className="move-menu-item move-menu-delete" onClick={doDelete} role="menuitem">
+              <span className="move-menu-emoji"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"/></svg></span>
+              <span className="move-menu-label">{moveMenu.isSubLine ? 'Delete this entry' : 'Delete item'}</span>
+            </button>
+          </div>
+        </>
       )}
 
       <style>{`
@@ -1103,6 +1175,35 @@ export default function ShoppingListClient() {
         .item-delete-btn { background: none; border: none; color: var(--border); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0; }
         .shop-item:hover .item-delete-btn { opacity: 1; }
         .item-delete-btn:hover { color: var(--rust); background: rgba(181,69,27,0.08); }
+
+        /* Move-to-aisle: kept visible (incl. on mobile) since it replaces a long drag. */
+        .item-move-btn { background: none; border: none; color: var(--ink-muted); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0.5; }
+        .shop-item:hover .item-move-btn { opacity: 0.8; }
+        .item-move-btn:hover { color: var(--rust); background: rgba(181,69,27,0.08); opacity: 1; }
+
+        .move-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
+        .move-menu { position: fixed; z-index: 61; min-width: 178px; max-width: 78vw; max-height: 56vh; overflow-y: auto; background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(60,42,30,0.18); padding: 4px; animation: moveMenuIn 0.12s ease-out; }
+        .move-menu.is-up { transform: translateY(-100%); }
+        @keyframes moveMenuIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; } }
+        .move-menu.is-up { animation: none; }
+        .move-menu-title { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); padding: 5px 8px 6px; }
+        .move-menu-item { display: flex; align-items: center; gap: 0.55rem; width: 100%; padding: 0.5rem 0.6rem; background: none; border: none; border-radius: 6px; font-family: var(--font-body); font-size: 0.85rem; color: var(--ink); cursor: pointer; text-align: left; transition: background 0.1s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+        .move-menu-item:hover { background: var(--parchment); }
+        .move-menu-item:active { background: var(--border); }
+        .move-menu-item.is-current { color: var(--ink-muted); cursor: default; }
+        .move-menu-emoji { font-size: 0.95rem; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 18px; }
+        .move-menu-label { flex: 1; text-transform: capitalize; min-width: 0; }
+        .move-menu-check { color: var(--sage); font-weight: 700; flex-shrink: 0; }
+        .move-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+        .move-menu-delete { color: var(--rust); }
+        .move-menu-delete:hover { background: rgba(181,69,27,0.08); }
+        .item-move-btn, .item-delete-btn { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+        @media (max-width: 600px) {
+          .move-menu { min-width: 200px; max-width: 86vw; }
+          .move-menu-item { padding: 0.7rem 0.7rem; font-size: 0.92rem; }
+          .item-move-btn { opacity: 0.7; padding: 5px; }
+        }
 
         .new-item-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.35rem; border-radius: 0 0 5px 5px; background: rgba(181,69,27,0.025); border: 1px dashed var(--border); border-top: none; animation: fadeInRow 0.12s ease; }
         @keyframes fadeInRow { from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none} }
