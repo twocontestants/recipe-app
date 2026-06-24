@@ -42,11 +42,11 @@ const UNITS = [
   'teaspoons?',   'tsps?',  'tsp',
   'fluid ounces?', 'fl\\.?\\s*oz',
   'millilitres?', 'milliliters?', 'mls?',
-  'litres?', 'liters?',
+  'litres?', 'liters?', 'l',
   'cups?',
   // Weight
   'kilograms?', 'kgs?',
-  'grams?',
+  'grams?', 'g',
   'pounds?', 'lbs?',
   'ounces?', 'ozs?', 'oz',
   // Count / descriptor units
@@ -381,6 +381,14 @@ const AMT_ONLY_RE = new RegExp(
 // Size words that must not end up in the unit field
 const SIZE_WORDS = new Set(['large', 'medium', 'small', 'extra-large', 'extra large', 'jumbo', 'mini', 'tiny']);
 
+// Remove parentheticals, including nested ones like "((a, b))", by repeatedly
+// clearing the innermost pair until none remain.
+function stripParentheticals(s: string): string {
+  let prev: string;
+  do { prev = s; s = s.replace(/\([^()]*\)/g, ' '); } while (s !== prev);
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 export function parseIngredientLine(raw: string): Ingredient[] {
   // Clean the line
   let line = raw
@@ -400,6 +408,25 @@ export function parseIngredientLine(raw: string): Ingredient[] {
 
   // Some sites use "OR" to separate alternatives — take the first
   line = line.split(/\s+or\s+/i)[0];
+
+  // "<amount> <unit> each A, B, C" is shorthand for several ingredients sharing
+  // one amount (e.g. "1 tsp each cumin, coriander, paprika"). Split it into one
+  // ingredient per item. Parentheticals are removed first so a comma inside a
+  // note ("((any, but I like smoked paprika))") doesn't get read as a separator.
+  const deParen = stripParentheticals(raw);
+  const eachMatch = deParen.match(/^(.*?)\beach\b\s+(.+)$/i);
+  if (eachMatch) {
+    const lead = eachMatch[1].trim();                       // e.g. "1 tsp"
+    const items = eachMatch[2]
+      .split(/\s*[,;]\s*|\s+and\s+|\s*&\s*/i)
+      .map(s => s.replace(/^of\s+/i, '').trim())
+      .filter(Boolean);
+    if (items.length >= 2) {
+      return items.flatMap(it => parseIngredientLine(lead ? `${lead} ${it}` : it));
+    }
+  }
+  // Strip a stray leading "each" left on a single item ("each cumin" → "cumin").
+  line = line.replace(/^each\s+/i, '');
 
   // Attempt full match: amount + unit + name
   const full = line.match(ING_RE);

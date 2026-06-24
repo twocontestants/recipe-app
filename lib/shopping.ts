@@ -175,13 +175,43 @@ const UNIT_CONVERSIONS: Record<string, { base: string; factor: number }> = {
 };
 
 type GroupedItem = {
-  totalMl?: number;
-  totalG?: number;
-  totalCount?: number;
-  unit: string;
   recipes: string[];
   contributions: ShoppingContribution[];
 };
+
+// Sum a set of contributions (each with its own amount + unit) into a single
+// displayed total, converting volume/weight units to a common base. This is the
+// single source of truth for an item's headline amount, so a group that loses a
+// detached sub-line — or a detached sub-line shown on its own — both recompute
+// consistently from whatever contributions remain.
+export function aggregateContributions(contributions: { amount: string; unit: string }[]): { totalAmount: string; unit: string } {
+  let totalMl: number | undefined;
+  let totalG: number | undefined;
+  let totalCount: number | undefined;
+  let countUnit = '';
+
+  for (const c of contributions) {
+    const amount = parseAmount(c.amount);
+    const unit = (c.unit || '').toLowerCase().trim();
+    const conversion = UNIT_CONVERSIONS[unit];
+    if (conversion) {
+      const base = amount * conversion.factor;
+      if (conversion.base === 'ml') totalMl = (totalMl || 0) + base;
+      else totalG = (totalG || 0) + base;
+    } else if (unit === 'g') {
+      totalG = (totalG || 0) + amount;
+    } else if (unit === 'ml') {
+      totalMl = (totalMl || 0) + amount;
+    } else {
+      totalCount = (totalCount || 0) + amount;
+      countUnit = unit || countUnit;
+    }
+  }
+
+  if (totalG !== undefined) return { totalAmount: formatWeight(totalG), unit: totalG >= 1000 ? 'kg' : 'g' };
+  if (totalMl !== undefined) return { totalAmount: formatVolume(totalMl), unit: totalMl >= 1000 ? 'L' : 'ml' };
+  return { totalAmount: totalCount ? formatDecimal(totalCount) : '', unit: countUnit || '' };
+}
 
 export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: Record<string, string>): ShoppingItem[] {
   // Keyed by the STANDARDISED name (what categorisation + merging run on). The
@@ -196,29 +226,15 @@ export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: 
     for (const ingredient of plan.recipe.ingredients) {
       const key = normalizeIngredientName(ingredient.name);
       if (!key) continue;
-      const existing = grouped.get(key) || { unit: ingredient.unit, recipes: [], contributions: [] };
+      const existing = grouped.get(key) || { recipes: [], contributions: [] };
 
       if (!existing.recipes.includes(recipeName)) existing.recipes.push(recipeName);
 
       const amount = parseAmount(ingredient.amount) * scaleFactor;
       const unit = ingredient.unit?.toLowerCase().trim() || '';
-      const conversion = UNIT_CONVERSIONS[unit];
-
-      if (conversion) {
-        const base = amount * conversion.factor;
-        if (conversion.base === 'ml') existing.totalMl = (existing.totalMl || 0) + base;
-        else existing.totalG = (existing.totalG || 0) + base;
-      } else if (unit === 'g') {
-        existing.totalG = (existing.totalG || 0) + amount;
-      } else if (unit === 'ml') {
-        existing.totalMl = (existing.totalMl || 0) + amount;
-      } else {
-        existing.totalCount = (existing.totalCount || 0) + amount;
-        existing.unit = unit || existing.unit;
-      }
 
       // Record this line's original wording + its own (scaled) amount so the UI
-      // can show exactly what the recipe said.
+      // can show exactly what the recipe said and totals can be recomputed.
       existing.contributions.push({
         name: cleanDisplayName(ingredient.name),
         amount: formatDecimal(amount),
@@ -236,23 +252,18 @@ export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: 
     // name and let the row expand to the individual wordings.
     const distinctWordings = [...new Set(data.contributions.map(c => c.name).filter(Boolean))];
     const displayName = distinctWordings.length === 1 ? distinctWordings[0] : capitalize(name);
+    const { totalAmount, unit } = aggregateContributions(data.contributions);
 
-    const base = {
+    result.push({
       id: genItemId(),
       name,                       // standardised
       displayName,
+      totalAmount,
+      unit,
       recipes: data.recipes,
       contributions: data.contributions,
       category: resolveCategory(name, categoryOverrides),
-    };
-
-    if (data.totalG !== undefined) {
-      result.push({ ...base, totalAmount: formatWeight(data.totalG), unit: data.totalG >= 1000 ? 'kg' : 'g' });
-    } else if (data.totalMl !== undefined) {
-      result.push({ ...base, totalAmount: formatVolume(data.totalMl), unit: data.totalMl >= 1000 ? 'L' : 'ml' });
-    } else {
-      result.push({ ...base, totalAmount: data.totalCount ? formatDecimal(data.totalCount) : '', unit: data.unit || '' });
-    }
+    });
   });
 
   // Sort by category order, then alphabetically by standardised name
@@ -313,19 +324,27 @@ export function normalizeIngredientName(name: string): string {
     const parts = name.split('/').map((p: string) => normalizeIngredientName(p.trim())).filter(Boolean);
     return parts.sort((a: string, b: string) => b.length - a.length)[0] ?? '';
   }
-  let out = name
+  // Remove parentheticals first, including nested pairs like "((a, b))".
+  let stripped = name;
+  let prev: string;
+  do { prev = stripped; stripped = stripped.replace(/\([^()]*\)/g, ' '); } while (stripped !== prev);
+
+  let out = stripped
     .toLowerCase()
-    .replace(/\(.*?\)/g, '')    // remove matched parentheticals
-    .replace(/[()]/g, '')       // remove unmatched brackets
+    .replace(/[()]/g, '')       // remove any stray unmatched brackets
     .replace(/,.*$/, '')        // remove anything after a comma
     .replace(/[^a-z0-9\s]/g, '') // strip leftover punctuation
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\d+(?:\.\d+)?\s+/, '') // drop a leading quantity that leaked into the name ("2 onions")
+    .replace(/^each\s+/i, '')   // drop a stray leading "each" ("each cumin" → "cumin")
     // Strip adjectives/adverbs that don't change ingredient identity
     .replace(/\b(finely|roughly|coarsely|thinly|thickly|lightly|freshly|well|very|extra|just)\b/gi, '')
     .replace(/\b(fresh|dried|frozen|canned|chopped|diced|sliced|minced|grated|peeled|crushed|pressed|squeezed|zested)\b/gi, '')
+    .replace(/\b(ground|cracked|powdered|shredded|crumbled|cubed|halved|quartered|shaved|beaten|sifted|toasted|softened|melted)\b/gi, '')
     .replace(/\b(large|medium|small|whole|boneless|skinless|lean|trimmed|rinsed|drained|packed)\b/gi, '')
+    // Drop trailing serving/quantity phrases ("black pepper to taste", "oil for frying")
+    .replace(/\b(to taste|for serving|to serve|for garnish|for dusting|for greasing|for frying|plus extra|plus more|as needed|if needed|optional|divided)\b.*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
   // Singularise each word so plurals merge ("onions" → "onion").

@@ -20,6 +20,7 @@ export default function SettingsClient() {
   const [query, setQuery] = useState('');
   const [onlyCustom, setOnlyCustom] = useState(false);
   const [savingName, setSavingName] = useState<string | null>(null);
+  const [prefMode, setPrefMode] = useState<'ask' | 'always' | 'never'>('ask');
 
   useEffect(() => {
     (async () => {
@@ -35,6 +36,22 @@ export default function SettingsClient() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/preferences');
+        if (res.ok) { const d = await res.json(); if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode); }
+      } catch { /* default ask */ }
+    })();
+  }, []);
+
+  const changePrefMode = (mode: 'ask' | 'always' | 'never') => {
+    setPrefMode(mode);
+    fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryPrefMode: mode }) })
+      .then(() => showToast('Preference saved', 'success'))
+      .catch(() => showToast('Couldn\u2019t save preference', 'error'));
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -102,6 +119,18 @@ export default function SettingsClient() {
         Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
         Change any category here and it sticks — new shopping lists will use your choice instead of the automatic guess.
       </p>
+
+      <div className="settings-pref">
+        <div className="settings-pref-label">
+          <span className="settings-pref-title">Saving category changes from the shopping list</span>
+          <span className="settings-pref-sub">When you drag an item to a new aisle in a list, should that be remembered for future lists?</span>
+        </div>
+        <select className="settings-select" value={prefMode} onChange={e => changePrefMode(e.target.value as 'ask' | 'always' | 'never')}>
+          <option value="ask">Ask me each time</option>
+          <option value="always">Always save</option>
+          <option value="never">Never save</option>
+        </select>
+      </div>
 
       {loading ? (
         <div className="empty-state"><div className="loading-dots"><span/><span/><span/></div></div>
@@ -175,6 +204,10 @@ export default function SettingsClient() {
 
       <style jsx>{`
         .settings-intro { max-width: 640px; color: var(--ink-soft); font-size: 0.9rem; line-height: 1.55; margin: 0 0 1.4rem; }
+        .settings-pref { display: flex; align-items: center; gap: 1rem; max-width: 720px; margin: 0 0 1.6rem; padding: 0.9rem 1rem; background: var(--sage-light); border: 1px solid var(--border); border-radius: var(--radius); }
+        .settings-pref-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .settings-pref-title { font-size: 0.85rem; color: var(--ink); font-weight: 500; }
+        .settings-pref-sub { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.4; }
         .settings-wrap { max-width: 720px; }
         .settings-controls { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
         .settings-search { flex: 1; min-width: 180px; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }

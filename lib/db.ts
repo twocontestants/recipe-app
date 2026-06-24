@@ -117,6 +117,33 @@ export async function setupDatabase() {
   // generation time. Keyed by the normalised name (the same value used as the
   // merge key), so one row covers every surface form that normalises to it.
   await ensureIngredientCategoriesTable();
+  await ensureAppSettingsTable();
+}
+
+let _appSettingsReady = false;
+async function ensureAppSettingsTable(): Promise<void> {
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  _appSettingsReady = true;
+}
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  if (!_appSettingsReady) await ensureAppSettingsTable();
+  const result = await pool().query('SELECT value FROM app_settings WHERE key = $1', [key]);
+  return result.rows.length ? (result.rows[0].value as string) : null;
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  if (!_appSettingsReady) await ensureAppSettingsTable();
+  await pool().query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = $2`,
+    [key, value]
+  );
 }
 
 let _ingredientCategoriesReady = false;

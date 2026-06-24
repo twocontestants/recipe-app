@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
-import { CATEGORY_ORDER, CATEGORY_EMOJI } from '@/lib/shopping';
+import { CATEGORY_ORDER, CATEGORY_EMOJI, aggregateContributions, normalizeIngredientName } from '@/lib/shopping';
+
+// A contribution with a stable id, so a single sub-line can be detached into its
+// own item and then tracked like any other item (category, check, order).
+type ResolvedContribution = ShoppingContribution & { id: string };
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
@@ -15,13 +19,14 @@ function genId() { return Math.random().toString(36).slice(2, 10); }
 interface CheckedState {
   [itemKey: string]: { checked: boolean; checkedBy: string; checkedAt: number };
 }
-interface ItemOverride { displayName?: string; displayAmount?: string; category?: string; hidden?: boolean; }
+interface ItemOverride { displayName?: string; displayAmount?: string; category?: string; hidden?: boolean; detached?: boolean; }
 interface CustomItem { id: string; displayName: string; category: string; displayAmount: string; }
 interface ResolvedItem {
   key: string; displayName: string; displayAmount: string;
   resolvedCategory: string; isCustom: boolean;
   originalServerName?: string; recipes?: string[];
-  contributions?: ShoppingContribution[];
+  contributions?: ResolvedContribution[];
+  isDetached?: boolean;
 }
 interface ShoppingListMeta {
   id: string; name: string; subtitle: string;
@@ -48,9 +53,10 @@ interface ItemRowProps {
   onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void;
   onDragOverItem: (e: React.DragEvent) => void; onDropOnItem: (e: React.DragEvent) => void;
   onEnterAtEnd: () => void; recipes?: string[]; recipeLinks?: Record<string, string>;
+  onSubDragStart?: (e: React.DragEvent, contribId: string) => void; onSubDragEnd?: () => void;
 }
 
-function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks }: ItemRowProps) {
+function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
 
@@ -115,8 +121,16 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
         <div className={`shop-subitems ${isChecked ? 'is-checked' : ''}`}>
           {contributions.map((c, i) => {
             const url = c.recipe ? recipeLinks?.[c.recipe] : undefined;
+            const canDrag = !isChecked && !!onSubDragStart;
             return (
-              <div className="shop-subitem" key={i}>
+              <div className="shop-subitem" key={c.id ?? i}>
+                <div
+                  className={`shop-subitem-handle no-print ${canDrag ? '' : 'is-disabled'}`}
+                  draggable={canDrag}
+                  onDragStart={e => canDrag && onSubDragStart!(e, c.id)}
+                  onDragEnd={() => onSubDragEnd?.()}
+                  title="Drag to move this one out into another aisle"
+                ><DragHandle size={9} /></div>
                 <span className="shop-subitem-name">{c.name}</span>
                 {fmtContribAmount(c) && <span className="shop-subitem-amount">{fmtContribAmount(c)}</span>}
                 {c.recipe && (url ? (
@@ -173,6 +187,12 @@ export default function ShoppingListClient() {
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [itemOrder, setItemOrder] = useState<Record<string, string[]>>({});
+  // App-wide behaviour for saving a dragged category change to the dictionary:
+  // 'ask' (prompt each time), 'always' (save silently), 'never'.
+  const [prefMode, setPrefMode] = useState<'ask' | 'always' | 'never'>('ask');
+  // The pending "save this category to your preferences?" prompt, if any.
+  const [pendingPref, setPendingPref] = useState<{ name: string; label: string; category: string } | null>(null);
+  const [prefDontAsk, setPrefDontAsk] = useState(false);
   const [subtitle, setSubtitle] = useState('');
 
   const [showDropdown, setShowDropdown] = useState(false);
@@ -228,6 +248,12 @@ export default function ShoppingListClient() {
   // callbacks (set up once) can show a readable name in the activity toast
   // instead of the raw id.
   const keyToNameRef = useRef<Record<string, string>>({});
+  // When a sub-line is being dragged out of its group, this holds its
+  // contribution id until the drop completes the detach.
+  const pendingDetachRef = useRef<string | null>(null);
+  // Current resolved items, kept fresh for event handlers (move/detach) that
+  // need an item's standardised name + category without re-deriving it.
+  const resolvedRef = useRef<ResolvedItem[]>([]);
 
   // Send a batch of operations to the server. Optimistic local state is applied
   // by the caller first; this persists the change as targeted ops (which compose
@@ -390,6 +416,16 @@ export default function ShoppingListClient() {
     })();
   }, []);
 
+  // Load the app-wide "save dragged category changes" preference.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/preferences');
+        if (res.ok) { const d = await res.json(); if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode); }
+      } catch { /* default to 'ask' */ }
+    })();
+  }, []);
+
   // ── Fetch active list items ───────────────────────────────────────────────
 
   // refresh=true: structural-only (remote `list-changed`; leaves checked to
@@ -466,22 +502,49 @@ export default function ShoppingListClient() {
   const getResolvedItems = (): ResolvedItem[] => {
     const results: ResolvedItem[] = [];
     for (const si of serverItems) {
-      // Identity is the item's id now (not its name), so recipe and custom items
-      // share one keying scheme for checks, ordering, overrides and moves.
-      const key = si.id ?? si.name;
-      const ov = itemOverrides[key] || {};
-      if (ov.hidden) continue;
-      const rawAmount = si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : '';
-      results.push({
-        key,
-        displayName: ov.displayName ?? si.displayName ?? si.name,
-        displayAmount: ov.displayAmount ?? rawAmount,
-        resolvedCategory: ov.category ?? si.category,
-        isCustom: false,
-        originalServerName: si.name,
-        recipes: si.recipes,
-        contributions: si.contributions,
-      });
+      const parentKey = si.id ?? si.name;
+      // Give each contribution a stable id (deterministic from the parent id +
+      // index, so it survives reloads without storing extra data).
+      const contribs: ResolvedContribution[] = (si.contributions ?? []).map((c, i) => ({ ...c, id: `${parentKey}#${i}` }));
+      const remaining = contribs.filter(c => !itemOverrides[c.id]?.detached);
+      const detachedHere = contribs.filter(c => itemOverrides[c.id]?.detached);
+
+      // The group itself (unless every contribution has been detached away).
+      const ov = itemOverrides[parentKey] || {};
+      if (!ov.hidden && remaining.length > 0) {
+        // Headline name/amount reflect only the contributions still in the group.
+        const distinct = [...new Set(remaining.map(c => c.name).filter(Boolean))];
+        const fallbackName = distinct.length === 1 ? distinct[0] : (si.displayName ?? si.name);
+        const rawAmount = detachedHere.length > 0
+          ? amountString(aggregateContributions(remaining))   // recompute since the set shrank
+          : (si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : '');
+        results.push({
+          key: parentKey,
+          displayName: ov.displayName ?? fallbackName,
+          displayAmount: ov.displayAmount ?? rawAmount,
+          resolvedCategory: ov.category ?? si.category,
+          isCustom: false,
+          originalServerName: si.name,
+          recipes: [...new Set(remaining.map(c => c.recipe).filter(Boolean))],
+          contributions: remaining,
+        });
+      }
+
+      // Each detached contribution becomes its own standalone item.
+      for (const c of detachedHere) {
+        const cov = itemOverrides[c.id] || {};
+        if (cov.hidden) continue;
+        results.push({
+          key: c.id,
+          displayName: cov.displayName ?? c.name,
+          displayAmount: cov.displayAmount ?? amountString(aggregateContributions([c])),
+          resolvedCategory: cov.category ?? si.category,
+          isCustom: false,
+          originalServerName: si.name,
+          recipes: c.recipe ? [c.recipe] : [],
+          isDetached: true,
+        });
+      }
     }
     for (const ci of customItems) {
       results.push({ key: ci.id, displayName: ci.displayName, displayAmount: ci.displayAmount, resolvedCategory: ci.category, isCustom: true });
@@ -489,8 +552,13 @@ export default function ShoppingListClient() {
     return results;
   };
 
+  // Format an aggregate { totalAmount, unit } into a display string.
+  const amountString = (a: { totalAmount: string; unit: string }) =>
+    a.totalAmount ? `${a.totalAmount}${a.unit ? ' ' + a.unit : ''}` : '';
+
   const resolvedItems = getResolvedItems();
   keyToNameRef.current = Object.fromEntries(resolvedItems.map(i => [i.key, i.displayName]));
+  resolvedRef.current = resolvedItems;
   const allActiveCats = [...new Set(resolvedItems.map(i => i.resolvedCategory))];
   const orderedCats = [...categoryOrder.filter(c => allActiveCats.includes(c)), ...allActiveCats.filter(c => !categoryOrder.includes(c))];
 
@@ -584,19 +652,79 @@ export default function ShoppingListClient() {
   const handleCatDragStart = (e: React.DragEvent, cat: string) => { e.stopPropagation(); setDragCat(cat); setDragItem(null); e.dataTransfer.effectAllowed = 'move'; };
   const handleCatDragOver = (e: React.DragEvent, cat: string) => { if (!dragCat || dragCat === cat) return; e.preventDefault(); e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setDropCat({ key: cat, position: e.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); };
   const handleCatDrop = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragCat || dragCat === cat) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; const order = categoryOrder.length > 0 ? [...categoryOrder] : [...orderedCats]; const fromIdx = order.indexOf(dragCat); if (fromIdx === -1) { resetDrag(); return; } const next = [...order]; next.splice(fromIdx, 1); const insertAt = next.indexOf(cat) + (pos === 'after' ? 1 : 0); next.splice(insertAt, 0, dragCat); setCategoryOrder(next); sendOps([{ t: 'setCategoryOrder', order: next }]); resetDrag(); };
-  const handleItemDragStart = (e: React.DragEvent, itemKey: string) => { e.stopPropagation(); setDragItem(itemKey); setDragCat(null); e.dataTransfer.effectAllowed = 'move'; };
+  const handleItemDragStart = (e: React.DragEvent, itemKey: string) => { e.stopPropagation(); setDragItem(itemKey); setDragCat(null); pendingDetachRef.current = null; e.dataTransfer.effectAllowed = 'move'; };
+  // Dragging a sub-line: treat it as an item drag of its contribution id, and
+  // flag it so the drop completes the detach into a standalone item.
+  const handleSubDragStart = (e: React.DragEvent, contribId: string) => { e.stopPropagation(); setDragItem(contribId); setDragCat(null); pendingDetachRef.current = contribId; e.dataTransfer.effectAllowed = 'move'; };
   const handleItemDragOverItem = (e: React.DragEvent, itemKey: string) => { if (!dragItem || dragItem === itemKey) return; e.preventDefault(); e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setDropItemTarget({ key: itemKey, position: e.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); setDropItemCat(null); };
   const handleItemDropOnItem = (e: React.DragEvent, targetKey: string, targetCat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem || dragItem === targetKey) { resetDrag(); return; } const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; const moved = dragItem; moveItemToCategory(moved, targetCat); const catItems = getItemsForCat(targetCat).map(i => i.key).filter(k => k !== moved); const insertAt = catItems.indexOf(targetKey) + (pos === 'after' ? 1 : 0); catItems.splice(insertAt, 0, moved); setItemOrder(prev => ({ ...prev, [targetCat]: catItems })); sendOps([{ t: 'setItemOrder', cat: targetCat, order: catItems }]); resetDrag(); };
   const handleItemDropOnCat = (e: React.DragEvent, cat: string) => { e.preventDefault(); e.stopPropagation(); if (!dragItem) { resetDrag(); return; } moveItemToCategory(dragItem, cat); resetDrag(); };
+
   const moveItemToCategory = (itemKey: string, newCat: string) => {
-    const ci = customItems.find(c => c.id === itemKey);
     const ops: ShoppingOp[] = [];
-    if (ci) { setCustomItems(prev => prev.map(c => c.id === itemKey ? { ...c, category: newCat } : c)); ops.push({ t: 'updateCustom', id: itemKey, patch: { category: newCat } }); }
-    else { setItemOverrides(prev => ({ ...prev, [itemKey]: { ...prev[itemKey], category: newCat } })); ops.push({ t: 'override', key: itemKey, patch: { category: newCat } }); }
+    const detaching = pendingDetachRef.current === itemKey && !itemOverrides[itemKey]?.detached;
+
+    // Work out the standardised name + previous category for the save-preference
+    // prompt, before any state changes.
+    let normName = '';
+    let label = '';
+    let oldCat = '';
+    if (detaching) {
+      const parentKey = itemKey.split('#')[0];
+      const si = serverItems.find(s => (s.id ?? s.name) === parentKey);
+      normName = si?.name ?? '';
+      oldCat = itemOverrides[parentKey]?.category ?? si?.category ?? '';
+      const idx = Number(itemKey.split('#')[1]);
+      label = si?.contributions?.[idx]?.name ?? normName;
+    } else {
+      const item = resolvedRef.current.find(i => i.key === itemKey);
+      label = item?.displayName ?? '';
+      oldCat = item?.resolvedCategory ?? '';
+      normName = item?.isCustom ? normalizeIngredientName(item.displayName) : (item?.originalServerName ?? '');
+    }
+
+    const ci = customItems.find(c => c.id === itemKey);
+    if (ci) {
+      setCustomItems(prev => prev.map(c => c.id === itemKey ? { ...c, category: newCat } : c));
+      ops.push({ t: 'updateCustom', id: itemKey, patch: { category: newCat } });
+    } else {
+      // Detaching is just another field on the item's override: { detached, category }.
+      const patch = detaching ? { category: newCat, detached: true } : { category: newCat };
+      setItemOverrides(prev => ({ ...prev, [itemKey]: { ...prev[itemKey], ...patch } }));
+      ops.push({ t: 'override', key: itemKey, patch });
+    }
     if (!categoryOrder.includes(newCat)) { setCategoryOrder(prev => prev.includes(newCat) ? prev : [...prev, newCat]); ops.push({ t: 'setCategoryOrder', order: [...categoryOrder, newCat] }); }
     sendOps(ops);
+
+    pendingDetachRef.current = null;
+
+    // Offer to remember this category for future lists — but not for the act of
+    // detaching itself (that's separating one instance, not a general rule).
+    if (!detaching && normName && newCat && oldCat && newCat !== oldCat) {
+      maybeSaveCategoryPref(normName, label || normName, newCat);
+    }
   };
-  const resetDrag = () => { setDragCat(null); setDragItem(null); setDropCat(null); setDropItemTarget(null); setDropItemCat(null); };
+  const resetDrag = () => { setDragCat(null); setDragItem(null); setDropCat(null); setDropItemTarget(null); setDropItemCat(null); pendingDetachRef.current = null; };
+
+  // ── Save-category preference ────────────────────────────────────────────────
+  const persistCategoryPref = async (name: string, category: string) => {
+    try {
+      await fetch('/api/ingredient-categories', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, category }),
+      });
+      showToast(`Saved — future lists will put ${name} in ${category}`, 'success');
+    } catch { showToast('Couldn\u2019t save that preference', 'error'); }
+  };
+  const setPrefModeAndPersist = (mode: 'ask' | 'always' | 'never') => {
+    setPrefMode(mode);
+    fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryPrefMode: mode }) }).catch(() => {});
+  };
+  const maybeSaveCategoryPref = (name: string, label: string, category: string) => {
+    if (prefMode === 'never') return;
+    if (prefMode === 'always') { persistCategoryPref(name, category); return; }
+    setPendingPref({ name, label, category });
+  };
 
   // ── Delete list ───────────────────────────────────────────────────────────
 
@@ -724,7 +852,23 @@ export default function ShoppingListClient() {
             <div className="progress-bar-track"><div className="progress-bar-fill" style={{ width: `${progress}%` }} /></div>
           </div>
           {recentActivity && <div className="activity-toast no-print">{recentActivity}</div>}
-          <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder</p>
+          <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder · Drag a sub-line out to split it off</p>
+
+          {pendingPref && (
+            <div className="cat-pref-prompt no-print" role="dialog" aria-live="polite">
+              <div className="cat-pref-text">
+                Remember <strong>{pendingPref.label}</strong> belongs in <strong>{pendingPref.category}</strong>? Future lists will sort it there.
+              </div>
+              <label className="cat-pref-dontask">
+                <input type="checkbox" checked={prefDontAsk} onChange={e => setPrefDontAsk(e.target.checked)} />
+                Don’t ask again
+              </label>
+              <div className="cat-pref-actions">
+                <button className="btn btn-secondary btn-sm" onClick={() => { if (prefDontAsk) setPrefModeAndPersist('never'); setPendingPref(null); setPrefDontAsk(false); }}>Not now</button>
+                <button className="btn btn-primary btn-sm" onClick={() => { persistCategoryPref(pendingPref.name, pendingPref.category); if (prefDontAsk) setPrefModeAndPersist('always'); setPendingPref(null); setPrefDontAsk(false); }}>Save preference</button>
+              </div>
+            </div>
+          )}
 
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
@@ -776,6 +920,8 @@ export default function ShoppingListClient() {
                         onEnterAtEnd={() => setInsertingIn({ cat, afterKey: item.key })}
                         recipes={item.recipes}
                         recipeLinks={recipeSources}
+                        onSubDragStart={handleSubDragStart}
+                        onSubDragEnd={resetDrag}
                       />
                       {insertingIn?.cat === cat && insertingIn.afterKey === item.key && (
                         <NewItemRow autoFocus onCommit={(n, a) => { addItem(cat, n, a, item.key); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
@@ -919,14 +1065,27 @@ export default function ShoppingListClient() {
 
         /* Merged-item sub-lines: each contributing recipe's original wording,
            indented to line up under the item name. Kept deliberately quiet. */
-        .shop-subitems { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px + 0.5rem); }
+        .shop-subitems { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px); }
         .shop-subitems.is-checked { opacity: 0.42; }
-        .shop-subitem { display: flex; align-items: baseline; gap: 0.5rem; padding: 1px 0; line-height: 1.45; }
-        .shop-subitem::before { content: '–'; color: var(--border); flex-shrink: 0; }
+        .shop-subitem { display: flex; align-items: center; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
+        .shop-subitem-handle { display: flex; align-items: center; color: var(--ink-muted); opacity: 0; cursor: grab; flex-shrink: 0; transition: opacity 0.12s; touch-action: none; }
+        .shop-subitem:hover .shop-subitem-handle { opacity: 0.5; }
+        .shop-subitem-handle:hover { opacity: 0.9 !important; }
+        .shop-subitem-handle.is-disabled { cursor: default; opacity: 0 !important; }
+        .shop-subitem-handle:active { cursor: grabbing; }
         .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; }
         .shop-subitem-amount { font-family: var(--font-display); font-size: 0.8rem; color: var(--rust); white-space: nowrap; flex-shrink: 0; opacity: 0.85; }
         .shop-subitem-recipe { font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font-style: italic; flex-shrink: 0; }
         a.shop-subitem-recipe { text-decoration: none; }
+
+        /* "Save this category?" prompt after a drag to a new aisle. */
+        .cat-pref-prompt { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; max-width: 700px; margin: 0 0 1rem; padding: 0.7rem 0.9rem; background: var(--sage-light); border: 1px solid var(--sage); border-radius: var(--radius); box-shadow: var(--shadow); animation: catPrefIn 0.18s ease-out; }
+        @keyframes catPrefIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+        .cat-pref-text { flex: 1; min-width: 220px; font-size: 0.85rem; color: var(--ink-soft); line-height: 1.45; }
+        .cat-pref-text strong { color: var(--ink); text-transform: capitalize; }
+        .cat-pref-dontask { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
+        .cat-pref-dontask input { accent-color: var(--sage); cursor: pointer; }
+        .cat-pref-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
         .btn.toggle-on { background: var(--sage-light); border-color: var(--sage); color: var(--sage); }
         .all-done { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; background: var(--sage-light); border: 1px solid #cdd6c3; border-radius: 10px; margin: 1rem 0; }
         .all-done-emoji { font-size: 1.5rem; }
