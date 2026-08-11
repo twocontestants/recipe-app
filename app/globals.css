@@ -213,6 +213,9 @@ body {
   border-radius: 6px;
   overflow: hidden;
   transition: box-shadow 0.2s, transform 0.2s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
@@ -221,6 +224,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 1.5rem;
+  align-items: stretch;
 }
 
 .recipe-card-img {
@@ -244,6 +248,7 @@ body {
 
 .recipe-card-body {
   padding: 1.25rem;
+  flex: 1 1 auto;
 }
 
 .recipe-card-title {
@@ -281,11 +286,13 @@ body {
 }
 
 .recipe-card-actions {
+  margin-top: auto;
   padding: 0.75rem 1.25rem;
   border-top: 1px solid var(--parchment);
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 /* ── Forms ────────────────────────────────── */
