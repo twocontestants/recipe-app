@@ -240,14 +240,14 @@ export async function updateRecipe(
       cook_time   = COALESCE($7, cook_time),
       ingredients = COALESCE($8::jsonb, ingredients),
       steps       = COALESCE($9::jsonb, steps),
-      primary_protein = COALESCE($11, primary_protein),
+      primary_protein = COALESCE($10, primary_protein),
       tags        = COALESCE(
-                     CASE WHEN $12::text IS NOT NULL
-                       THEN ARRAY(SELECT jsonb_array_elements_text($12::jsonb))
+                     CASE WHEN $11::text IS NOT NULL
+                       THEN ARRAY(SELECT jsonb_array_elements_text($11::jsonb))
                        ELSE NULL END,
                      tags),
       updated_at  = NOW()
-     WHERE id = $13
+     WHERE id = $12
      RETURNING *`,
     [
       data.title || null,
