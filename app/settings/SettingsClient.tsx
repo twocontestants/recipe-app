@@ -206,10 +206,26 @@ export default function SettingsClient() {
 
       <style jsx>{`
         .settings-intro { max-width: 640px; color: var(--ink-soft); font-size: 0.9rem; line-height: 1.55; margin: 0 0 1.4rem; }
-        .settings-pref { display: flex; align-items: center; gap: 1rem; max-width: 720px; margin: 0 0 1.6rem; padding: 0.9rem 1rem; background: var(--sage-light); border: 1px solid var(--border); border-radius: var(--radius); }
-        .settings-pref-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .settings-pref {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 1rem 1.25rem;
+          max-width: 720px;
+          margin: 0 0 1.6rem;
+          padding: 0.9rem 1rem;
+          background: var(--sage-light);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+        }
+        .settings-pref-label { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
         .settings-pref-title { font-size: 0.85rem; color: var(--ink); font-weight: 500; }
         .settings-pref-sub { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.4; }
+        .settings-pref :global(select.settings-select) {
+          width: auto;
+          max-width: 14rem;
+          justify-self: end;
+        }
         .settings-wrap { max-width: 720px; min-width: 0; }
         .settings-controls { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
         .settings-search { flex: 1 1 180px; min-width: 0; width: auto; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
@@ -257,13 +273,21 @@ export default function SettingsClient() {
         }
         .settings-select:focus { border-color: var(--rust); }
         .settings-select.is-custom { border-color: var(--rust); color: var(--rust); font-weight: 500; }
-        .settings-pref .settings-select { max-width: 14rem; }
 
         .settings-noresults { color: var(--ink-muted); font-size: 0.88rem; padding: 1rem 0; }
 
         @media (max-width: 600px) {
-          .settings-pref { flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; }
-          .settings-pref .settings-select { width: 100%; max-width: none; font-size: 16px; }
+          .settings-pref {
+            grid-template-columns: 1fr;
+            align-items: stretch;
+            gap: 0.75rem;
+          }
+          .settings-pref :global(select.settings-select) {
+            width: 100%;
+            max-width: none;
+            justify-self: stretch;
+            font-size: 16px;
+          }
           .settings-search { flex: 1 1 100%; font-size: 16px; }
           .settings-row {
             flex-direction: column;

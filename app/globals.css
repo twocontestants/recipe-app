@@ -436,6 +436,16 @@ input:focus, textarea:focus, select:focus {
 
 textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
 
+/* Compact selects used in settings / toolbars — override global width:100% */
+select.settings-select {
+  width: auto;
+  max-width: 14rem;
+  flex: 0 0 auto;
+  padding: 0.32rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
 .url-input-group {
   display: flex;
   flex-wrap: wrap;
