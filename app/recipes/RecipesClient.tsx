@@ -441,13 +441,13 @@ export default function RecipesPage() {
           <h1 className="page-title">My <em>Recipes</em></h1>
           <p className="page-subtitle">{recipes.length} saved recipes</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="page-header-actions">
           <input
-            type="text"
+            type="search"
+            className="page-header-search"
             placeholder="Search recipes…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ width: '200px', marginBottom: 0 }}
           />
           <button className="btn btn-secondary" onClick={() => { setEditingRecipe(null); setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] }); setShowPasteModal(true); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -547,7 +547,7 @@ export default function RecipesPage() {
 
             {!editingRecipe && <div className="divider" style={{ margin: '1rem 0' }} />}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1rem' }}>
+            <div className="form-grid">
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                 <label>Title *</label>
                 <input type="text" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Recipe name" />
@@ -607,10 +607,10 @@ export default function RecipesPage() {
 
             <div className="form-group">
               <label>Ingredients</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '80px 100px 1fr auto', gap: '0.35rem', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--ink-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Amount</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--ink-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Unit</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--ink-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Ingredient</span>
+              <div className="ingredient-row-header">
+                <span>Amount</span>
+                <span>Unit</span>
+                <span>Ingredient</span>
                 <span />
               </div>
               {form.ingredients.map((ing, i) => (
@@ -640,7 +640,7 @@ export default function RecipesPage() {
               <button className="add-row-btn" onClick={addStep}>+ Add step</button>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+            <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? <span className="loading-dots"><span/><span/><span/></span> : (editingRecipe ? 'Save Changes' : 'Save Recipe')}
@@ -677,8 +677,14 @@ export default function RecipesPage() {
 
         /* Day grid */
         .pqm-day-grid {
-          display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
+          display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.3rem;
           margin-bottom: 1rem;
+        }
+        @media (max-width: 600px) {
+          .planner-quick-modal { max-width: 100%; padding: 1.25rem 1.1rem; }
+          .pqm-recipe-name { max-width: 100%; }
+          .pqm-day-btn { padding: 0.45rem 0.1rem; }
+          .pqm-day-date { font-size: 0.85rem; }
         }
         .pqm-day-btn {
           display: flex; flex-direction: column; align-items: center;
@@ -788,12 +794,12 @@ export default function RecipesPage() {
                 onChange={e => setPasteText(e.target.value)}
                 placeholder={"Paste the full recipe here…\n\nIngredients:\n2 cups flour\n1 tsp salt\n...\n\nSteps:\n1. Mix dry ingredients...\n2. Add wet ingredients..."}
                 rows={14}
-                style={{ fontFamily: 'var(--font-body)', fontSize: '0.85rem', resize: 'vertical' }}
+                style={{ fontFamily: 'var(--font-body)', resize: 'vertical' }}
                 autoFocus
               />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <div className="modal-actions" style={{ marginTop: '0.5rem' }}>
               <button className="btn btn-secondary" onClick={() => setShowPasteModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handlePasteImport} disabled={parsing || !pasteText.trim()}>
                 {parsing ? (
@@ -823,23 +829,23 @@ function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
   return (
     <>
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button className="btn btn-ghost" onClick={onBack}>
+        <div className="page-header-leading">
+          <button className="btn btn-ghost" onClick={onBack} style={{ flexShrink: 0 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
             Back
           </button>
           <div>
-            <h1 className="page-title" style={{ fontSize: '2rem' }}>{recipe.title}</h1>
+            <h1 className="page-title" style={{ fontSize: 'clamp(1.35rem, 5vw, 2rem)' }}>{recipe.title}</h1>
             {recipe.tags?.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem' }}>
+              <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
                 {recipe.tags.map(t => <span key={t} className="tag">{t}</span>)}
               </div>
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div className="page-header-actions" style={{ gap: '0.5rem' }}>
           {recipe.source_url && (
             <a href={recipe.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
               View Source ↗

@@ -804,7 +804,7 @@ export default function ShoppingListClient() {
         <div>
           <h1 className="page-title">Shopping <em>List</em></h1>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="page-header-actions" style={{ gap: '0.5rem' }}>
           <div className={`socket-badge ${connected ? 'connected' : 'disconnected'}`}>
             <span className="socket-dot" />
             {connected ? `Live · ${activeShoppers}` : 'Offline'}

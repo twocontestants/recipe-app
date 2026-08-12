@@ -210,7 +210,7 @@ export default function SettingsClient() {
         .settings-pref-sub { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.4; }
         .settings-wrap { max-width: 720px; }
         .settings-controls { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
-        .settings-search { flex: 1; min-width: 180px; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
+        .settings-search { flex: 1; min-width: min(180px, 100%); padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
         .settings-search:focus { border-color: var(--rust); }
 
         .settings-cat { margin-bottom: 1.5rem; }
@@ -229,15 +229,20 @@ export default function SettingsClient() {
         .settings-row-meta { font-size: 0.68rem; color: var(--ink-muted); white-space: nowrap; flex-shrink: 0; }
         .settings-reset { background: none; border: none; color: var(--ink-muted); font-size: 0.68rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; font-family: var(--font-body); text-decoration: underline; transition: color 0.15s; flex-shrink: 0; }
         .settings-reset:hover { color: var(--rust); }
-        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: white; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; }
+        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: white; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; max-width: 42vw; }
         .settings-select:focus { border-color: var(--rust); }
         .settings-select.is-custom { border-color: var(--rust); color: var(--rust); font-weight: 500; }
 
         .settings-noresults { color: var(--ink-muted); font-size: 0.88rem; padding: 1rem 0; }
 
         @media (max-width: 600px) {
-          .settings-row-examples { max-width: 140px; }
+          .settings-pref { flex-wrap: wrap; gap: 0.75rem; }
+          .settings-search { flex: 1 1 100%; min-width: 0; font-size: 16px; }
+          .settings-row { flex-wrap: wrap; gap: 0.4rem 0.6rem; }
+          .settings-row-examples { max-width: 100%; }
           .settings-row-name { font-size: 0.85rem; }
+          .settings-select { max-width: 100%; font-size: 16px; }
+          .settings-row-meta { width: 100%; }
         }
       `}</style>
     </>

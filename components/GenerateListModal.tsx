@@ -157,7 +157,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
         }
         @media (min-width: 601px) {
           .glm-overlay { align-items: center; padding: 1rem; }
-          .glm-sheet { border-radius: 14px !important; max-height: 85vh !important; width: 480px; max-width: calc(100vw - 2rem); }
+          .glm-sheet { border-radius: 14px !important; max-height: 85vh !important; width: 480px; max-width: min(480px, calc(100% - 2rem)); }
         }
         .glm-sheet {
           background: white; width: 100%; max-height: 92dvh;

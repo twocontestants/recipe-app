@@ -642,7 +642,7 @@ export default function PlannerClient() {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 Replaces all current meals for this week
               </p>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <div className="magic-footer-actions">
                 <button className="btn-cancel" onClick={() => setShowMagic(false)}>Cancel</button>
                 <button className="btn-magic-go" onClick={handleMagicSuggest} disabled={magicLoading}>
                   {magicLoading ? <span className="loading-dots"><span/><span/><span/></span> : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>Plan my week</>}
@@ -792,6 +792,7 @@ export default function PlannerClient() {
         .magic-input { width: 100%; padding: 0.55rem 0.85rem; border: 1px solid var(--border); border-radius: 8px; font-family: var(--font-body); font-size: 0.88rem; color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
         .magic-input:focus { border-color: var(--rust); }
         .magic-footer { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+        .magic-footer-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
         .magic-warn { display: flex; align-items: center; gap: 0.4rem; font-size: 0.73rem; color: var(--ink-muted); }
         .btn-cancel { padding: 0.5rem 0.9rem; background: white; border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); color: var(--ink-soft); cursor: pointer; transition: all 0.15s; }
         .btn-cancel:hover { border-color: var(--ink-muted); }
@@ -804,15 +805,20 @@ export default function PlannerClient() {
         /* Mobile */
         @media (max-width: 600px) {
           .pl-title { font-size: 2rem; }
-          .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; }
+          .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
           .pl-btn-magic, .pl-btn-gen { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
           .pl-day { padding: 1rem 0; }
           .pl-day-name { font-size: 1.1rem; }
           .pl-recipe-img { width: 64px; height: 56px; }
           .pl-recipe-name { font-size: 0.85rem; }
-          .pl-picker { max-height: 92dvh; border-radius: 16px 16px 0 0; }
+          .pl-picker { max-height: 92dvh; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .modal-overlay { align-items: flex-end; }
           .pl-trash-bar { padding: 1.25rem 1rem 2rem; }
+          .magic-modal { width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom, 0)); }
+          .magic-input { font-size: 16px; }
+          .magic-footer-actions { width: 100%; }
+          .magic-footer-actions .btn-cancel,
+          .magic-footer-actions .btn-magic-go { flex: 1 1 auto; justify-content: center; }
         }
       `}</style>
     </div>

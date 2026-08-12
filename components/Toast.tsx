@@ -28,7 +28,7 @@ export function ToastProvider() {
   if (!globalSetToasts) globalSetToasts = setToasts;
   
   return (
-    <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 2000, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+    <div className="toast-stack">
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.type}`}>
           {t.message}
