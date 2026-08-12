@@ -10,42 +10,28 @@ const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 
 type ProteinType = typeof PROTEINS[number];
 
 const PROTEIN_COLORS: Record<string, string> = {
-  chicken: '#E8A838',
-  beef:    '#C0392B',
-  pork:    '#D4697A',
-  lamb:    '#8E44AD',
-  fish:    '#2980B9',
-  seafood: '#16A085',
-  tofu:    '#27AE60',
-  eggs:    '#D4AC0D',
-  legumes: '#A04000',
-  dairy:   '#717D7E',
-};
-
-const PROTEIN_EMOJI: Record<string, string> = {
-  chicken: '🍗',
-  beef:    '🥩',
-  pork:    '🐷',
-  lamb:    '🐑',
-  fish:    '🐟',
-  seafood: '🦐',
-  tofu:    '🫘',
-  eggs:    '🥚',
-  legumes: '🫘',
-  dairy:   '🧀',
+  chicken: '#9A7B4F',
+  beef:    '#7A4E48',
+  pork:    '#8B6B72',
+  lamb:    '#6B5B70',
+  fish:    '#5A6E7A',
+  seafood: '#5A7268',
+  tofu:    '#6A7260',
+  eggs:    '#8A7A4A',
+  legumes: '#7A6248',
+  dairy:   '#6E7270',
 };
 
 function ProteinBadge({ protein, size = 'sm' }: { protein?: string; size?: 'sm' | 'xs' }) {
   if (!protein) return null;
   const color = PROTEIN_COLORS[protein] || '#888';
-  const emoji = PROTEIN_EMOJI[protein] || '🍽';
   return (
     <span
       className={`protein-badge protein-badge-${size}`}
-      style={{ background: color + '22', color, borderColor: color + '44' }}
+      style={{ background: color + '18', color, borderColor: color + '33' }}
       title={`Primary protein: ${protein}`}
     >
-      {emoji} {protein}
+      {protein}
     </span>
   );
 }
@@ -438,7 +424,7 @@ export default function RecipesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">My <em>Recipes</em></h1>
+          <h1 className="page-title">Recipes</h1>
           <p className="page-subtitle">{recipes.length} saved recipes</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -470,7 +456,12 @@ export default function RecipesPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">🍽️</div>
+          <div className="empty-state-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
+              <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+            </svg>
+          </div>
           <h3>{search ? 'No recipes found' : 'Your cookbook is empty'}</h3>
           <p>{search ? 'Try a different search term' : 'Add your first recipe to get started'}</p>
         </div>
@@ -482,7 +473,9 @@ export default function RecipesPage() {
                 {recipe.image_url ? (
                   <img src={recipe.image_url} alt={recipe.title} className="recipe-card-img" onClick={() => setViewRecipe(recipe)} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 ) : (
-                  <div className="recipe-card-img-placeholder" onClick={() => setViewRecipe(recipe)}>🍳</div>
+                  <div className="recipe-card-img-placeholder" onClick={() => setViewRecipe(recipe)}>
+                    {(recipe.title || '?').charAt(0).toUpperCase()}
+                  </div>
                 )}
                 <button
                   className="card-plan-btn"
@@ -496,9 +489,9 @@ export default function RecipesPage() {
               <div className="recipe-card-body">
                 <h3 className="recipe-card-title">{recipe.title}</h3>
                 <div className="recipe-card-meta">
-                  {recipe.prep_time && <span>⏱ {recipe.prep_time}m prep</span>}
-                  {recipe.cook_time && <span>🔥 {recipe.cook_time}m cook</span>}
-                  <span>👤 {recipe.servings} servings</span>
+                  {recipe.prep_time && <span>{recipe.prep_time}m prep</span>}
+                  {recipe.cook_time && <span>{recipe.cook_time}m cook</span>}
+                  <span>{recipe.servings} servings</span>
                 </div>
                 {recipe.description && <p className="recipe-card-desc">{recipe.description}</p>}
                 {recipe.tags?.length > 0 && (
@@ -594,7 +587,7 @@ export default function RecipesPage() {
                       style={form.primary_protein === p ? { background: PROTEIN_COLORS[p], borderColor: PROTEIN_COLORS[p], color: 'white' } : {}}
                       onClick={() => setForm(prev => ({ ...prev, primary_protein: prev.primary_protein === p ? '' : p }))}
                     >
-                      {PROTEIN_EMOJI[p]} {p}
+                      {p}
                     </button>
                   ))}
                 </div>
@@ -662,7 +655,7 @@ export default function RecipesPage() {
         .pqm-week-row {
           display: flex; align-items: center; gap: 0.5rem;
           margin: 1rem 0 0.75rem; background: var(--parchment);
-          border-radius: 8px; padding: 0.4rem 0.5rem;
+          border-radius: var(--radius); padding: 0.4rem 0.5rem;
         }
         .pqm-week-label {
           flex: 1; text-align: center; font-size: 0.82rem;
@@ -671,52 +664,49 @@ export default function RecipesPage() {
         .pqm-week-arrow {
           background: none; border: none; font-size: 1.2rem; cursor: pointer;
           color: var(--ink-muted); padding: 0 0.35rem; line-height: 1;
-          border-radius: 4px; transition: color 0.15s;
+          border-radius: var(--radius); transition: color 0.15s;
         }
         .pqm-week-arrow:hover { color: var(--rust); }
 
-        /* Day grid */
         .pqm-day-grid {
           display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
           margin-bottom: 1rem;
         }
         .pqm-day-btn {
           display: flex; flex-direction: column; align-items: center;
-          gap: 2px; padding: 0.5rem 0.2rem; border: 1.5px solid var(--border);
-          border-radius: 8px; background: white; cursor: pointer;
+          gap: 2px; padding: 0.5rem 0.2rem; border: 1px solid var(--border);
+          border-radius: var(--radius); background: #FFFEFC; cursor: pointer;
           transition: all 0.15s; position: relative;
         }
         .pqm-day-btn:hover { border-color: var(--rust); }
-        .pqm-day-btn.today { border-color: var(--sage); }
-        .pqm-day-btn.today .pqm-day-name { color: var(--sage); }
+        .pqm-day-btn.today { border-color: var(--ink-muted); }
+        .pqm-day-btn.today .pqm-day-name { color: var(--ink-soft); }
         .pqm-day-btn.selected {
-          border-color: var(--rust); background: var(--rust);
+          border-color: var(--ink); background: var(--ink);
         }
         .pqm-day-btn.selected .pqm-day-name,
-        .pqm-day-btn.selected .pqm-day-date { color: white; }
+        .pqm-day-btn.selected .pqm-day-date { color: var(--cream); }
         .pqm-day-name {
           font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em;
           color: var(--ink-muted); font-weight: 500; line-height: 1;
         }
         .pqm-day-date {
           font-size: 0.95rem; font-family: var(--font-display);
-          color: var(--ink); line-height: 1; font-weight: 300;
+          color: var(--ink); line-height: 1; font-weight: 400;
         }
         .pqm-day-dots { display: flex; gap: 2px; height: 5px; align-items: center; }
         .pqm-dot {
-          width: 4px; height: 4px; border-radius: 50%; background: var(--sage); opacity: 0.7;
+          width: 4px; height: 4px; border-radius: 50%; background: var(--rust); opacity: 0.7;
         }
-        .pqm-day-btn.selected .pqm-dot { background: rgba(255,255,255,0.7); }
+        .pqm-day-btn.selected .pqm-dot { background: rgba(247,246,243,0.7); }
         .pqm-dot-empty {
           width: 4px; height: 4px; border-radius: 50%;
           border: 1px solid var(--border); opacity: 0.4;
         }
 
-
-        /* Add button */
         .pqm-add-btn {
-          width: 100%; padding: 0.8rem; background: var(--rust); color: white;
-          border: none; border-radius: 8px; font-size: 0.9rem;
+          width: 100%; padding: 0.75rem; background: var(--ink); color: var(--cream);
+          border: none; border-radius: var(--radius); font-size: 0.88rem;
           font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
           font-weight: 500; letter-spacing: 0.02em;
           display: flex; align-items: center; justify-content: center; gap: 0.4rem;
@@ -724,21 +714,19 @@ export default function RecipesPage() {
         .pqm-add-btn:hover:not(:disabled) { opacity: 0.88; }
         .pqm-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-
-        /* Card plan button — thumbnail overlay */
         .recipe-card-img-wrap { position: relative; overflow: hidden; }
         .recipe-card-img-wrap .recipe-card-img,
         .recipe-card-img-wrap .recipe-card-img-placeholder { display: block; width: 100%; cursor: pointer; }
         .card-plan-btn {
           position: absolute; bottom: 8px; right: 8px;
           display: inline-flex; align-items: center; gap: 5px;
-          padding: 0.38rem 0.7rem;
-          background: var(--rust); color: white; border: none;
-          border-radius: 99px; font-size: 0.72rem; font-family: var(--font-body);
+          padding: 0.35rem 0.65rem;
+          background: var(--ink); color: var(--cream); border: none;
+          border-radius: var(--radius); font-size: 0.7rem; font-family: var(--font-body);
           font-weight: 500; cursor: pointer; letter-spacing: 0.02em;
           opacity: 0; transform: translateY(4px);
           transition: opacity 0.18s ease, transform 0.18s ease;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.28); white-space: nowrap;
+          box-shadow: var(--shadow); white-space: nowrap;
         }
         .recipe-card-img-wrap:hover .card-plan-btn { opacity: 1; transform: translateY(0); }
         @media (hover: none) { .card-plan-btn { opacity: 1; transform: none; } }
@@ -753,12 +741,29 @@ export default function RecipesPage() {
           display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
         }
         .plan-picker-btn {
-          padding: 0.35rem 0.2rem; border: 1px solid var(--border); border-radius: 6px;
-          background: white; color: var(--ink-soft); font-size: 0.72rem; cursor: pointer;
+          padding: 0.35rem 0.2rem; border: 1px solid var(--border); border-radius: var(--radius);
+          background: #FFFEFC; color: var(--ink-soft); font-size: 0.72rem; cursor: pointer;
           font-family: var(--font-body); transition: all 0.15s; text-align: center;
         }
         .plan-picker-btn:hover { border-color: var(--rust); color: var(--rust); }
-        .plan-picker-btn.active { background: var(--rust); border-color: var(--rust); color: white; }
+        .plan-picker-btn.active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+
+        .protein-badge {
+          display: inline-flex; align-items: center; gap: 0.25rem;
+          border: 1px solid; border-radius: var(--radius);
+          text-transform: capitalize; font-weight: 500; letter-spacing: 0.02em;
+        }
+        .protein-badge-sm { font-size: 0.68rem; padding: 0.15rem 0.45rem; }
+        .protein-badge-xs { font-size: 0.6rem; padding: 0.1rem 0.35rem; }
+        .protein-picker { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .protein-btn {
+          padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius);
+          background: #FFFEFC; color: var(--ink-soft); font-size: 0.75rem; cursor: pointer;
+          font-family: var(--font-body); text-transform: capitalize; transition: all 0.15s;
+        }
+        .protein-btn:hover { border-color: var(--ink-muted); }
+        .protein-btn.active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+        .protein-btn.active.none { background: var(--parchment); border-color: var(--ink-muted); color: var(--ink); }
       `}</style>
 
 
@@ -857,11 +862,11 @@ function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
       {recipe.image_url ? (
         <img src={recipe.image_url} alt={recipe.title} className="recipe-detail-hero" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
       ) : (
-        <div className="recipe-detail-hero-placeholder">🍽️</div>
+        <div className="recipe-detail-hero-placeholder">{(recipe.title || 'R').charAt(0).toUpperCase()}</div>
       )}
 
       {recipe.description && (
-        <p style={{ fontSize: '1.05rem', color: 'var(--ink-soft)', marginBottom: '1.5rem', fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 300, lineHeight: 1.6 }}>
+        <p style={{ fontSize: '1.05rem', color: 'var(--ink-soft)', marginBottom: '1.5rem', fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400, lineHeight: 1.6 }}>
           {recipe.description}
         </p>
       )}

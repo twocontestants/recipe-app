@@ -152,48 +152,50 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       <style>{`
         .glm-overlay {
           position: fixed; inset: 0; z-index: 500;
-          background: rgba(26,22,18,0.45);
+          background: rgba(28,28,26,0.45);
           display: flex; align-items: flex-end; justify-content: center;
         }
         @media (min-width: 601px) {
           .glm-overlay { align-items: center; padding: 1rem; }
-          .glm-sheet { border-radius: 14px !important; max-height: 85vh !important; width: 480px; max-width: calc(100vw - 2rem); }
+          .glm-sheet { border-radius: 4px !important; max-height: 85vh !important; width: 480px; max-width: calc(100vw - 2rem); }
         }
         .glm-sheet {
-          background: white; width: 100%; max-height: 92dvh;
-          border-radius: 20px 20px 0 0;
+          background: #FFFEFC; width: 100%; max-height: 92dvh;
+          border-radius: 12px 12px 0 0;
           display: flex; flex-direction: column;
           overflow: hidden;
+          border: 1px solid var(--border);
         }
-        .glm-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 10px auto 0; flex-shrink: 0; }
-        .glm-header { padding: 14px 20px 12px; border-bottom: 1px solid var(--parchment); flex-shrink: 0; }
-        .glm-title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 300; color: var(--ink); margin-bottom: 2px; }
+        .glm-handle { width: 36px; height: 3px; border-radius: 1px; background: var(--border); margin: 10px auto 0; flex-shrink: 0; }
+        .glm-header { padding: 14px 20px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .glm-title { font-family: var(--font-display); font-size: 1.3rem; font-weight: 400; color: var(--ink); margin-bottom: 2px; }
         .glm-sub { font-size: 0.78rem; color: var(--ink-muted); }
         .glm-body { overflow-y: auto; flex: 1; padding: 0 20px 12px; -webkit-overflow-scrolling: touch; }
         .glm-week-section { margin-top: 16px; }
         .glm-week-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .glm-week-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); font-weight: 500; }
+        .glm-week-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 500; }
         .glm-week-toggle { font-size: 0.72rem; color: var(--rust); background: none; border: none; cursor: pointer; font-family: var(--font-body); padding: 0; }
         .glm-meal-row {
           display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-          border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
+          border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px;
           cursor: pointer; transition: background 0.12s;
+          background: #FFFEFC;
         }
-        .glm-meal-row.is-selected { background: rgba(181,69,27,0.05); border-color: rgba(181,69,27,0.3); }
-        .glm-check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
-        .glm-meal-row.is-selected .glm-check { background: var(--rust); border-color: var(--rust); }
+        .glm-meal-row.is-selected { background: var(--accent-soft); border-color: rgba(139,115,85,0.35); }
+        .glm-check { width: 18px; height: 18px; border-radius: var(--radius); border: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
+        .glm-meal-row.is-selected .glm-check { background: var(--ink); border-color: var(--ink); }
         .glm-meal-name { flex: 1; font-size: 0.88rem; color: var(--ink); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .glm-meal-day { font-size: 0.72rem; color: var(--ink-muted); flex-shrink: 0; }
         .glm-empty { font-size: 0.8rem; color: var(--ink-muted); font-style: italic; padding: 8px 0; }
         .glm-subtitle-field { margin-top: 16px; }
-        .glm-subtitle-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 6px; display: block; }
-        .glm-subtitle-input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
+        .glm-subtitle-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin-bottom: 6px; display: block; }
+        .glm-subtitle-input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; background: #FFFEFC; }
         .glm-subtitle-input:focus { border-color: var(--rust); }
         .glm-subtitle-input::placeholder { color: var(--ink-muted); font-style: italic; }
-        .glm-footer { padding: 12px 20px; border-top: 1px solid var(--parchment); flex-shrink: 0; }
+        .glm-footer { padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0; }
         .glm-generate-btn {
-          width: 100%; padding: 13px; background: var(--rust); color: white;
-          border: none; border-radius: 10px; font-size: 0.92rem; font-weight: 500;
+          width: 100%; padding: 12px; background: var(--ink); color: var(--cream);
+          border: none; border-radius: var(--radius); font-size: 0.9rem; font-weight: 500;
           font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
           display: flex; align-items: center; justify-content: center; gap: 0.4rem;
         }
