@@ -178,22 +178,24 @@ export default function SettingsClient() {
                         </span>
                       )}
                     </div>
-                    <span className="settings-row-meta">
-                      {e.count > 0 ? `${e.count} recipe${e.count !== 1 ? 's' : ''}` : 'unused'}
-                    </span>
-                    {e.source === 'custom' && (
-                      <button className="settings-reset" onClick={() => resetToAuto(e.name)} title="Reset to automatic category">
-                        reset
-                      </button>
-                    )}
-                    <select
-                      className={`settings-select ${e.source === 'custom' ? 'is-custom' : ''}`}
-                      value={e.category}
-                      onChange={ev => changeCategory(e.name, ev.target.value)}
-                    >
-                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                      {!categories.includes(e.category) && <option value={e.category}>{e.category}</option>}
-                    </select>
+                    <div className="settings-row-controls">
+                      <span className="settings-row-meta">
+                        {e.count > 0 ? `${e.count} recipe${e.count !== 1 ? 's' : ''}` : 'unused'}
+                      </span>
+                      {e.source === 'custom' && (
+                        <button className="settings-reset" onClick={() => resetToAuto(e.name)} title="Reset to automatic category">
+                          reset
+                        </button>
+                      )}
+                      <select
+                        className={`settings-select ${e.source === 'custom' ? 'is-custom' : ''}`}
+                        value={e.category}
+                        onChange={ev => changeCategory(e.name, ev.target.value)}
+                      >
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                        {!categories.includes(e.category) && <option value={e.category}>{e.category}</option>}
+                      </select>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -208,41 +210,72 @@ export default function SettingsClient() {
         .settings-pref-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
         .settings-pref-title { font-size: 0.85rem; color: var(--ink); font-weight: 500; }
         .settings-pref-sub { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.4; }
-        .settings-wrap { max-width: 720px; }
+        .settings-wrap { max-width: 720px; min-width: 0; }
         .settings-controls { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
-        .settings-search { flex: 1; min-width: min(180px, 100%); padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
+        .settings-search { flex: 1 1 180px; min-width: 0; width: auto; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
         .settings-search:focus { border-color: var(--rust); }
 
         .settings-cat { margin-bottom: 1.5rem; }
         .settings-cat-header { display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.5rem; margin-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
-        .settings-cat-emoji { font-size: 1rem; }
-        .settings-cat-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-soft); font-weight: 500; flex: 1; }
-        .settings-cat-count { font-size: 0.7rem; color: var(--ink-muted); }
+        .settings-cat-emoji { font-size: 1rem; flex-shrink: 0; }
+        .settings-cat-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-soft); font-weight: 500; flex: 1; min-width: 0; }
+        .settings-cat-count { font-size: 0.7rem; color: var(--ink-muted); flex-shrink: 0; }
 
         .settings-rows { display: flex; flex-direction: column; }
-        .settings-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.35rem; border-bottom: 1px solid var(--parchment); transition: background 0.1s, opacity 0.15s; }
+        .settings-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.5rem 0.35rem;
+          border-bottom: 1px solid var(--parchment);
+          transition: background 0.1s, opacity 0.15s;
+          min-width: 0;
+        }
         .settings-row:hover { background: var(--parchment); }
         .settings-row.is-saving { opacity: 0.55; }
-        .settings-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-        .settings-row-name { font-size: 0.92rem; color: var(--ink); text-transform: capitalize; }
-        .settings-row-examples { font-size: 0.68rem; color: var(--ink-muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+        .settings-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .settings-row-name { font-size: 0.92rem; color: var(--ink); text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .settings-row-examples { font-size: 0.68rem; color: var(--ink-muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+        .settings-row-controls { display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto; min-width: 0; }
         .settings-row-meta { font-size: 0.68rem; color: var(--ink-muted); white-space: nowrap; flex-shrink: 0; }
         .settings-reset { background: none; border: none; color: var(--ink-muted); font-size: 0.68rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; font-family: var(--font-body); text-decoration: underline; transition: color 0.15s; flex-shrink: 0; }
         .settings-reset:hover { color: var(--rust); }
-        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: white; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; max-width: 42vw; }
+        .settings-select {
+          width: auto;
+          max-width: 12.5rem;
+          flex: 0 0 auto;
+          padding: 0.32rem 0.5rem;
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          background: white;
+          font-family: var(--font-body);
+          font-size: 0.8rem;
+          color: var(--ink-soft);
+          cursor: pointer;
+          outline: none;
+          transition: border-color 0.15s, color 0.15s;
+        }
         .settings-select:focus { border-color: var(--rust); }
         .settings-select.is-custom { border-color: var(--rust); color: var(--rust); font-weight: 500; }
+        .settings-pref .settings-select { max-width: 14rem; }
 
         .settings-noresults { color: var(--ink-muted); font-size: 0.88rem; padding: 1rem 0; }
 
         @media (max-width: 600px) {
-          .settings-pref { flex-wrap: wrap; gap: 0.75rem; }
-          .settings-search { flex: 1 1 100%; min-width: 0; font-size: 16px; }
-          .settings-row { flex-wrap: wrap; gap: 0.4rem 0.6rem; }
-          .settings-row-examples { max-width: 100%; }
-          .settings-row-name { font-size: 0.85rem; }
-          .settings-select { max-width: 100%; font-size: 16px; }
-          .settings-row-meta { width: 100%; }
+          .settings-pref { flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; }
+          .settings-pref .settings-select { width: 100%; max-width: none; font-size: 16px; }
+          .settings-search { flex: 1 1 100%; font-size: 16px; }
+          .settings-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.4rem;
+            padding: 0.65rem 0.25rem;
+          }
+          .settings-row-name { white-space: normal; overflow: visible; text-overflow: unset; font-size: 0.85rem; }
+          .settings-row-examples { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+          .settings-row-controls { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+          .settings-row-meta { margin-right: auto; }
+          .settings-select { max-width: min(12rem, 58vw); font-size: 16px; }
         }
       `}</style>
     </>
