@@ -230,7 +230,7 @@ export default function SettingsClient() {
         .settings-row-meta { font-size: 0.68rem; color: var(--ink-muted); white-space: nowrap; flex-shrink: 0; }
         .settings-reset { background: none; border: none; color: var(--ink-muted); font-size: 0.68rem; cursor: pointer; padding: 2px 4px; border-radius: var(--radius); font-family: var(--font-body); text-decoration: underline; transition: color 0.15s; flex-shrink: 0; }
         .settings-reset:hover { color: var(--rust); }
-        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: #FFFEFC; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; }
+        .settings-select { flex-shrink: 0; width: auto; max-width: 200px; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: #FFFEFC; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; }
         .settings-select:focus { border-color: var(--rust); }
         .settings-select.is-custom { border-color: var(--rust); color: var(--rust); font-weight: 500; }
 
