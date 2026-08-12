@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
 
 interface DictionaryEntry {
@@ -111,7 +110,7 @@ export default function SettingsClient() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Ingredient <em>Categories</em></h1>
+          <h1 className="page-title">Ingredient Categories</h1>
         </div>
       </div>
 
@@ -136,7 +135,11 @@ export default function SettingsClient() {
         <div className="empty-state"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : entries.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">🧂</div>
+          <div className="empty-state-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
+              <path d="M12 3v18M5 8h14M7 12h10M9 16h6"/>
+            </svg>
+          </div>
           <h3>No ingredients yet</h3>
           <p>Add some recipes and their ingredients will show up here to categorise.</p>
         </div>
@@ -163,7 +166,6 @@ export default function SettingsClient() {
           ) : grouped.map(([cat, items]) => (
             <section key={cat} className="settings-cat">
               <div className="settings-cat-header">
-                <span className="settings-cat-emoji">{CATEGORY_EMOJI[cat] || '🛒'}</span>
                 <span className="settings-cat-name">{cat}</span>
                 <span className="settings-cat-count">{items.length}</span>
               </div>
@@ -210,13 +212,12 @@ export default function SettingsClient() {
         .settings-pref-sub { font-size: 0.74rem; color: var(--ink-muted); line-height: 1.4; }
         .settings-wrap { max-width: 720px; }
         .settings-controls { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
-        .settings-search { flex: 1; min-width: 180px; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: white; outline: none; transition: border-color 0.15s; }
+        .settings-search { flex: 1; min-width: 180px; padding: 0.5rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-body); font-size: 0.9rem; color: var(--ink); background: #FFFEFC; outline: none; transition: border-color 0.15s; }
         .settings-search:focus { border-color: var(--rust); }
 
         .settings-cat { margin-bottom: 1.5rem; }
         .settings-cat-header { display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.5rem; margin-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
-        .settings-cat-emoji { font-size: 1rem; }
-        .settings-cat-name { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-soft); font-weight: 500; flex: 1; }
+        .settings-cat-name { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-soft); font-weight: 500; flex: 1; }
         .settings-cat-count { font-size: 0.7rem; color: var(--ink-muted); }
 
         .settings-rows { display: flex; flex-direction: column; }
@@ -227,9 +228,9 @@ export default function SettingsClient() {
         .settings-row-name { font-size: 0.92rem; color: var(--ink); text-transform: capitalize; }
         .settings-row-examples { font-size: 0.68rem; color: var(--ink-muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
         .settings-row-meta { font-size: 0.68rem; color: var(--ink-muted); white-space: nowrap; flex-shrink: 0; }
-        .settings-reset { background: none; border: none; color: var(--ink-muted); font-size: 0.68rem; cursor: pointer; padding: 2px 4px; border-radius: 3px; font-family: var(--font-body); text-decoration: underline; transition: color 0.15s; flex-shrink: 0; }
+        .settings-reset { background: none; border: none; color: var(--ink-muted); font-size: 0.68rem; cursor: pointer; padding: 2px 4px; border-radius: var(--radius); font-family: var(--font-body); text-decoration: underline; transition: color 0.15s; flex-shrink: 0; }
         .settings-reset:hover { color: var(--rust); }
-        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: white; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; }
+        .settings-select { flex-shrink: 0; padding: 0.32rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: #FFFEFC; font-family: var(--font-body); font-size: 0.8rem; color: var(--ink-soft); cursor: pointer; outline: none; transition: border-color 0.15s, color 0.15s; }
         .settings-select:focus { border-color: var(--rust); }
         .settings-select.is-custom { border-color: var(--rust); color: var(--rust); font-weight: 500; }
 
