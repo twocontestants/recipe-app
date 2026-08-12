@@ -9,3 +9,5 @@ services:
         value: production
       - key: ANTHROPIC_API_KEY
         sync: false   # you'll paste this in the dashboard
+      - key: POSTGRES_URL
+        sync: false   # Neon connection string — paste in the dashboard, never commit

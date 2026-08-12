@@ -2,13 +2,17 @@ import { Pool } from 'pg';
 import { autoTag } from './autotag';
 import type { ShoppingOp } from './shoppingOps';
 
-// Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
+// Connection string comes from POSTGRES_URL (Neon / Vercel Postgres).
 // We use the raw `pg` driver to avoid @vercel/postgres wrapper confusion.
 let _pool: Pool | null = null;
 function pool(): Pool {
   if (!_pool) {
-    const connectionString = process.env.POSTGRES_URL ||
-      'postgresql://neondb_owner:npg_Da4LVXg8EdHB@ep-purple-glitter-a773calm.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+    const connectionString = process.env.POSTGRES_URL;
+    if (!connectionString) {
+      throw new Error(
+        'POSTGRES_URL is not set. Copy .env.local.example to .env.local and add your Neon connection string.'
+      );
+    }
     _pool = new Pool({ connectionString });
   }
   return _pool;
