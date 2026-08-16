@@ -31,4 +31,5 @@
 
 ## Notes
 
-- FR-006 mentions automated tests as a product requirement because the user asked for tests; wording stays outcome-focused (coverage of the two stories) rather than naming a framework.
+- FR-006 mentions automated tests as a product requirement because the user asked for tests; wording stays outcome-focused (coverage of the stories) rather than naming a framework.
+- User Story 3 (add to rest of week / another date) and FR-004 (fill leftover space with the sheet, not a dimmer) were added after the first ship so the spec matches the picker cooks actually use.
