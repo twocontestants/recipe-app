@@ -963,10 +963,10 @@ export default function PlannerClient() {
 
         /* Picker — dimmer is the backdrop; the sheet itself fills the visible area */
         .pl-picker-dimmer { position: fixed; inset: 0; z-index: 1000; background: rgba(26,22,18,0.55); backdrop-filter: blur(4px); }
-        .pl-picker-overlay { position: fixed; inset: 0; z-index: 1001; display: flex; align-items: center; justify-content: center; overflow: hidden; overscroll-behavior: none; padding: 1rem; box-sizing: border-box; }
+        .pl-picker-overlay { position: fixed; inset: 0; z-index: 1001; display: flex; align-items: center; justify-content: center; overflow: hidden; overscroll-behavior: none; padding: 1.5rem; box-sizing: border-box; }
         .pl-picker-overlay.is-sheet { padding: 0; align-items: stretch; background: white; }
         .pl-picker-overlay.is-sheet .pl-picker { height: 100%; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; }
-        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 100%; height: min(640px, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
+        .pl-picker { background: white; border-radius: 12px; width: min(640px, 100%); max-width: 100%; height: min(92vh, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
         .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); flex-shrink: 0; }
         .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
         .pl-picker-day { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
