@@ -6,6 +6,8 @@
     "dev": "NODE_ENV=development node server.js",
     "build": "next build",
     "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:setup": "node scripts/setup-db.js"
   },
   "dependencies": {
@@ -20,12 +22,16 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20.19.39",
     "@types/pg": "^8.11.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18",
     "@types/uuid": "^9",
-    "typescript": "^5.9.3"
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=20.18.1"
