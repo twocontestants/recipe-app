@@ -24,20 +24,25 @@ export type PickerSheetBox = {
 };
 
 export const KEYBOARD_OVERLAY_MIN_PX = 150;
-export const KEYBOARD_OPEN_DELTA_PX = 120;
+export const KEYBOARD_OPEN_DELTA_PX = 200;
 
 export function computePickerSheetBox(
   visual: ViewportRect,
   layout: LayoutRect,
-  baselineHeight: number,
+  baselineVisualHeight: number,
+  baselineInnerHeight?: number,
 ): PickerSheetBox;
 ```
+
+`baselineInnerHeight` defaults to `baselineVisualHeight`. Callers pass the visual height and `window.innerHeight` captured when the picker opened (before body scroll lock).
 
 ## Invariants
 
 1. `top === visual.offsetTop` and `left === visual.offsetLeft` and `width === visual.width`.
-2. If `layout.innerHeight - visual.offsetTop - visual.height` is in `(0, KEYBOARD_OVERLAY_MIN_PX)`, then `height === layout.innerHeight - visual.offsetTop` (no uncovered strip).
-3. If that space is `>= KEYBOARD_OVERLAY_MIN_PX`, then `height === visual.height` (do not draw under the keyboard).
-4. `keyboardOpen === baselineHeight - height >= KEYBOARD_OPEN_DELTA_PX` OR `baselineHeight - visual.height >= KEYBOARD_OPEN_DELTA_PX`.
-5. `top + height` never exceeds `layout.innerHeight`.
-6. `height` is never less than `visual.height`.
+2. Let `toLayoutBottom = max(0, layout.innerHeight - top)` and `toBaselineBottom = max(0, (baselineInnerHeight ?? baselineVisualHeight) - top)`.
+3. Overlaying keyboard: visual shrank by `>= KEYBOARD_OPEN_DELTA_PX` from `baselineVisualHeight` **and** space below the visual viewport (`toLayoutBottom - visual.height`) is `>= KEYBOARD_OVERLAY_MIN_PX`. Then `height === visual.height`.
+4. Layout-excludes-keyboard: layout inner height shrank by `>= KEYBOARD_OPEN_DELTA_PX` from `baselineInnerHeight`. Then `height === toLayoutBottom` (fill leftover chrome strip, do not grow back under the keys).
+5. Otherwise (keyboard closed / chrome / body-lock gap): `height === max(toLayoutBottom, toBaselineBottom)` so the **sheet** fills leftover space rather than a dimmer hiding it.
+6. `keyboardOpen` is true in cases 3 or 4.
+7. `top + height` never exceeds `max(layout.innerHeight, baselineInnerHeight ?? baselineVisualHeight)`.
+8. `height` is never negative.

@@ -5,6 +5,7 @@ import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
+import PickerRecipeRow from '@/components/PickerRecipeRow';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
@@ -162,7 +163,8 @@ export default function PlannerClient() {
     const vv = window.visualViewport;
     const html = document.documentElement;
     const body = document.body;
-    const baselineHeight = Math.max(window.innerHeight, vv?.height ?? 0);
+    const baselineVisualHeight = vv?.height ?? window.innerHeight;
+    const baselineInnerHeight = window.innerHeight;
     const prev = {
       htmlOverflow: html.style.overflow,
       bodyOverflow: body.style.overflow,
@@ -188,7 +190,8 @@ export default function PlannerClient() {
       const box = computePickerSheetBox(
         visual,
         { innerWidth: window.innerWidth, innerHeight: window.innerHeight },
-        baselineHeight,
+        baselineVisualHeight,
+        baselineInnerHeight,
       );
       overlay.style.inset = 'auto';
       overlay.style.top = `${box.top}px`;
@@ -198,6 +201,10 @@ export default function PlannerClient() {
       overlay.style.width = `${box.width}px`;
       overlay.style.height = `${box.height}px`;
       overlay.classList.toggle('is-keyboard', box.keyboardOpen);
+      overlay.classList.toggle(
+        'is-sheet',
+        window.innerWidth <= 600 || box.keyboardOpen || window.matchMedia('(pointer: coarse)').matches,
+      );
     };
 
     sync();
@@ -227,6 +234,7 @@ export default function PlannerClient() {
       overlay.style.width = '';
       overlay.style.height = '';
       overlay.classList.remove('is-keyboard');
+      overlay.classList.remove('is-sheet');
     };
   }, [picker]);
 
@@ -246,20 +254,38 @@ export default function PlannerClient() {
   // then fire the DB write in the background. On failure they roll back and
   // show a toast.
 
-  const addMeal = async (dayIndex: number, recipeId: string) => {
+  const addMeal = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
     const recipe = recipes.find(r => r.id === recipeId);
+    const weekStr = formatDate(targetWeekStart);
+    const sameWeek = weekStr === formatDate(weekStart);
+    const servings = recipe?.servings || 4;
+
+    if (!sameWeek) {
+      try {
+        const res = await fetch('/api/planner', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
+        });
+        if (!res.ok) throw new Error();
+        const when = getDayDate(targetWeekStart, dayIndex).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+        showToast(`Added to ${when}`, 'success');
+      } catch {
+        showToast('Failed to add meal', 'error');
+      }
+      return;
+    }
+
     // Optimistic: insert a temporary meal with a fake id
     const tempId = `tmp-${Date.now()}`;
     const optimistic: MealPlan = {
       id: tempId, recipe_id: recipeId, day_of_week: dayIndex,
-      meal_type: 'dinner', servings: recipe?.servings || 4,
-      week_start: formatDate(weekStart), recipe: recipe as any,
+      meal_type: 'dinner', servings, week_start: weekStr, recipe: recipe as any,
     };
     setMealPlans(prev => [...prev, optimistic]);
     try {
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings: recipe?.servings || 4 }),
+        body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
       });
       if (!res.ok) throw new Error();
       // Replace temp entry with real one from server
@@ -282,6 +308,21 @@ export default function PlannerClient() {
       if (snapshot) setMealPlans(prev => [...prev, snapshot]);
       showToast('Failed to remove meal', 'error');
     }
+  };
+
+  const pickRecipeForDay = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
+    const sameWeek = formatDate(targetWeekStart) === formatDate(weekStart);
+    if (picker?.replacingId && sameWeek && dayIndex === picker.dayIndex) {
+      await removeMeal(picker.replacingId);
+    }
+    await addMeal(dayIndex, recipeId, targetWeekStart);
+    setPicker(null);
+  };
+
+  const pickRecipeForDate = async (isoDate: string, recipeId: string) => {
+    const d = new Date(`${isoDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return;
+    await pickRecipeForDay((d.getDay() + 6) % 7, recipeId, getMonday(d));
   };
 
   const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
@@ -602,27 +643,24 @@ export default function PlannerClient() {
                     {!recipes.length ? <><span>No recipes yet.</span> <a href="/recipes">Add some →</a></> : <span>No matches</span>}
                   </div>
                 ) : filteredRecipes.map(r => (
-                  <button key={r.id} className="pl-picker-row" onClick={async () => {
-                    if (picker.replacingId) {
-                      await removeMeal(picker.replacingId);
-                      await addMeal(picker.dayIndex, r.id);
-                    } else {
-                      await addMeal(picker.dayIndex, r.id);
-                    }
-                    setPicker(null);
-                  }}>
-                    <div className="pl-picker-thumb">
-                      {(r as any).image_url ? <img src={(r as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <span>🍽</span>}
-                    </div>
-                    <div className="pl-picker-info">
-                      <span className="pl-picker-name">{r.title}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginTop: 3 }}>
-                        {r.primary_protein && <ProteinBadge protein={r.primary_protein} />}
-                        <span className="pl-picker-meta">{[(r as any).cook_time && `${(r as any).cook_time}m`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}</span>
-                      </div>
-                    </div>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--border)', flexShrink: 0 }}><path d="M9 18l6-6-6-6"/></svg>
-                  </button>
+                  <PickerRecipeRow
+                    key={r.id}
+                    title={r.title}
+                    currentDayIndex={picker.dayIndex}
+                    days={DAYS.map((name, i) => ({
+                      index: i,
+                      name,
+                      dateLabel: getDayDate(weekStart, i).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+                    }))}
+                    protein={r.primary_protein ? <ProteinBadge protein={r.primary_protein} /> : null}
+                    meta={[(r as any).cook_time && `${(r as any).cook_time}m`, ...(r.tags?.slice(0, 2) || [])].filter(Boolean).join(' · ')}
+                    thumb={(r as any).image_url
+                      ? <img src={(r as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      : <span>🍽</span>}
+                    onSelect={() => pickRecipeForDay(picker.dayIndex, r.id)}
+                    onAddToDay={dayIndex => pickRecipeForDay(dayIndex, r.id)}
+                    onAddToDate={isoDate => pickRecipeForDate(isoDate, r.id)}
+                  />
                 ))}
               </div>
               <div className="pl-picker-search-wrap">
@@ -923,9 +961,11 @@ export default function PlannerClient() {
         .pl-card-menu-date { font-size: 0.72rem; color: var(--ink-muted); }
         .pl-card-menu-check { color: var(--sage, #5a7a52); font-weight: 700; flex-shrink: 0; }
 
-        /* Picker — dimmer covers the page; sheet tracks the visible viewport */
-        .pl-picker-dimmer { position: fixed; top: 0; left: 0; right: 0; height: 200vh; z-index: 1000; background: rgba(26,22,18,0.55); backdrop-filter: blur(4px); }
+        /* Picker — dimmer is the backdrop; the sheet itself fills the visible area */
+        .pl-picker-dimmer { position: fixed; inset: 0; z-index: 1000; background: rgba(26,22,18,0.55); backdrop-filter: blur(4px); }
         .pl-picker-overlay { position: fixed; inset: 0; z-index: 1001; display: flex; align-items: center; justify-content: center; overflow: hidden; overscroll-behavior: none; padding: 1rem; box-sizing: border-box; }
+        .pl-picker-overlay.is-sheet { padding: 0; align-items: stretch; background: white; }
+        .pl-picker-overlay.is-sheet .pl-picker { height: 100%; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; }
         .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 100%; height: min(640px, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
         .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); flex-shrink: 0; }
         .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
@@ -935,8 +975,24 @@ export default function PlannerClient() {
         .pl-picker-empty a { color: var(--rust); }
         .pl-picker-search-wrap { padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0)); border-top: 1px solid var(--parchment); flex-shrink: 0; background: white; }
         .pl-picker-overlay.is-keyboard .pl-picker-search-wrap { padding-bottom: 0.75rem; }
-        .pl-picker-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); }
+        .pl-picker-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); min-width: 0; }
         .pl-picker-row:hover { background: var(--parchment); }
+        .pl-picker-row-wrap { display: flex; align-items: stretch; gap: 2px; position: relative; }
+        .pl-picker-date-hidden {
+          position: absolute; right: 0; top: 0; bottom: 0; width: 40px;
+          opacity: 0.01; border: 0; padding: 0; margin: 0; z-index: 0;
+        }
+        .pl-picker-row-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 3px; }
+        .pl-picker-row-menu-btn {
+          position: relative; z-index: 1;
+          background: none; border: none; border-radius: 8px; width: 40px; min-width: 40px;
+          display: flex; align-items: center; justify-content: center;
+          color: var(--ink-muted); cursor: pointer; flex-shrink: 0;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .pl-picker-row-menu-btn:hover { background: var(--parchment); color: var(--ink); }
+        .pl-picker-day-menu-backdrop { position: fixed; inset: 0; z-index: 1101; }
+        .pl-picker-day-menu { z-index: 1102; }
         .pl-picker-thumb { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--parchment); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
         .pl-picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
         .pl-picker-info { flex: 1; min-width: 0; }
@@ -985,7 +1041,7 @@ export default function PlannerClient() {
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }
-          .pl-picker-overlay { padding: 0; align-items: stretch; }
+          .pl-picker-overlay { padding: 0; align-items: stretch; background: white; }
           .pl-card-menu { min-width: 210px; }
           .pl-card-menu-item { padding: 0.7rem 0.75rem; font-size: 0.92rem; }
           .magic-modal { width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom, 0)); }

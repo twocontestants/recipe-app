@@ -1,22 +1,24 @@
 # Implementation Plan: Planner picker search polish
 
-**Branch**: `cursor/planner-picker-polish-ffdc` | **Date**: 2026-08-16 | **Spec**: [spec.md](./spec.md)
+**Branch**: `cursor/picker-fill-and-add-to-day-ffdc` | **Date**: 2026-08-16 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/001-picker-search-polish/spec.md`
 
 ## Summary
 
-Stop the picker search icon covering typed text, and close the strip of planner that shows between the sheet and the on-screen keyboard. Extract viewport-box math and search-field structure into testable modules; cover both with Vitest before wiring them into `PlannerClient`.
+Stop the picker search icon covering typed text. Size the white sheet to leftover chrome / body-lock space (and to the visual viewport when a keyboard overlays) so the planner never shows through a gap and more recipes stay visible. Tapping a result adds it to the open day; a kebab menu adds it to the rest of this week or to another calendar date.
+
+Extract viewport-box math, search-field structure, and result-row add-to behavior into testable modules; cover them with Vitest.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5 / React 18 / Next.js 14
 
-**Primary Dependencies**: Existing planner client; new Vitest runner for unit tests
+**Primary Dependencies**: Existing planner client; Vitest for unit tests
 
-**Storage**: N/A
+**Storage**: Existing `meal_plans` rows (`week_start` + `day_of_week`); another-date adds use the Monday of the picked date
 
-**Testing**: Vitest (jsdom for the search field, pure unit tests for viewport math)
+**Testing**: Vitest (jsdom for search field and recipe row, pure unit tests for viewport math)
 
 **Target Platform**: Mobile web (iOS/Android keyboards) and desktop
 
@@ -26,15 +28,15 @@ Stop the picker search icon covering typed text, and close the strip of planner 
 
 **Constraints**: No new UI libraries. Keep the picker in `PlannerClient` plus small extracted modules.
 
-**Scale/Scope**: One modal, two bugs, automated tests for both.
+**Scale/Scope**: One modal: search polish, sheet fill, add-to-day / another-date.
 
 ## Constitution Check
 
-- Household-first UX: icon cannot cover text; sheet stays flush with the keyboard.
-- Extract what you test: `lib/pickerViewport.ts` and `components/PickerSearchField.tsx`.
-- Test-first: Vitest cases land and fail before production changes.
-- Overlay honesty: full-screen dimmer + sheet sized to the visible viewport, filling small layout/visual mismatches.
-- Simplicity: flex row for the icon; no extra dependencies beyond Vitest.
+- Household-first UX: icon cannot cover text; sheet fills leftover space; add-to targets are tappable.
+- Extract what you test: `lib/pickerViewport.ts`, `components/PickerSearchField.tsx`, `components/PickerRecipeRow.tsx`.
+- Test-first: Vitest cases for geometry, search layout, and add-to menu.
+- Overlay honesty: the white sheet occupies leftover visible space; a dimmer is not the gap-hider.
+- Simplicity: flex row for the icon; native date input for Another date; no extra dependencies beyond Vitest.
 
 Post-design: no constitution violations.
 
@@ -60,6 +62,8 @@ lib/pickerViewport.ts
 lib/pickerViewport.test.ts
 components/PickerSearchField.tsx
 components/PickerSearchField.test.tsx
+components/PickerRecipeRow.tsx
+components/PickerRecipeRow.test.tsx
 app/planner/PlannerClient.tsx
 package.json          # npm test → vitest
 vitest.config.ts
@@ -69,13 +73,13 @@ vitest.config.ts
 
 ## Phase 0 — Research
 
-See [research.md](./research.md). Decisions: flex sibling icon (not absolute overlay), split dimmer vs sheet, fill sub-keyboard gaps when layout viewport already excludes the keyboard.
+See [research.md](./research.md). Decisions: flex sibling icon; fill leftover layout/baseline height with the sheet unless a keyboard is overlaying; rest-of-week days plus native date picker for Another date.
 
 ## Phase 1 — Design
 
 - Viewport contract: [contracts/picker-viewport.md](./contracts/picker-viewport.md)
 - Quickstart / test recipe: [quickstart.md](./quickstart.md)
-- No data-model (no persisted entities)
+- No new persisted entities (reuse meal plans)
 
 ## Complexity Tracking
 
