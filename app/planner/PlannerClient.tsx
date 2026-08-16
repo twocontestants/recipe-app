@@ -99,11 +99,18 @@ export default function PlannerClient() {
   const [magicSettings, setMagicSettings] = useState<MagicSettings>({ variety: 'medium', servings: 4, preferTags: '', excludeTags: '' });
   const [magicLoading, setMagicLoading] = useState(false);
 
-  // Drag state
   const [suggestions, setSuggestions] = useState<Record<number, Recipe[]>>({});
-  const [dragging, setDragging] = useState<{ mealId: string; fromDay: number } | null>(null);
-  const [dragOverDay, setDragOverDay] = useState<number | null>(null);
-  const [dragOverTrash, setDragOverTrash] = useState(false);
+
+  // Card action menu (delete / replace / move to)
+  const [cardMenu, setCardMenu] = useState<{
+    mealId: string;
+    dayIndex: number;
+    right: number;
+    y: number;
+    up: boolean;
+    view: 'root' | 'move';
+  } | null>(null);
+  const cardMenuRef = useRef<HTMLDivElement>(null);
 
   // Note save debounce timers
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
@@ -235,50 +242,39 @@ export default function PlannerClient() {
     }, 800);
   };
 
-  // ── Drag handlers ───────────────────────────────────────────────────────────
+  // ── Card action menu ────────────────────────────────────────────────────────
 
-  const handleDragStart = (e: React.DragEvent, mealId: string, fromDay: number) => {
-    setDragging({ mealId, fromDay });
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragEnd = () => {
-    setDragging(null);
-    setDragOverDay(null);
-    setDragOverTrash(false);
-  };
-
-  const handleDayDragOver = (e: React.DragEvent, dayIndex: number) => {
-    if (!dragging) return;
+  const openCardMenu = (e: React.MouseEvent, mealId: string, dayIndex: number) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverDay(dayIndex);
-    setDragOverTrash(false);
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const up = rect.bottom > window.innerHeight * 0.55;
+    setCardMenu({
+      mealId,
+      dayIndex,
+      right: window.innerWidth - rect.right,
+      y: up ? rect.top - 4 : rect.bottom + 4,
+      up,
+      view: 'root',
+    });
   };
 
-  const handleDayDrop = async (e: React.DragEvent, dayIndex: number) => {
-    e.preventDefault();
-    if (!dragging) return;
-    await moveMeal(dragging.mealId, dragging.fromDay, dayIndex);
-    setDragging(null);
-    setDragOverDay(null);
-  };
-
-  const handleTrashDragOver = (e: React.DragEvent) => {
-    if (!dragging) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverTrash(true);
-    setDragOverDay(null);
-  };
-
-  const handleTrashDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    if (!dragging) return;
-    await removeMeal(dragging.mealId);
-    setDragging(null);
-    setDragOverTrash(false);
-  };
+  useEffect(() => {
+    if (!cardMenu) return;
+    const close = (e?: Event) => {
+      if (e && cardMenuRef.current?.contains(e.target as Node)) return;
+      setCardMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCardMenu(null); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [cardMenu]);
 
   // ── Magic ───────────────────────────────────────────────────────────────────
 
@@ -378,17 +374,13 @@ export default function PlannerClient() {
             const isToday = isThisWeek(weekStart) && dayIndex === todayIdx;
             const isPast = isThisWeek(weekStart) && dayIndex < todayIdx;
             const dayMeals = getMealsForDay(dayIndex);
-            const isDragTarget = dragOverDay === dayIndex && dragging?.fromDay !== dayIndex;
             const daySuggestions = suggestions[dayIndex] ?? [];
 
             return (
               <div
                 key={dayIndex}
                 ref={isToday ? todayRef : undefined}
-                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''} ${isDragTarget ? 'drag-target' : ''}`}
-                onDragOver={e => handleDayDragOver(e, dayIndex)}
-                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverDay(null); }}
-                onDrop={e => handleDayDrop(e, dayIndex)}
+                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}`}
               >
                 {/* Day header */}
                 <div className="pl-day-header">
@@ -412,11 +404,11 @@ export default function PlannerClient() {
                   <div className="pl-meal-stack">
                     {dayMeals.map(meal => {
                       const recipe = meal.recipe;
-                      const isDraggingThis = dragging?.mealId === meal.id;
+                      const menuOpen = cardMenu?.mealId === meal.id;
                       return (
                         <div
                           key={meal.id}
-                          className={`pl-recipe-card ${isDraggingThis ? 'is-dragging' : ''}`}
+                          className="pl-recipe-card"
                           onClick={() => { if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`; }}
                           title="View recipe"
                         >
@@ -439,31 +431,18 @@ export default function PlannerClient() {
                           </div>
                           <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
                             <button
-                              className="pl-card-btn"
-                              title="Replace recipe"
-                              onClick={() => { setPicker({ dayIndex, replacingId: meal.id }); setPickerSearch(''); }}
+                              className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
+                              title="Meal options"
+                              aria-haspopup="menu"
+                              aria-expanded={menuOpen}
+                              onClick={e => openCardMenu(e, meal.id, dayIndex)}
                             >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="1 4 1 10 7 10"/>
-                                <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                <line x1="4" y1="6" x2="20" y2="6"/>
+                                <line x1="4" y1="12" x2="20" y2="12"/>
+                                <line x1="4" y1="18" x2="20" y2="18"/>
                               </svg>
                             </button>
-                            <div
-                              className="pl-card-btn pl-drag-handle"
-                              title="Drag to move to another day"
-                              draggable
-                              onDragStart={e => { e.stopPropagation(); handleDragStart(e, meal.id, dayIndex); }}
-                              onDragEnd={handleDragEnd}
-                            >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="5 9 2 12 5 15"/>
-                                <polyline points="19 9 22 12 19 15"/>
-                                <polyline points="9 5 12 2 15 5"/>
-                                <polyline points="9 19 12 22 15 19"/>
-                                <line x1="2" y1="12" x2="22" y2="12"/>
-                                <line x1="12" y1="2" x2="12" y2="22"/>
-                              </svg>
-                            </div>
                           </div>
                         </div>
                       );
@@ -516,19 +495,6 @@ export default function PlannerClient() {
         </div>
       )}
 
-      {/* Trash drop zone — only visible while dragging */}
-      {dragging && (
-        <div
-          className={`pl-trash-bar ${dragOverTrash ? 'active' : ''}`}
-          onDragOver={handleTrashDragOver}
-          onDragLeave={() => setDragOverTrash(false)}
-          onDrop={handleTrashDrop}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-          {dragOverTrash ? 'Release to remove' : 'Drop here to remove'}
-        </div>
-      )}
-
       {/* Recipe picker modal */}
       {picker && (
         <div className="modal-overlay" onClick={() => setPicker(null)}>
@@ -541,10 +507,6 @@ export default function PlannerClient() {
               <button className="modal-close" onClick={() => setPicker(null)}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
-            </div>
-            <div className="pl-picker-search-wrap">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 24, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)', pointerEvents: 'none' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-              <input autoFocus type="text" className="pl-picker-search" placeholder="Search recipes…" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} />
             </div>
             <div className="pl-picker-list">
               {filteredRecipes.length === 0 ? (
@@ -575,8 +537,110 @@ export default function PlannerClient() {
                 </button>
               ))}
             </div>
+            <div className="pl-picker-search-wrap">
+              <div className="pl-picker-search-field">
+                <svg className="pl-picker-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                <input autoFocus type="search" className="pl-picker-search" placeholder="Search recipes…" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} />
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Meal card action menu */}
+      {cardMenu && (
+        <>
+          <div className="pl-menu-backdrop" onClick={() => setCardMenu(null)} />
+          <div
+            ref={cardMenuRef}
+            className={`pl-card-menu ${cardMenu.up ? 'is-up' : ''}`}
+            style={{ right: cardMenu.right, top: cardMenu.y }}
+            role="menu"
+          >
+            {cardMenu.view === 'root' ? (
+              <>
+                <button
+                  className="pl-card-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    const { mealId, dayIndex } = cardMenu;
+                    setCardMenu(null);
+                    setPicker({ dayIndex, replacingId: mealId });
+                    setPickerSearch('');
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10"/>
+                    <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+                  </svg>
+                  Replace
+                </button>
+                <button
+                  className="pl-card-menu-item"
+                  role="menuitem"
+                  onClick={() => setCardMenu(m => m ? { ...m, view: 'move' } : m)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                  </svg>
+                  Move to
+                  <svg className="pl-card-menu-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                <div className="pl-card-menu-sep" />
+                <button
+                  className="pl-card-menu-item is-danger"
+                  role="menuitem"
+                  onClick={() => {
+                    const { mealId } = cardMenu;
+                    setCardMenu(null);
+                    removeMeal(mealId);
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6"/>
+                  </svg>
+                  Delete
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="pl-card-menu-item pl-card-menu-back"
+                  onClick={() => setCardMenu(m => m ? { ...m, view: 'root' } : m)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+                  Move to…
+                </button>
+                <div className="pl-card-menu-sep" />
+                {DAYS.map((name, i) => {
+                  const date = getDayDate(weekStart, i);
+                  const isCurrent = i === cardMenu.dayIndex;
+                  return (
+                    <button
+                      key={i}
+                      className={`pl-card-menu-item ${isCurrent ? 'is-current' : ''}`}
+                      role="menuitem"
+                      disabled={isCurrent}
+                      onClick={() => {
+                        const { mealId, dayIndex } = cardMenu;
+                        setCardMenu(null);
+                        moveMeal(mealId, dayIndex, i);
+                      }}
+                    >
+                      <span className="pl-card-menu-day">
+                        <span>{name}</span>
+                        <span className="pl-card-menu-date">{date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>
+                      </span>
+                      {isCurrent && <span className="pl-card-menu-check">✓</span>}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </>
       )}
 
       {/* Magic modal */}
@@ -675,10 +739,9 @@ export default function PlannerClient() {
 
         /* Day list */
         .pl-days { display: flex; flex-direction: column; }
-        .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); transition: background 0.15s; }
+        .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
         .pl-day:first-child { border-top: 1px solid var(--border); }
         .pl-day.is-past { opacity: 0.42; }
-        .pl-day.drag-target { background: rgba(181,69,27,0.04); border-radius: 8px; outline: 2px dashed var(--rust); outline-offset: -4px; }
 
         /* Day header */
         .pl-day-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
@@ -696,7 +759,6 @@ export default function PlannerClient() {
         /* Recipe card */
         .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
-        .pl-recipe-card.is-dragging { opacity: 0.35; }
         .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
         .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; display: flex; flex-direction: column; justify-content: center; }
@@ -706,9 +768,7 @@ export default function PlannerClient() {
         .pl-recipe-tag { background: var(--parchment); border: 1px solid var(--border); border-radius: 99px; padding: 1px 6px; font-size: 0.66rem; color: var(--ink-soft); }
         .pl-card-actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; flex-shrink: 0; align-self: center; }
         .pl-card-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; padding: 0; }
-        .pl-card-btn:hover { border-color: var(--rust); color: var(--rust); }
-        .pl-drag-handle { cursor: grab; }
-        .pl-drag-handle:active { cursor: grabbing; }
+        .pl-card-btn:hover, .pl-card-btn.is-open { border-color: var(--rust); color: var(--rust); }
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
@@ -740,30 +800,48 @@ export default function PlannerClient() {
         .pl-day-note:focus { color: var(--ink); }
         .pl-day-note:focus::placeholder { color: var(--ink-soft); }
 
-        /* Trash bar */
-        .pl-trash-bar {
-          position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
-          display: flex; align-items: center; justify-content: center; gap: 0.6rem;
-          padding: 1rem; background: white; border-top: 1.5px solid var(--border);
-          font-size: 0.85rem; color: var(--ink-muted);
-          box-shadow: 0 -4px 20px rgba(26,22,18,0.08);
-          transition: background 0.15s, color 0.15s, border-color 0.15s;
-          animation: slideUp 0.2s ease;
+        /* Card action menu */
+        .pl-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
+        .pl-card-menu {
+          position: fixed; z-index: 61; min-width: 188px; max-width: 86vw; max-height: 56vh;
+          overflow-y: auto; background: white; border: 1px solid var(--border);
+          border-radius: 10px; box-shadow: 0 8px 28px rgba(60,42,30,0.18);
+          padding: 4px; animation: plMenuIn 0.12s ease-out;
         }
-        .pl-trash-bar.active { background: #FEF2F2; border-color: #C0392B; color: #C0392B; }
-        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+        .pl-card-menu.is-up { transform: translateY(-100%); animation: none; }
+        @keyframes plMenuIn { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; } }
+        .pl-card-menu-item {
+          display: flex; align-items: center; gap: 0.55rem; width: 100%;
+          padding: 0.55rem 0.7rem; background: none; border: none; border-radius: 7px;
+          font-family: var(--font-body); font-size: 0.85rem; color: var(--ink);
+          cursor: pointer; text-align: left; transition: background 0.1s;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        }
+        .pl-card-menu-item:hover { background: var(--parchment); }
+        .pl-card-menu-item:disabled, .pl-card-menu-item.is-current { color: var(--ink-muted); cursor: default; }
+        .pl-card-menu-item.is-danger { color: var(--rust); }
+        .pl-card-menu-item.is-danger:hover { background: rgba(181,69,27,0.08); }
+        .pl-card-menu-item svg { flex-shrink: 0; color: currentColor; }
+        .pl-card-menu-chevron { margin-left: auto; color: var(--ink-muted); }
+        .pl-card-menu-back { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
+        .pl-card-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+        .pl-card-menu-day { flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+        .pl-card-menu-date { font-size: 0.72rem; color: var(--ink-muted); }
+        .pl-card-menu-check { color: var(--sage, #5a7a52); font-weight: 700; flex-shrink: 0; }
 
-        /* Picker */
-        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
-        .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); }
+        /* Picker — fixed height so search results don't resize the modal */
+        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 95vw; height: min(640px, 85vh); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
+        .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); flex-shrink: 0; }
         .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
         .pl-picker-day { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
-        .pl-picker-search-wrap { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--parchment); }
+        .pl-picker-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0.5rem; }
+        .pl-picker-empty { display: flex; align-items: center; justify-content: center; gap: 0.35rem; min-height: 100%; padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
+        .pl-picker-empty a { color: var(--rust); }
+        .pl-picker-search-wrap { padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0)); border-top: 1px solid var(--parchment); flex-shrink: 0; background: white; }
+        .pl-picker-search-field { position: relative; }
+        .pl-picker-search-icon { position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
         .pl-picker-search { width: 100%; padding: 0.55rem 0.85rem 0.55rem 2.4rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
         .pl-picker-search:focus { border-color: var(--rust); }
-        .pl-picker-list { overflow-y: auto; flex: 1; padding: 0.5rem; }
-        .pl-picker-empty { padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
-        .pl-picker-empty a { color: var(--rust); }
         .pl-picker-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); }
         .pl-picker-row:hover { background: var(--parchment); }
         .pl-picker-thumb { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--parchment); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
@@ -811,9 +889,11 @@ export default function PlannerClient() {
           .pl-day-name { font-size: 1.1rem; }
           .pl-recipe-img { width: 64px; height: 56px; }
           .pl-recipe-name { font-size: 0.85rem; }
-          .pl-picker { max-height: 92dvh; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
+          .pl-picker { height: min(640px, 85dvh); max-height: 92dvh; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
+          .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }
-          .pl-trash-bar { padding: 1.25rem 1rem 2rem; }
+          .pl-card-menu { min-width: 210px; }
+          .pl-card-menu-item { padding: 0.7rem 0.75rem; font-size: 0.92rem; }
           .magic-modal { width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom, 0)); }
           .magic-input { font-size: 16px; }
           .magic-footer-actions { width: 100%; }
