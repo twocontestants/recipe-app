@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import GenerateListModal from '@/components/GenerateListModal';
@@ -93,6 +93,8 @@ export default function PlannerClient() {
   // Picker
   const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
+  const pickerOverlayRef = useRef<HTMLDivElement>(null);
+  const pickerSearchRef = useRef<HTMLInputElement>(null);
 
   // Magic
   const [showMagic, setShowMagic] = useState(false);
@@ -147,6 +149,77 @@ export default function PlannerClient() {
   }, [weekStart]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Keep the recipe picker inside the visual viewport so the mobile keyboard
+  // shrinks the sheet instead of pushing it off-screen.
+  useLayoutEffect(() => {
+    if (!picker) return;
+    const overlay = pickerOverlayRef.current;
+    if (!overlay) return;
+
+    const vv = window.visualViewport;
+    const html = document.documentElement;
+    const body = document.body;
+    const baselineHeight = Math.max(window.innerHeight, vv?.height ?? 0);
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyWidth: body.style.width,
+      scrollY: window.scrollY,
+    };
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.top = `-${prev.scrollY}px`;
+    body.style.width = '100%';
+
+    const sync = () => {
+      const top = vv?.offsetTop ?? 0;
+      const left = vv?.offsetLeft ?? 0;
+      const width = vv?.width ?? window.innerWidth;
+      const height = vv?.height ?? window.innerHeight;
+      overlay.style.inset = 'auto';
+      overlay.style.top = `${top}px`;
+      overlay.style.left = `${left}px`;
+      overlay.style.right = 'auto';
+      overlay.style.bottom = 'auto';
+      overlay.style.width = `${width}px`;
+      overlay.style.height = `${height}px`;
+      overlay.classList.toggle('is-keyboard', height < baselineHeight - 120);
+    };
+
+    sync();
+    vv?.addEventListener('resize', sync);
+    vv?.addEventListener('scroll', sync);
+    window.addEventListener('resize', sync);
+
+    if (!window.matchMedia('(pointer: coarse)').matches) {
+      pickerSearchRef.current?.focus();
+    }
+
+    return () => {
+      vv?.removeEventListener('resize', sync);
+      vv?.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.position = prev.bodyPosition;
+      body.style.top = prev.bodyTop;
+      body.style.width = prev.bodyWidth;
+      window.scrollTo(0, prev.scrollY);
+      overlay.style.inset = '';
+      overlay.style.top = '';
+      overlay.style.left = '';
+      overlay.style.right = '';
+      overlay.style.bottom = '';
+      overlay.style.width = '';
+      overlay.style.height = '';
+      overlay.classList.remove('is-keyboard');
+    };
+  }, [picker]);
 
   useEffect(() => {
     if (!loading && todayRef.current && isThisWeek(weekStart)) {
@@ -497,7 +570,11 @@ export default function PlannerClient() {
 
       {/* Recipe picker modal */}
       {picker && (
-        <div className="modal-overlay" onClick={() => setPicker(null)}>
+        <div
+          ref={pickerOverlayRef}
+          className="modal-overlay pl-picker-overlay"
+          onClick={() => setPicker(null)}
+        >
           <div className="pl-picker" onClick={e => e.stopPropagation()}>
             <div className="pl-picker-header">
               <div>
@@ -540,7 +617,20 @@ export default function PlannerClient() {
             <div className="pl-picker-search-wrap">
               <div className="pl-picker-search-field">
                 <svg className="pl-picker-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                <input autoFocus type="search" className="pl-picker-search" placeholder="Search recipes…" value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} />
+                <input
+                  ref={pickerSearchRef}
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  className="pl-picker-search"
+                  placeholder="Search recipes…"
+                  value={pickerSearch}
+                  onChange={e => setPickerSearch(e.target.value)}
+                  onFocus={() => {
+                    window.scrollTo(0, 0);
+                    requestAnimationFrame(() => window.scrollTo(0, 0));
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -829,15 +919,17 @@ export default function PlannerClient() {
         .pl-card-menu-date { font-size: 0.72rem; color: var(--ink-muted); }
         .pl-card-menu-check { color: var(--sage, #5a7a52); font-weight: 700; flex-shrink: 0; }
 
-        /* Picker — fixed height so search results don't resize the modal */
-        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 95vw; height: min(640px, 85vh); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
+        /* Picker — sized to the visual viewport so the keyboard shrinks it in place */
+        .modal-overlay.pl-picker-overlay { overflow: hidden; overscroll-behavior: none; padding: 1rem; box-sizing: border-box; }
+        .pl-picker { background: white; border-radius: 12px; width: 440px; max-width: 100%; height: min(640px, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(26,22,18,0.15); }
         .pl-picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; border-bottom: 1px solid var(--parchment); flex-shrink: 0; }
         .pl-picker-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 300; color: var(--ink); }
         .pl-picker-day { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
-        .pl-picker-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0.5rem; }
+        .pl-picker-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0.5rem; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
         .pl-picker-empty { display: flex; align-items: center; justify-content: center; gap: 0.35rem; min-height: 100%; padding: 2rem; text-align: center; font-size: 0.85rem; color: var(--ink-muted); }
         .pl-picker-empty a { color: var(--rust); }
         .pl-picker-search-wrap { padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0)); border-top: 1px solid var(--parchment); flex-shrink: 0; background: white; }
+        .pl-picker-overlay.is-keyboard .pl-picker-search-wrap { padding-bottom: 0.75rem; }
         .pl-picker-search-field { position: relative; }
         .pl-picker-search-icon { position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); color: var(--ink-muted); pointer-events: none; }
         .pl-picker-search { width: 100%; padding: 0.55rem 0.85rem 0.55rem 2.4rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.88rem; font-family: var(--font-body); color: var(--ink); outline: none; transition: border-color 0.15s; box-sizing: border-box; }
@@ -889,9 +981,10 @@ export default function PlannerClient() {
           .pl-day-name { font-size: 1.1rem; }
           .pl-recipe-img { width: 64px; height: 56px; }
           .pl-recipe-name { font-size: 0.85rem; }
-          .pl-picker { height: min(640px, 85dvh); max-height: 92dvh; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
+          .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }
+          .modal-overlay.pl-picker-overlay { padding: 0; align-items: stretch; }
           .pl-card-menu { min-width: 210px; }
           .pl-card-menu-item { padding: 0.7rem 0.75rem; font-size: 0.92rem; }
           .magic-modal { width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom, 0)); }
