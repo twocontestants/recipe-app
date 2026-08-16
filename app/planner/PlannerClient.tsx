@@ -254,20 +254,38 @@ export default function PlannerClient() {
   // then fire the DB write in the background. On failure they roll back and
   // show a toast.
 
-  const addMeal = async (dayIndex: number, recipeId: string) => {
+  const addMeal = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
     const recipe = recipes.find(r => r.id === recipeId);
+    const weekStr = formatDate(targetWeekStart);
+    const sameWeek = weekStr === formatDate(weekStart);
+    const servings = recipe?.servings || 4;
+
+    if (!sameWeek) {
+      try {
+        const res = await fetch('/api/planner', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
+        });
+        if (!res.ok) throw new Error();
+        const when = getDayDate(targetWeekStart, dayIndex).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+        showToast(`Added to ${when}`, 'success');
+      } catch {
+        showToast('Failed to add meal', 'error');
+      }
+      return;
+    }
+
     // Optimistic: insert a temporary meal with a fake id
     const tempId = `tmp-${Date.now()}`;
     const optimistic: MealPlan = {
       id: tempId, recipe_id: recipeId, day_of_week: dayIndex,
-      meal_type: 'dinner', servings: recipe?.servings || 4,
-      week_start: formatDate(weekStart), recipe: recipe as any,
+      meal_type: 'dinner', servings, week_start: weekStr, recipe: recipe as any,
     };
     setMealPlans(prev => [...prev, optimistic]);
     try {
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings: recipe?.servings || 4 }),
+        body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
       });
       if (!res.ok) throw new Error();
       // Replace temp entry with real one from server
@@ -292,12 +310,19 @@ export default function PlannerClient() {
     }
   };
 
-  const pickRecipeForDay = async (dayIndex: number, recipeId: string) => {
-    if (picker?.replacingId && dayIndex === picker.dayIndex) {
+  const pickRecipeForDay = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
+    const sameWeek = formatDate(targetWeekStart) === formatDate(weekStart);
+    if (picker?.replacingId && sameWeek && dayIndex === picker.dayIndex) {
       await removeMeal(picker.replacingId);
     }
-    await addMeal(dayIndex, recipeId);
+    await addMeal(dayIndex, recipeId, targetWeekStart);
     setPicker(null);
+  };
+
+  const pickRecipeForDate = async (isoDate: string, recipeId: string) => {
+    const d = new Date(`${isoDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return;
+    await pickRecipeForDay((d.getDay() + 6) % 7, recipeId, getMonday(d));
   };
 
   const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
@@ -634,6 +659,7 @@ export default function PlannerClient() {
                       : <span>🍽</span>}
                     onSelect={() => pickRecipeForDay(picker.dayIndex, r.id)}
                     onAddToDay={dayIndex => pickRecipeForDay(dayIndex, r.id)}
+                    onAddToDate={isoDate => pickRecipeForDate(isoDate, r.id)}
                   />
                 ))}
               </div>
@@ -951,9 +977,14 @@ export default function PlannerClient() {
         .pl-picker-overlay.is-keyboard .pl-picker-search-wrap { padding-bottom: 0.75rem; }
         .pl-picker-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: none; background: none; cursor: pointer; width: 100%; text-align: left; transition: background 0.12s; font-family: var(--font-body); min-width: 0; }
         .pl-picker-row:hover { background: var(--parchment); }
-        .pl-picker-row-wrap { display: flex; align-items: stretch; gap: 2px; }
+        .pl-picker-row-wrap { display: flex; align-items: stretch; gap: 2px; position: relative; }
+        .pl-picker-date-hidden {
+          position: absolute; right: 0; top: 0; bottom: 0; width: 40px;
+          opacity: 0.01; border: 0; padding: 0; margin: 0; z-index: 0;
+        }
         .pl-picker-row-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 3px; }
         .pl-picker-row-menu-btn {
+          position: relative; z-index: 1;
           background: none; border: none; border-radius: 8px; width: 40px; min-width: 40px;
           display: flex; align-items: center; justify-content: center;
           color: var(--ink-muted); cursor: pointer; flex-shrink: 0;
