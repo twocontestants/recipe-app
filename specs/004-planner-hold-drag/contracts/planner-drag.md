@@ -8,8 +8,8 @@ Module: `lib/plannerDrag.ts`
 |------|-------|------|
 | `HOLD_MS` | `400` | Press duration before a drag arms |
 | `MOVE_CANCEL_PX` | `8` | Movement before hold that cancels the hold |
-| `RAIL_DAYS` | `10` | Length of the surrounding window |
-| `RAIL_DAYS_BEFORE` | `4` | Days before the origin in the window |
+| `RAIL_DAYS` | `8` | Numbered dates on the rail (plus earlier/later pickers) |
+| `RAIL_DAYS_BEFORE` | `2` | Days before the origin in the numbered window |
 
 ## Types
 
@@ -23,6 +23,7 @@ type RailHit = HitRect & { iso: string }
 type DragTarget =
   | { type: 'week-day'; index: number; iso: string }
   | { type: 'rail-day'; iso: string }
+  | { type: 'rail-pick'; direction: 'earlier' | 'later' }
   | null
 ```
 
@@ -38,7 +39,7 @@ True when `hypot(dx, dy) >= threshold`. Used both to cancel an unarmed hold and 
 
 ### `surroundingTenDays(originIso: string): string[]`
 
-Exactly ten ISO dates: `origin - 4` … `origin + 5`, inclusive, in order.
+Eight ISO dates: `origin - 2` … `origin + 5`, inclusive, in order. Earlier/later picker slots sit above and below.
 
 ### `storageWeeksForIsos(isos: string[]): string[]`
 

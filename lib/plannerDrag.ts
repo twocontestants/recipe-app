@@ -2,8 +2,8 @@ import { isoDate, localDateIso, parseLocalIso, storageCoords } from './plannerDa
 
 export const HOLD_MS = 400;
 export const MOVE_CANCEL_PX = 8;
-export const RAIL_DAYS = 10;
-export const RAIL_DAYS_BEFORE = 4;
+export const RAIL_DAYS = 8;
+export const RAIL_DAYS_BEFORE = 2;
 
 export interface HitRect {
   left: number;
@@ -18,12 +18,14 @@ export interface WeekHit extends HitRect {
 }
 
 export interface RailHit extends HitRect {
-  iso: string;
+  iso?: string;
+  pick?: 'earlier' | 'later';
 }
 
 export type DragTarget =
   | { type: 'week-day'; index: number; iso: string }
   | { type: 'rail-day'; iso: string }
+  | { type: 'rail-pick'; direction: 'earlier' | 'later' }
   | null;
 
 export interface OccupancyMeal {
@@ -87,7 +89,8 @@ export function resolveDragTarget(
   const week = weeks.find(hit => pointInRect(x, y, hit));
   if (week) return { type: 'week-day', index: week.index, iso: week.iso };
   const rail = railHits.find(hit => pointInRect(x, y, hit));
-  if (rail) return { type: 'rail-day', iso: rail.iso };
+  if (rail?.pick) return { type: 'rail-pick', direction: rail.pick };
+  if (rail?.iso) return { type: 'rail-day', iso: rail.iso };
   return null;
 }
 

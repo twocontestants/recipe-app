@@ -22,6 +22,7 @@ import {
 } from '@/lib/plannerDays';
 import {
   HOLD_MS,
+  addCalendarDays,
   dayOccupied,
   movementExceededThreshold,
   resolveDragTarget,
@@ -145,6 +146,12 @@ export default function PlannerClient() {
   const [drag, setDrag] = useState<typeof dragRef.current>(null);
   const [railDays, setRailDays] = useState<string[]>([]);
   const [railMeals, setRailMeals] = useState<MealPlan[]>([]);
+  const railPickEls = useRef<{ earlier: HTMLDivElement | null; later: HTMLDivElement | null }>({
+    earlier: null,
+    later: null,
+  });
+  const railDateInputRef = useRef<HTMLInputElement>(null);
+  const pendingRailPick = useRef<{ mealId: string; direction: 'earlier' | 'later' } | null>(null);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -461,13 +468,53 @@ export default function PlannerClient() {
       }];
     });
 
-  const railHits = (): RailHit[] =>
-    railDays.flatMap((iso, index) => {
+  const railHits = (): RailHit[] => {
+    const hits: RailHit[] = [];
+    const earlier = railPickEls.current.earlier;
+    if (earlier) {
+      const r = earlier.getBoundingClientRect();
+      hits.push({ pick: 'earlier', left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    for (const [index, iso] of railDays.entries()) {
       const el = railEls.current[index];
-      if (!el) return [];
+      if (!el) continue;
       const r = el.getBoundingClientRect();
-      return [{ iso, left: r.left, right: r.right, top: r.top, bottom: r.bottom }];
-    });
+      hits.push({ iso, left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    const later = railPickEls.current.later;
+    if (later) {
+      const r = later.getBoundingClientRect();
+      hits.push({ pick: 'later', left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    return hits;
+  };
+
+  const openRailDatePicker = (mealId: string, direction: 'earlier' | 'later', days: string[]) => {
+    pendingRailPick.current = { mealId, direction };
+    const input = railDateInputRef.current;
+    if (!input) return;
+    if (direction === 'earlier') {
+      const max = days[0] ? addCalendarDays(days[0], -1) : localDateIso(new Date());
+      input.removeAttribute('min');
+      input.max = max;
+      input.value = max;
+    } else {
+      const min = days.length ? addCalendarDays(days[days.length - 1], 1) : localDateIso(new Date());
+      input.removeAttribute('max');
+      input.min = min;
+      input.value = min;
+    }
+    const open = () => {
+      try {
+        if (typeof input.showPicker === 'function') input.showPicker();
+        else input.focus();
+      } catch {
+        input.focus();
+      }
+    };
+    open();
+    requestAnimationFrame(open);
+  };
 
   const updateDrag = (next: typeof dragRef.current) => {
     dragRef.current = next;
@@ -557,6 +604,7 @@ export default function PlannerClient() {
     if (!session || e.pointerId !== session.pointerId) return;
     clearHoldTimer();
     holdEl.current = null;
+    const daysSnapshot = railDays;
     hideRail();
     updateDrag(null);
     if (!session.armed) return;
@@ -565,6 +613,10 @@ export default function PlannerClient() {
     if (cancelled || !session.target) return;
     if (session.target.type === 'week-day') {
       void moveMealToDate(session.mealId, getDayDate(weekStart, session.target.index));
+      return;
+    }
+    if (session.target.type === 'rail-pick') {
+      openRailDatePicker(session.mealId, session.target.direction, daysSnapshot);
       return;
     }
     void moveMealToDate(session.mealId, parseLocalIso(session.target.iso));
@@ -918,8 +970,19 @@ export default function PlannerClient() {
 
       {drag?.armed && railDays.length > 0 && (
         <div className="pl-rail" aria-live="polite" aria-label="Nearby days">
+          <div
+            ref={el => { railPickEls.current.earlier = el; }}
+            className={`pl-rail-day pl-rail-pick${drag.target?.type === 'rail-pick' && drag.target.direction === 'earlier' ? ' is-hot' : ''}`}
+          >
+            <div className="pl-rail-circle" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 14 12 8 18 14"/>
+              </svg>
+            </div>
+            <div className="pl-rail-wd">Earlier</div>
+          </div>
           {railDays.map((iso, index) => {
-            const date = new Date(`${iso}T00:00:00`);
+            const date = parseLocalIso(iso);
             const occupied = dayOccupied(occupancyMeals, iso);
             const titles = titlesOnDay(occupancyMeals, iso);
             const hot = drag.target?.type === 'rail-day' && drag.target.iso === iso;
@@ -929,18 +992,45 @@ export default function PlannerClient() {
                 ref={el => { railEls.current[index] = el; }}
                 className={`pl-rail-day${occupied ? ' is-occupied' : ''}${hot ? ' is-hot' : ''}${iso === drag.originIso ? ' is-origin' : ''}`}
               >
-                <div className="pl-rail-preview">
-                  {titles.length ? titles.join(' · ') : '\u00a0'}
-                </div>
                 <div className="pl-rail-circle">{date.getDate()}</div>
                 <div className="pl-rail-wd">
                   {date.toLocaleDateString('en-AU', { weekday: 'short' })}
                 </div>
+                {titles.length > 0 && (
+                  <div className="pl-rail-preview">{titles.join(' · ')}</div>
+                )}
               </div>
             );
           })}
+          <div
+            ref={el => { railPickEls.current.later = el; }}
+            className={`pl-rail-day pl-rail-pick${drag.target?.type === 'rail-pick' && drag.target.direction === 'later' ? ' is-hot' : ''}`}
+          >
+            <div className="pl-rail-circle" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 10 12 16 18 10"/>
+              </svg>
+            </div>
+            <div className="pl-rail-wd">Later</div>
+          </div>
         </div>
       )}
+      <input
+        ref={railDateInputRef}
+        type="date"
+        className="pl-picker-date-hidden"
+        aria-label="Pick a date to move this meal"
+        onChange={e => {
+          const value = e.target.value;
+          const pending = pendingRailPick.current;
+          pendingRailPick.current = null;
+          e.target.value = '';
+          e.target.removeAttribute('min');
+          e.target.removeAttribute('max');
+          if (!pending || !value) return;
+          void moveMealToDate(pending.mealId, parseLocalIso(value));
+        }}
+      />
       {drag?.armed && (
         <div className="pl-drag-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden>
           {mealPlans.find(m => m.id === drag.mealId)?.recipe?.title ?? 'Moving…'}
@@ -1247,6 +1337,7 @@ export default function PlannerClient() {
           border-radius: 10px;
           padding: 2px 0;
         }
+        .pl-rail-pick { flex: 0 0 auto; padding: 8px 0 6px; }
         .pl-rail-day.is-hot { background: rgba(181, 69, 27, 0.1); }
         .pl-rail-day.is-origin .pl-rail-circle { box-shadow: 0 0 0 2px var(--parchment), 0 0 0 3px var(--rust); }
         .pl-rail-preview {
@@ -1254,10 +1345,15 @@ export default function PlannerClient() {
           color: var(--ink-soft); max-width: 100%;
           overflow: hidden; display: -webkit-box;
           -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-          min-height: 1.4em;
         }
         .pl-rail-circle {
-          width: 32px; height: 32px; border-radius: 50%;
+          flex: 0 0 32px;
+          width: 32px; height: 32px;
+          min-width: 32px; min-height: 32px;
+          max-width: 32px; max-height: 32px;
+          aspect-ratio: 1;
+          box-sizing: border-box;
+          border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
           font-size: 0.76rem; font-weight: 700;
           border: 2px dashed var(--border);
@@ -1266,6 +1362,11 @@ export default function PlannerClient() {
         .pl-rail-day.is-occupied .pl-rail-circle {
           border-style: solid; border-color: var(--rust);
           background: var(--rust); color: #fff;
+        }
+        .pl-rail-pick .pl-rail-circle {
+          border-style: dotted;
+          background: white;
+          color: var(--ink);
         }
         .pl-rail-day.is-hot .pl-rail-circle { transform: scale(1.08); }
         .pl-rail-wd { font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.02em; }

@@ -36,10 +36,8 @@ describe('shouldAllowDrag', () => {
 });
 
 describe('surroundingTenDays', () => {
-  it('is four days before the origin, the origin, and five days after', () => {
+  it('is two days before the origin, the origin, and five days after', () => {
     expect(surroundingTenDays('2026-08-19')).toEqual([
-      '2026-08-15',
-      '2026-08-16',
       '2026-08-17',
       '2026-08-18',
       '2026-08-19',
@@ -96,6 +94,21 @@ describe('resolveDragTarget', () => {
 
   it('returns null over empty space', () => {
     expect(resolveDragTarget(120, 40, weekHits, railHits)).toBeNull();
+  });
+
+  it('hits earlier and later picker slots on the rail', () => {
+    const picks: RailHit[] = [
+      { pick: 'earlier', left: 310, right: 400, top: 0, bottom: 50 },
+      { pick: 'later', left: 310, right: 400, top: 650, bottom: 700 },
+    ];
+    expect(resolveDragTarget(340, 20, [], picks)).toEqual({
+      type: 'rail-pick',
+      direction: 'earlier',
+    });
+    expect(resolveDragTarget(340, 680, [], picks)).toEqual({
+      type: 'rail-pick',
+      direction: 'later',
+    });
   });
 });
 
