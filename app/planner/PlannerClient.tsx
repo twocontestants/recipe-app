@@ -8,6 +8,7 @@ import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import {
+  dayDateOf,
   displayDayIndex,
   displayDays,
   formatWeekLabel,
@@ -18,6 +19,14 @@ import {
   storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
+import {
+  adjacentWeekIso,
+  movementExceededThreshold,
+  resolveDragTarget,
+  shouldAllowDrag,
+  type DayRect,
+  type DragTarget,
+} from '@/lib/plannerDrag';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -110,6 +119,19 @@ export default function PlannerClient() {
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const todayRef = useRef<HTMLDivElement>(null);
+  const dayEls = useRef<(HTMLDivElement | null)[]>([]);
+  const suppressCardClick = useRef(false);
+  const dragRef = useRef<{
+    mealId: string;
+    fromDay: number;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    dragging: boolean;
+    target: DragTarget;
+  } | null>(null);
+  const [drag, setDrag] = useState<typeof dragRef.current>(null);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -359,13 +381,21 @@ export default function PlannerClient() {
     await pickRecipeForDay(displayDayIndex(d, weekStartsOn), recipeId, startOfDisplayWeek(d, weekStartsOn));
   };
 
-  const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
-    if (fromDay === toDay) return;
+  const moveMealToDate = async (mealId: string, date: Date) => {
     const meal = mealPlans.find(m => m.id === mealId);
     if (!meal) return;
-    // Optimistic: update day_of_week in place
-    const toCoords = storageCoords(getDayDate(weekStart, toDay));
-    setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toCoords.dayOfWeek, week_start: toCoords.weekStart } : m));
+    const toCoords = storageCoords(date);
+    if (isoDate(meal.week_start) === toCoords.weekStart && meal.day_of_week === toCoords.dayOfWeek) return;
+
+    const destWeek = startOfDisplayWeek(date, weekStartsOn);
+    const sameDisplayWeek = formatDate(destWeek) === formatDate(weekStart);
+
+    if (sameDisplayWeek) {
+      setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toCoords.dayOfWeek, week_start: toCoords.weekStart } : m));
+    } else {
+      setMealPlans(prev => prev.filter(m => m.id !== mealId));
+    }
+
     try {
       await fetch(`/api/planner?id=${mealId}`, { method: 'DELETE' });
       const res = await fetch('/api/planner', {
@@ -374,15 +404,89 @@ export default function PlannerClient() {
       });
       if (!res.ok) throw new Error();
       const real = await res.json();
-      setMealPlans(prev => prev.map(m => m.id === mealId
-        ? { ...real, recipe: meal.recipe }
-        : m
-      ));
+      if (sameDisplayWeek) {
+        setMealPlans(prev => prev.map(m => m.id === mealId ? { ...real, recipe: meal.recipe } : m));
+      } else {
+        setWeekStart(destWeek);
+        const when = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+        showToast(`Moved to ${when}`, 'success');
+      }
     } catch {
-      // Roll back
-      setMealPlans(prev => prev.map(m => m.id === mealId ? meal : m));
+      setMealPlans(prev => {
+        if (prev.some(m => m.id === mealId)) {
+          return prev.map(m => m.id === mealId ? meal : m);
+        }
+        return [...prev, meal];
+      });
       showToast('Failed to move meal', 'error');
     }
+  };
+
+  const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
+    if (fromDay === toDay) return;
+    await moveMealToDate(mealId, getDayDate(weekStart, toDay));
+  };
+
+  const dayRects = (): DayRect[] =>
+    dayEls.current.flatMap((el, index) => {
+      if (!el) return [];
+      const r = el.getBoundingClientRect();
+      return [{ index, top: r.top, bottom: r.bottom }];
+    });
+
+  const updateDrag = (next: typeof dragRef.current) => {
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const onMealPointerDown = (e: React.PointerEvent, mealId: string, fromDay: number) => {
+    if (e.button !== 0) return;
+    if (!shouldAllowDrag(mealId)) return;
+    if ((e.target as HTMLElement).closest('.pl-card-actions')) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    updateDrag({
+      mealId,
+      fromDay,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      dragging: false,
+      target: null,
+    });
+  };
+
+  const onMealPointerMove = (e: React.PointerEvent) => {
+    const session = dragRef.current;
+    if (!session) return;
+    const dx = e.clientX - session.startX;
+    const dy = e.clientY - session.startY;
+    const dragging = session.dragging || movementExceededThreshold(dx, dy);
+    if (dragging) e.preventDefault();
+    const target = dragging
+      ? resolveDragTarget(e.clientY, window.innerHeight, dayRects())
+      : null;
+    updateDrag({ ...session, x: e.clientX, y: e.clientY, dragging, target });
+  };
+
+  const onMealPointerUp = (e: React.PointerEvent) => {
+    const session = dragRef.current;
+    updateDrag(null);
+    if (!session) return;
+    if (!session.dragging) return;
+    suppressCardClick.current = true;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!session.target) return;
+    if (session.target.type === 'day') {
+      void moveMeal(session.mealId, session.fromDay, session.target.index);
+      return;
+    }
+    const destWeek = adjacentWeekIso(
+      formatDate(weekStart),
+      session.target.type === 'next-week' ? 1 : -1,
+    );
+    void moveMealToDate(session.mealId, dayDateOf(destWeek, session.fromDay));
   };
 
   // ── Notes ───────────────────────────────────────────────────────────────────
@@ -526,7 +630,7 @@ export default function PlannerClient() {
       {loading ? (
         <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : (
-        <div className="pl-days">
+        <div className={`pl-days${drag?.dragging ? ' is-dragging' : ''}`}>
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
             const todayIdx = todayDisplayIdx;
@@ -538,8 +642,11 @@ export default function PlannerClient() {
             return (
               <div
                 key={dayIndex}
-                ref={isToday ? todayRef : undefined}
-                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}`}
+                ref={el => {
+                  dayEls.current[dayIndex] = el;
+                  if (isToday) todayRef.current = el;
+                }}
+                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.dragging && drag.target?.type === 'day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
               >
                 {/* Day header */}
                 <div className="pl-day-header">
@@ -567,9 +674,22 @@ export default function PlannerClient() {
                       return (
                         <div
                           key={meal.id}
-                          className="pl-recipe-card"
-                          onClick={() => { if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`; }}
+                          className={`pl-recipe-card${drag?.dragging && drag.mealId === meal.id ? ' is-dragging' : ''}`}
+                          onClick={() => {
+                            if (suppressCardClick.current) {
+                              suppressCardClick.current = false;
+                              return;
+                            }
+                            if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`;
+                          }}
                           title="View recipe"
+                          onPointerDown={e => onMealPointerDown(e, meal.id, dayIndex)}
+                          onPointerMove={onMealPointerMove}
+                          onPointerUp={onMealPointerUp}
+                          onPointerCancel={() => {
+                            if (dragRef.current?.dragging) suppressCardClick.current = true;
+                            updateDrag(null);
+                          }}
                         >
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
@@ -651,6 +771,18 @@ export default function PlannerClient() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {drag?.dragging && drag.target?.type === 'prev-week' && (
+        <div className="pl-week-drop is-top is-hot" aria-live="polite">Previous week</div>
+      )}
+      {drag?.dragging && drag.target?.type === 'next-week' && (
+        <div className="pl-week-drop is-bottom is-hot" aria-live="polite">Next week</div>
+      )}
+      {drag?.dragging && (
+        <div className="pl-drag-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden>
+          {mealPlans.find(m => m.id === drag.mealId)?.recipe?.title ?? 'Moving…'}
         </div>
       )}
 
@@ -911,6 +1043,12 @@ export default function PlannerClient() {
         .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
         .pl-day:first-child { border-top: 1px solid var(--border); }
         .pl-day.is-past { opacity: 0.42; }
+        .pl-day.is-drop-target {
+          outline: 2px solid var(--rust);
+          outline-offset: 2px;
+          background: rgba(181, 69, 27, 0.06);
+        }
+        .pl-days.is-dragging { user-select: none; cursor: grabbing; }
 
         /* Day header */
         .pl-day-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
@@ -926,8 +1064,39 @@ export default function PlannerClient() {
         .pl-meal-stack { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
 
         /* Recipe card */
-        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; }
+        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; touch-action: none; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
+        .pl-recipe-card.is-dragging { opacity: 0.4; }
+        .pl-week-drop {
+          position: fixed; left: 0; right: 0; z-index: 40;
+          height: 56px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.95rem; font-weight: 700; font-family: var(--font-body);
+          background: var(--parchment);
+          border: 2px dashed var(--border);
+          color: var(--ink-muted);
+          pointer-events: none;
+        }
+        .pl-week-drop.is-top { top: 0; }
+        .pl-week-drop.is-bottom { bottom: 0; }
+        .pl-week-drop.is-hot {
+          background: var(--rust);
+          color: #fff;
+          border-color: var(--rust);
+        }
+        .pl-drag-ghost {
+          position: fixed; z-index: 50;
+          pointer-events: none;
+          max-width: min(280px, 70vw);
+          padding: 8px 12px;
+          background: white;
+          border: 1px solid var(--rust);
+          border-radius: 8px;
+          box-shadow: 0 8px 24px rgba(60, 42, 30, 0.18);
+          font-size: 0.85rem; font-weight: 600; color: var(--ink);
+          transform: translate(-8px, -8px);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
         .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
         .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; display: flex; flex-direction: column; justify-content: center; }
