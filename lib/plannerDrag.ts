@@ -9,6 +9,8 @@ export const RAIL_DAYS_BEFORE = 2;
 export const RAIL_PICK_HEIGHT = 52;
 export const RAIL_DAY_SLOT = 88;
 export const RAIL_CHROME = 16;
+/** Matches the mobile tab-bar breakpoint in app/globals.css. */
+export const BOTTOM_NAV_MAX_WIDTH = 600;
 
 export interface HitRect {
   left: number;
@@ -58,8 +60,14 @@ export function addCalendarDays(iso: string, days: number): string {
   return localDateIso(d);
 }
 
-export function railDayCount(viewportHeight: number): number {
-  const avail = viewportHeight - RAIL_CHROME - 2 * RAIL_PICK_HEIGHT;
+/** How much of the viewport the bottom tab bar covers. Zero on desktop. */
+export function bottomNavReserve(viewportWidth: number, navHeight: number): number {
+  if (viewportWidth > BOTTOM_NAV_MAX_WIDTH) return 0;
+  return Math.max(0, navHeight);
+}
+
+export function railDayCount(viewportHeight: number, reservedBottom = 0): number {
+  const avail = viewportHeight - Math.max(0, reservedBottom) - RAIL_CHROME - 2 * RAIL_PICK_HEIGHT;
   const raw = Math.floor(avail / RAIL_DAY_SLOT);
   const odd = raw % 2 === 0 ? raw - 1 : raw;
   return Math.min(RAIL_MAX_DAYS, Math.max(RAIL_MIN_DAYS, odd));

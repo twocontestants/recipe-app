@@ -40,6 +40,7 @@ import {
 } from '@/lib/plannerDaySheet';
 import {
   HOLD_MS,
+  bottomNavReserve,
   dayOccupied,
   movementExceededThreshold,
   railDayCount,
@@ -162,6 +163,7 @@ export default function PlannerClient() {
   } | null>(null);
   const [drag, setDrag] = useState<typeof dragRef.current>(null);
   const [railDays, setRailDays] = useState<string[]>([]);
+  const [railBottom, setRailBottom] = useState(0);
   const [railMeals, setRailMeals] = useState<MealPlan[]>([]);
   const railPickEls = useRef<{ earlier: HTMLDivElement | null; later: HTMLDivElement | null }>({
     earlier: null,
@@ -672,7 +674,13 @@ export default function PlannerClient() {
       const session = dragRef.current;
       if (!session || session.mealId !== mealId || session.pointerId !== e.pointerId) return;
       const viewport = window.visualViewport?.height ?? window.innerHeight;
-      const days = surroundingRailDays(session.originIso, railDayCount(viewport));
+      const nav = document.querySelector('.sidebar');
+      const reserved = bottomNavReserve(
+        window.innerWidth,
+        nav instanceof HTMLElement ? nav.getBoundingClientRect().height : 0,
+      );
+      setRailBottom(reserved);
+      const days = surroundingRailDays(session.originIso, railDayCount(viewport, reserved));
       setRailDays(days);
       void loadRailMeals(days);
       updateDrag({ ...session, armed: true });
@@ -1074,7 +1082,12 @@ export default function PlannerClient() {
       )}
 
       {drag?.armed && railDays.length > 0 && (
-        <div className="pl-rail" aria-live="polite" aria-label="Nearby days">
+        <div
+          className="pl-rail"
+          aria-live="polite"
+          aria-label="Nearby days"
+          style={railBottom > 0 ? { bottom: railBottom } : undefined}
+        >
           <div
             ref={el => { railPickEls.current.earlier = el; }}
             className={`pl-rail-day pl-rail-pick${drag.target?.type === 'rail-pick' && drag.target.direction === 'earlier' ? ' is-hot' : ''}`}
@@ -1427,10 +1440,10 @@ export default function PlannerClient() {
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
         .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
         .pl-rail {
-          position: fixed; top: 0; right: 0; bottom: 0; z-index: 36;
+          position: fixed; top: 0; right: 0; bottom: var(--bottom-nav-height, 0px); z-index: 36;
           width: 92px;
           display: flex; flex-direction: column;
-          padding: 8px 6px env(safe-area-inset-bottom, 8px);
+          padding: 8px 6px 8px;
           background: rgba(247, 242, 233, 0.97);
           border-left: 1px solid var(--border);
           box-shadow: -10px 0 28px rgba(60, 42, 30, 0.1);

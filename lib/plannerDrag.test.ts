@@ -3,6 +3,7 @@ import {
   dayOccupied,
   holdArmed,
   movementExceededThreshold,
+  bottomNavReserve,
   railDayCount,
   resolveDragTarget,
   shouldAllowDrag,
@@ -49,16 +50,30 @@ describe('surroundingTenDays', () => {
   });
 });
 
+describe('bottomNavReserve', () => {
+  it('uses the measured tab bar on a phone and ignores the desktop sidebar height', () => {
+    expect(bottomNavReserve(390, 72)).toBe(72);
+    expect(bottomNavReserve(600, 68)).toBe(68);
+    expect(bottomNavReserve(901, 800)).toBe(0);
+  });
+});
+
 describe('railDayCount / surroundingRailDays', () => {
   it('uses five numbered days on a phone-height screen', () => {
     expect(railDayCount(667)).toBe(5);
     expect(railDayCount(400)).toBe(5);
+    expect(railDayCount(667, 72)).toBe(5);
   });
 
   it('grows to more odd-length windows on a taller screen', () => {
     expect(railDayCount(900)).toBeGreaterThanOrEqual(7);
     expect(railDayCount(900) % 2).toBe(1);
     expect(railDayCount(1400)).toBeLessThanOrEqual(11);
+  });
+
+  it('keeps Later on-screen by using less height when the tab bar is reserved', () => {
+    expect(railDayCount(900, 0)).toBeGreaterThan(railDayCount(900, 220));
+    expect(railDayCount(900, 220)).toBe(5);
   });
 
   it('keeps the origin in the middle of a longer window', () => {

@@ -16,6 +16,7 @@
   --radius: 4px;
   --shadow: 0 2px 12px rgba(26,22,18,0.08);
   --shadow-lg: 0 8px 40px rgba(26,22,18,0.12);
+  --bottom-nav-height: 0px;
 }
 
 html { font-size: 16px; }
@@ -1122,6 +1123,10 @@ select.settings-select {
 
 /* ── Mobile (≤600px): optimised for one-hand use ── */
 @media (max-width: 600px) {
+  :root {
+    --bottom-nav-height: calc(4.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
   /* Nav — fixed bottom tab bar: three evenly-spaced items always fit, and it's
      thumb-reachable. Removes the top bar that was overflowing on narrow phones. */
   .sidebar {
@@ -1171,7 +1176,7 @@ select.settings-select {
   /* Main content — leave room for the fixed bottom tab bar */
   .main-content {
     padding: 1rem 0.9rem;
-    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0));
+    padding-bottom: var(--bottom-nav-height);
   }
 
   /* Page header — stacks cleanly */
@@ -1276,7 +1281,7 @@ select.settings-select {
 
   /* Toast above bottom tab bar */
   .toast-stack {
-    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0));
+    bottom: calc(var(--bottom-nav-height) + 0.25rem);
     right: 0.75rem;
     left: 0.75rem;
     max-width: none;
@@ -1290,6 +1295,6 @@ select.settings-select {
   .recipe-card-img-placeholder { height: 140px; }
   .main-content {
     padding: 0.75rem;
-    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0));
+    padding-bottom: var(--bottom-nav-height);
   }
 }
