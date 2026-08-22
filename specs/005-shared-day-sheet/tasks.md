@@ -65,13 +65,13 @@
 
 ---
 
-## Phase 5: User Story 3 - Rail marks the origin date (Priority: P2)
+## Phase 5: User Story 3 - Rail de-emphasises the origin date (Priority: P2)
 
-**Goal**: Visible From label on the dragged-from rail day
+**Goal**: Grey out the dragged-from rail day; no From caption; not a drop target
 
-**Independent Test**: Origin day shows From; others do not
+**Independent Test**: Origin day is faded; others are not; no From text
 
-- [x] T011 [US3] Render a From label on the numbered rail day when `isRailOrigin` in `app/planner/PlannerClient.tsx`
+- [x] T011 [US3] Grey out the numbered rail day when `isRailOrigin` in `app/planner/PlannerClient.tsx` (no From label; skip it in rail hit-testing)
 
 **Checkpoint**: Hold a meal — source date is obvious on the rail
 
@@ -96,4 +96,4 @@
 
 ## Implementation strategy
 
-MVP is US1 (shared sheet + Recipes wrapper). US2 is the user-visible planner fix. US3 is the rail From mark.
+MVP is US1 (shared sheet + Recipes wrapper). US2 is the user-visible planner fix. US3 is the greyed-out origin day.

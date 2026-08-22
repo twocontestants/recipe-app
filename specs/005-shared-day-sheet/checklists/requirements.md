@@ -32,4 +32,4 @@
 ## Notes
 
 - Validation passed on first review. “Native date popup” is a user-visible control contrast, not a stack choice.
-- Ready for `/speckit-plan`.
+- Re-validated 2026-08-22: origin mark is a greyed-out day (no From caption), matching what we shipped after the rail felt cramped.

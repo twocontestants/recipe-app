@@ -14,5 +14,6 @@
 
 ## Month that spans storage weeks
 
-- **Decision**: `storageWeeksForDateRange(from, to)` collects `storageCoords` for each local day. Query `week_start = ANY(...)`.
-- **Rationale**: Matches how rows are stored (Monday-canonical keys, including the known UTC `formatWeekStart` behaviour).
+- **Decision**: Query an inclusive padded `week_start` window (`plannerQueryWindow`). Optionally union client-passed `weeks=` from `storageWeeksForDateRange` run in the browser. Keep `?weekStart=` for the visible week.
+- **Rationale**: `storageWeeksForDateRange` on a UTC host asks for Monday keys (`2026-08-17`) while Australian rows are stored as the previous Sunday (`2026-08-16`). That empty month was cached and a first-paint focus reload locked the planner blank. Existing `week_start` rows stay as-is.
+- **Alternatives considered**: Change `formatWeekStart` (needs a data migration). Only client `weeks=` (still fails if a client omits them). Exact Monday `ANY(...)` on the server (the bug).

@@ -20,6 +20,6 @@
 
 ## Origin mark
 
-- **Decision**: Show a short **From** label on the numbered rail day whose ISO equals `originIso`. Keep the existing origin ring as extra emphasis.
-- **Rationale**: Filled (occupied) origin circles already use rust, so a ring alone is easy to miss. A text label is readable mid-drag.
-- **Alternatives considered**: Only a thicker ring (too subtle). Arrow between days (noisy on a narrow rail).
+- **Decision**: Grey out the numbered rail day whose ISO equals `originIso`. No **From** caption. That day is not a drop target.
+- **Rationale**: The cook asked to de-emphasise the source instead of a label. The caption stole height on the phone rail (Later already sits tight above the tab bar).
+- **Alternatives considered**: A From label plus rust ring (shipped, then rejected — extra space). Thicker ring only (too subtle on an occupied rust circle).

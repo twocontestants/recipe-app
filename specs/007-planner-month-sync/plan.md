@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace week-by-week meal cache with a **calendar-month** download (`GET /api/planner?from=&to=`). The planner still renders one display week. Reuse the existing Socket.IO relay: `join-planner` / `planner-changed` (exclude sender). Remote clients drop the month copy and reload. Extract month-window math into `lib/plannerMonth.ts`.
+Replace week-by-week meal cache with a **calendar-month** download (`GET /api/planner?from=&to=` via a padded `week_start` window, not server-local Monday keys). The planner still renders one display week and still loads that week via `?weekStart=`. Reuse the existing Socket.IO relay: `join-planner` / `planner-changed` (exclude sender). Remote clients reload only after a real hide→show or a remote event. Extract month-window math into `lib/plannerMonth.ts`.
 
 ## Technical Context
 

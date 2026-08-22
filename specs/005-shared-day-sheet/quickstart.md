@@ -17,7 +17,7 @@ Expected: Vitest passes `lib/plannerDaySheet.test.ts`, `components/PlannerDayShe
 ## Manual — Earlier / Later move
 
 1. Planner: hold the left grip on a dinner until the rail appears.
-2. The dinner’s date shows **From**.
+2. The dinner’s date is greyed out (no **From** caption) and is not a drop target.
 3. Drop on **Earlier**. The shared sheet opens on the previous week (last day selected). No system date popup.
 4. Pick a day → confirm. The meal is there.
 5. Repeat with **Later**, then close the sheet without confirming. The meal stays put.

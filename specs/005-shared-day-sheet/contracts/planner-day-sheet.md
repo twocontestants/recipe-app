@@ -47,4 +47,4 @@ Props include `title`, `recipeTitle`, `confirmVerb`, `weekStart`, `selectedDay`,
 ## Planner rail
 
 - Earlier/Later drop opens the sheet; no `input type="date"` / `showPicker`.
-- Numbered origin day includes a visible **From** label when `isRailOrigin`.
+- Numbered origin day (`isRailOrigin`) is greyed out, has no **From** caption, and is omitted from drop hit-testing.

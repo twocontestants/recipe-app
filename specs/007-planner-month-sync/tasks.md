@@ -27,3 +27,4 @@
 ## Phase 5: Polish
 
 - [x] T009 Remove week-grain cache from the hot path (`lib/plannerWeekCache.ts` if unused); `npm test` and `npm run build`
+- [x] T010 Range GET uses `plannerQueryWindow` / `getMealPlansInDateWindow` plus optional client `weeks=`; visible week still loads via `?weekStart=`; live resync skips first paint and does not wipe a full store with an empty result

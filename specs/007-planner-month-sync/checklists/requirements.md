@@ -32,4 +32,4 @@
 ## Notes
 
 - Validation passed. “Existing live channel” refers to the household shopping-list sync the cook already uses, not a new product.
-- Ready for `/speckit-plan`.
+- Re-validated 2026-08-22: month reads must still show dinners stored east of UTC; an empty first-paint reload must not blank the planner.

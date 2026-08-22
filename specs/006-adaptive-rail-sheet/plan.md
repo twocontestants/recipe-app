@@ -6,7 +6,7 @@
 
 ## Summary
 
-Fit the hold-drag rail to the viewport (default origin ±2; grow when tall). Fix day-sheet occupancy and This/Next week flicker by using **local** display-week keys (`localDateIso` + local `shiftWeek`) while leaving `formatWeekStart` as the **storage** key. Match dinners to sheet days via `storageCoords` of each calendar date. Cache storage-week fetches in memory and invalidate on add/move.
+Fit the hold-drag rail to the viewport (default origin ±2; grow when tall; usable height excludes the phone tab bar so Later stays above it). Fix day-sheet occupancy and This/Next week flicker by using **local** display-week keys (`localDateIso` + local `shiftWeek`) while leaving `formatWeekStart` as the **storage** key. Match dinners to sheet days via `storageCoords` of each calendar date. Cache storage-week fetches in memory and invalidate on add/move.
 
 ## Technical Context
 

@@ -12,9 +12,13 @@ Required: August 2026 → from `2026-08-01` to `2026-08-31`. A Monday-start week
 
 ## `GET /api/planner?from=&to=`
 
-Returns the same meal objects as `?weekStart=`, for every storage week overlapping the inclusive local range.
+Returns the same meal objects as `?weekStart=` for dinners whose `week_start` falls in a **padded date window** around `[from, to]` (`plannerQueryWindow`: from − 14 days, to + 7 days). Do **not** compute `storageWeeksForDateRange` on the server — that uses `formatWeekStart` / `toISOString()` in the host timezone and misses Australian Sunday-stored keys.
 
-`GET /api/planner?weekStart=` unchanged.
+Optional `weeks=` is a comma-separated list of client-computed storage week keys (unioned with the window).
+
+`GET /api/planner?weekStart=` unchanged. The visible display week still loads this way as a safety net.
+
+Helpers: `plannerQueryWindow`, `parseWeekStartList`, `getMealPlansInDateWindow`.
 
 ## Socket (`server.js`)
 
@@ -27,4 +31,4 @@ No DB access on the socket (same as shopping list).
 
 ## Clients
 
-Planner and Recipes: `usePlannerLive`. After successful add/move/delete, `broadcastPlannerChanged()`. On remote event, reload loaded months from GET `from`/`to`.
+Planner and Recipes: `usePlannerLive`. After successful add/move/delete, `broadcastPlannerChanged()`. On remote event, reload loaded months from GET `from`/`to` (plus the visible `?weekStart=` week). Resync on focus/visibility only after the tab was hidden — not on first paint. Do not replace a populated store with an empty refetch.

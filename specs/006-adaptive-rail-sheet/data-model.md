@@ -33,5 +33,6 @@ Invalidate the origin and destination storage weeks after a successful write.
 ## Validation
 
 - Rail `count` is odd so the origin stays centred.
+- Phone tab-bar height is reserved from usable rail height; desktop sidebar height is not.
 - Sheet day `i` occupancy uses the calendar date `dayDateOf(weekStart, i)`, not a reconstructed UTC date.
 - Cache miss ⇒ fetch; cache hit ⇒ reuse; write ⇒ delete those keys.

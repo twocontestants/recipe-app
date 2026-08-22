@@ -44,18 +44,19 @@ The cook holds a dinner and drops it on **Earlier** or **Later** on the rail. In
 
 ---
 
-### User Story 3 - The rail marks the day being moved from (Priority: P2)
+### User Story 3 - The rail de-emphasises the day being moved from (Priority: P2)
 
-While the rail is open, the cook can see which date the dinner is coming from. That day is marked more clearly than a thin ring — a short **From** label sits with that day’s circle so it is obvious even when the circle is already filled.
+While the rail is open, the cook can tell which date the dinner is coming from. That day looks like a disabled option — greyer and quieter than the others — not an extra **From** caption. A caption would steal height on a phone rail. Dropping on that day does nothing; it is not a destination.
 
-**Why this priority**: Nearby days look alike; without a source mark it is easy to drop back on the same day or lose track mid-drag.
+**Why this priority**: Nearby days look alike; without a source mark it is easy to lose track mid-drag. A label costs space that Later already needs.
 
-**Independent Test**: Hold Thursday’s dinner. The Thursday circle on the rail is labelled From. Other days are not.
+**Independent Test**: Hold Thursday’s dinner. Thursday on the rail is faded; other days are full colour. There is no From text.
 
 **Acceptance Scenarios**:
 
-1. **Given** a dinner on Thursday is held, **When** the rail appears, **Then** Thursday shows a From indicator and the other numbered days do not.
-2. **Given** the origin day also has recipe names, **When** the cook looks at it, **Then** From still appears (names stay under the weekday).
+1. **Given** a dinner on Thursday is held, **When** the rail appears, **Then** Thursday is greyed out and the other numbered days are not.
+2. **Given** the origin day also has recipe names, **When** the cook looks at it, **Then** names may still show but the day stays muted and has no extra caption.
+3. **Given** they release on the origin day, **When** the drag ends, **Then** the dinner stays put.
 
 ---
 
@@ -79,7 +80,7 @@ While the rail is open, the cook can see which date the dinner is coming from. T
 - **FR-005**: Confirming the chooser from Earlier/Later MUST move the dinner to the selected calendar date (same save path as other planner moves).
 - **FR-006**: Dismissing the chooser without confirm MUST leave the dinner on its original date.
 - **FR-007**: Earlier/Later MUST NOT open a native date popup.
-- **FR-008**: While the rail is visible, the origin date MUST show a From indicator; other rail days MUST NOT.
+- **FR-008**: While the rail is visible, the origin date MUST be visually de-emphasised (greyed out) and MUST NOT be a drop target. It MUST NOT use an extra From caption.
 - **FR-009**: Numbered rail days and week-list drops MUST still move immediately without opening the chooser.
 
 ### Key Entities
@@ -94,7 +95,7 @@ While the rail is open, the cook can see which date the dinner is coming from. T
 
 - **SC-001**: A cook who already uses Add to planner can finish an Earlier/Later move on the first try without learning a second picker.
 - **SC-002**: A change to the day list or week arrows appears in both Recipes and planner without a second implementation.
-- **SC-003**: During a hold-drag, the cook can name the source date from the rail in under two seconds (the From mark is visible without opening a menu).
+- **SC-003**: During a hold-drag, the cook can name the source date from the rail in under two seconds (the greyed-out day is visible without opening a menu).
 - **SC-004**: Cancelling the sheet after Earlier/Later never moves the dinner.
 
 ## Assumptions

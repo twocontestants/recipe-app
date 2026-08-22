@@ -6,7 +6,7 @@
 
 ## Summary
 
-Extract the Recipes **Add to planner** week/day chooser into a shared `PlannerDaySheet`. Recipes keeps a thin `AddToPlannerModal` wrapper. Planner Earlier/Later opens the same sheet to finish a move (no native `input type="date"`). Opening week/day for Earlier/Later and occupancy grouping live in `lib/plannerDaySheet.ts`. The rail marks the origin day with a **From** label.
+Extract the Recipes **Add to planner** week/day chooser into a shared `PlannerDaySheet`. Recipes keeps a thin `AddToPlannerModal` wrapper. Planner Earlier/Later opens the same sheet to finish a move (no native `input type="date"`). Opening week/day for Earlier/Later and occupancy grouping live in `lib/plannerDaySheet.ts`. The rail greys out the origin day (no From caption; not a drop target).
 
 ## Technical Context
 
@@ -32,7 +32,7 @@ Extract the Recipes **Add to planner** week/day chooser into a shared `PlannerDa
 
 - Household-first: week list + large day rows instead of a tiny native calendar after a drag.
 - Extract what you test: `sheetAnchorForRailPick`, `weekPlanFromMeals`, `isRailOrigin`.
-- Test-first: failing tests for anchor week/day and From helper before wiring clients.
+- Test-first: failing tests for anchor week/day and origin helper before wiring clients.
 - Overlay honesty: reuse the existing planner-quick modal, not a new dimmer treatment.
 - Simplicity: one presentational sheet; wrappers only change title/confirm copy.
 

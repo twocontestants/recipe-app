@@ -47,8 +47,9 @@ If one phone adds, moves, or deletes a dinner, other open planner or Recipes add
 
 - Month load failure leaves the week already on screen; a toast is enough.
 - Crossing a month boundary (week that spans two months) loads both months that contain those seven dates.
-- A tab that was backgrounded may miss a live event; coming back to the tab refreshes the current month quietly.
+- A tab that was backgrounded may miss a live event; coming back to the tab refreshes the current month quietly. First paint / leftover focus MUST NOT treat the page as “just returned” and wipe a good copy with an empty one.
 - Temporary (`tmp-*`) optimistic meals are not required on other clients until the save succeeds.
+- Existing dinners stay visible even when the host clock is UTC and the household is east of UTC (stored week keys may be the previous calendar day). An empty month fetch MUST NOT lock the planner on a blank week.
 
 ## Requirements *(mandatory)*
 
@@ -61,6 +62,8 @@ If one phone adds, moves, or deletes a dinner, other open planner or Recipes add
 - **FR-005**: Other clients that receive that notice MUST refresh their local month copy from the stored planner (source of truth) and update what is on screen.
 - **FR-006**: The sender MUST NOT apply their own broadcast as if it were a remote change (no self-echo overwrite).
 - **FR-007**: Existing storage week keys used in the database MUST stay unchanged.
+- **FR-008**: A month download MUST return the dinners the household already stored for those dates, even when the server’s clock is in a different timezone from the cook’s phone. It MUST NOT key the query only from Monday dates computed on the server.
+- **FR-009**: The week on screen MUST still load via the existing single-week path as a safety net. An empty month result MUST NOT replace dinners already on screen or mark that month as loaded.
 
 ### Key Entities
 
@@ -75,9 +78,11 @@ If one phone adds, moves, or deletes a dinner, other open planner or Recipes add
 - **SC-001**: Opening the planner and then the next week in the same month does not perform a second meal download for that week.
 - **SC-002**: A dinner added on a second device appears on the first within a few seconds while both stay on the planner.
 - **SC-003**: The cook still sees exactly one week of days at a time (month load does not change the layout).
+- **SC-004**: After opening the planner in Australia, dinners already planned for this week are visible without a refresh workaround.
 
 ## Assumptions
 
 - The household already has a Socket.IO relay (shopping list). Planner uses the same server and a shared planner room.
 - One household / one planner (no per-user rooms).
 - Adjacent months may be prefetched quietly so a week that crosses a month edge is covered.
+- `formatWeekStart` (`toISOString()` of local Monday midnight) remains the storage key. East of UTC those keys are often the previous Sunday. Month reads must find those rows without a data migration.

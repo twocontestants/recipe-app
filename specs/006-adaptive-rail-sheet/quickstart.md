@@ -10,8 +10,8 @@ Expected: existing suites plus `lib/plannerWeekCache.test.ts`, updated rail/week
 
 ## Manual — rail
 
-1. Phone-width portrait: hold a dinner. Five numbered days (origin ±2), Earlier at top, Later fully visible at the bottom.
-2. Desktop or tall phone: more numbered days around the origin; Later still fully visible.
+1. Phone-width portrait: hold a dinner. Five numbered days (origin ±2), Earlier at top, Later fully visible **above** the bottom tab bar.
+2. Desktop or tall phone: more numbered days around the origin; Later still fully visible (desktop has no bottom reserve).
 3. Drop on a numbered day still moves; Earlier/Later still open the shared sheet.
 
 ## Manual — sheet occupancy

@@ -32,4 +32,4 @@
 ## Notes
 
 - Validation passed. Storage-key vs display-week distinction is a product rule (which dates are shown vs how old rows are stored), not a stack choice.
-- Ready for `/speckit-plan`.
+- Re-validated 2026-08-22: Later must sit above the phone tab bar; usable height excludes that bar.

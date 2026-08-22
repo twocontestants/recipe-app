@@ -2,9 +2,9 @@
 
 ## Why Later is cut off
 
-- **Decision**: Default numbered window is origin ±2 (5 days). Count grows from viewport height minus Earlier/Later slots. Numbered days stay flex-distributed only after the count fits.
-- **Rationale**: Eight fixed days plus titles overflow phone height. The cook asked for ±2, then more on taller screens.
-- **Alternatives considered**: Scroll the rail (easy to lose Later). Shrink circles (harder to hit). Keep 8 and clip (current bug).
+- **Decision**: Default numbered window is origin ±2 (5 days). Count grows from viewport height minus Earlier/Later slots **and** the phone tab bar. The rail’s bottom edge is `--bottom-nav-height` (measured `.sidebar` on a phone). Numbered days stay flex-distributed only after the count fits.
+- **Rationale**: Eight fixed days plus titles overflow phone height. After ±2 landed, Later still sat under the bottom nav (`z-index` above the rail). The cook asked for the rail height to account for that bar.
+- **Alternatives considered**: Scroll the rail (easy to lose Later). Shrink circles (harder to hit). Keep 8 and clip (old bug). Raise the rail above the nav (covers the tabs).
 
 ## Why labels and occupancy glitch
 

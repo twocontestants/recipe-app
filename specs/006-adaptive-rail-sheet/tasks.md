@@ -29,7 +29,7 @@
 
 ## Phase 3: User Story 1 - Rail fits the screen (Priority: P1)
 
-- [x] T010 [US1] Size the rail window from `visualViewport` / `innerHeight` in `app/planner/PlannerClient.tsx` and keep Later on screen (CSS if needed)
+- [x] T010 [US1] Size the rail window from `visualViewport` / `innerHeight` minus `bottomNavReserve` in `app/planner/PlannerClient.tsx` and stop the rail above the phone tab bar
 
 ---
 
