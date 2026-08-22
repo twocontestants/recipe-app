@@ -48,6 +48,14 @@ describe('AddToPlannerModal', () => {
     expect(screen.getByRole('button', { name: /add dinner · wed 19/i })).toBeTruthy();
   });
 
+  it('lists Sunday first when the household week starts on Sunday', () => {
+    renderModal({ weekStartsOn: 'sunday', weekStart: '2026-08-16', selectedDay: 0 });
+    const options = screen.getAllByRole('option');
+    expect(options[0].textContent).toMatch(/sun/i);
+    expect(options[1].textContent).toMatch(/mon/i);
+    expect(screen.getByRole('button', { name: /add dinner · sun 16/i })).toBeTruthy();
+  });
+
   it('does not use weekday-name keys for occupancy', () => {
     renderModal({
       weekPlan: {

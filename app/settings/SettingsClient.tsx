@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
+import { DAY_KEYS, DAY_LABELS, parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
 
 interface DictionaryEntry {
   name: string;
@@ -21,6 +22,7 @@ export default function SettingsClient() {
   const [onlyCustom, setOnlyCustom] = useState(false);
   const [savingName, setSavingName] = useState<string | null>(null);
   const [prefMode, setPrefMode] = useState<'ask' | 'always' | 'never'>('ask');
+  const [weekStartDay, setWeekStartDay] = useState<DayKey>('monday');
 
   useEffect(() => {
     (async () => {
@@ -41,7 +43,11 @@ export default function SettingsClient() {
     (async () => {
       try {
         const res = await fetch('/api/preferences');
-        if (res.ok) { const d = await res.json(); if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode); }
+        if (res.ok) {
+          const d = await res.json();
+          if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode);
+          if (d?.weekStartDay) setWeekStartDay(parseWeekStartDay(d.weekStartDay));
+        }
       } catch { /* default ask */ }
     })();
   }, []);
@@ -49,8 +55,19 @@ export default function SettingsClient() {
   const changePrefMode = (mode: 'ask' | 'always' | 'never') => {
     setPrefMode(mode);
     fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryPrefMode: mode }) })
-      .then(() => showToast('Preference saved', 'success'))
+      .then(res => { if (!res.ok) throw new Error(); showToast('Preference saved', 'success'); })
       .catch(() => showToast('Couldn\u2019t save preference', 'error'));
+  };
+
+  const changeWeekStart = (day: DayKey) => {
+    const prev = weekStartDay;
+    setWeekStartDay(day);
+    fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekStartDay: day }) })
+      .then(res => { if (!res.ok) throw new Error(); showToast('Week start saved', 'success'); })
+      .catch(() => {
+        setWeekStartDay(prev);
+        showToast('Couldn\u2019t save week start', 'error');
+      });
   };
 
   const filtered = useMemo(() => {
@@ -119,6 +136,18 @@ export default function SettingsClient() {
         Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
         Change any category here and it sticks — new shopping lists will use your choice instead of the automatic guess.
       </p>
+
+      <div className="settings-pref">
+        <div className="settings-pref-label">
+          <span className="settings-pref-title">Week starts on</span>
+          <span className="settings-pref-sub">The first day of every planning week. Meals stay on their calendar dates when you change this.</span>
+        </div>
+        <select className="settings-select" value={weekStartDay} onChange={e => changeWeekStart(e.target.value as DayKey)}>
+          {DAY_KEYS.map((key, i) => (
+            <option key={key} value={key}>{DAY_LABELS[i]}</option>
+          ))}
+        </select>
+      </div>
 
       <div className="settings-pref">
         <div className="settings-pref-label">

@@ -74,9 +74,78 @@ export function indexToDayKey(index: number): DayKey {
   return DAY_KEYS[index];
 }
 
+/** JS Date.getDay() Sunday=0 → Monday-canonical 0–6. */
+export function jsSundayToMonIndex(jsDay: number): number {
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
 export function todayDayIndex(now = new Date()): number {
-  const d = now.getDay();
-  return d === 0 ? 6 : d - 1;
+  return jsSundayToMonIndex(now.getDay());
+}
+
+/** Household week-start setting. Junk values become Monday. */
+export function parseWeekStartDay(value: unknown): DayKey {
+  const parsed = parseDayOfWeek(value);
+  if (parsed === null) return 'monday';
+  return indexToDayKey(parsed);
+}
+
+export function startOfDisplayWeek(date: Date, weekStartsOn: DayKey = 'monday'): Date {
+  const startIdx = parseDayOfWeek(weekStartsOn) ?? 0;
+  const current = jsSundayToMonIndex(date.getDay());
+  const delta = (current - startIdx + 7) % 7;
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - delta);
+  return d;
+}
+
+export function displayDays(weekStartsOn: DayKey = 'monday'): DayKey[] {
+  const start = parseDayOfWeek(weekStartsOn) ?? 0;
+  return Array.from({ length: 7 }, (_, i) => DAY_KEYS[(start + i) % 7]);
+}
+
+export function displayDayIndex(date: Date, weekStartsOn: DayKey = 'monday'): number {
+  const start = parseDayOfWeek(weekStartsOn) ?? 0;
+  const current = jsSundayToMonIndex(date.getDay());
+  return (current - start + 7) % 7;
+}
+
+export function getThisDisplayWeek(weekStartsOn: DayKey = 'monday', now = new Date()): string {
+  return formatWeekStart(startOfDisplayWeek(now, weekStartsOn));
+}
+
+/** Monday-canonical storage pair for a calendar date. */
+export function storageCoords(date: Date): { weekStart: string; dayOfWeek: number } {
+  return {
+    weekStart: formatWeekStart(mondayOf(date)),
+    dayOfWeek: jsSundayToMonIndex(date.getDay()),
+  };
+}
+
+export function calendarDateOf(weekStart: string, dayOfWeek: number): Date {
+  return dayDateOf(weekStart, dayOfWeek);
+}
+
+export function storageWeeksForDisplayWeek(
+  displayWeekStartIso: string,
+  weekStartsOn: DayKey = 'monday',
+): string[] {
+  const seen = new Set<string>();
+  const weeks: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const { weekStart } = storageCoords(dayDateOf(displayWeekStartIso, i));
+    if (!seen.has(weekStart)) {
+      seen.add(weekStart);
+      weeks.push(weekStart);
+    }
+  }
+  return weeks;
+}
+
+export function isoDate(value: string | Date): string {
+  if (value instanceof Date) return formatWeekStart(value);
+  return String(value).slice(0, 10);
 }
 
 export function mondayOf(date: Date): Date {
@@ -106,12 +175,16 @@ export function shiftWeek(weekStart: string, weeks: number): string {
   return formatWeekStart(d);
 }
 
-export function isThisWeek(weekStart: string, now = new Date()): boolean {
-  return weekStart === getThisMonday(now);
+export function isThisWeek(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): boolean {
+  return weekStart === getThisDisplayWeek(weekStartsOn, now);
 }
 
-export function isNextWeek(weekStart: string, now = new Date()): boolean {
-  return weekStart === shiftWeek(getThisMonday(now), 1);
+export function isNextWeek(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): boolean {
+  return weekStart === shiftWeek(getThisDisplayWeek(weekStartsOn, now), 1);
+}
+
+export function isPrevWeek(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): boolean {
+  return weekStart === shiftWeek(getThisDisplayWeek(weekStartsOn, now), -1);
 }
 
 export function formatShortWeek(weekStart: string): string {
@@ -121,9 +194,9 @@ export function formatShortWeek(weekStart: string): string {
   return `${mon.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – ${sun.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`;
 }
 
-export function formatWeekLabel(weekStart: string, now = new Date()): string {
-  if (isThisWeek(weekStart, now)) return 'This week';
-  if (isNextWeek(weekStart, now)) return 'Next week';
+export function formatWeekLabel(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): string {
+  if (isThisWeek(weekStart, now, weekStartsOn)) return 'This week';
+  if (isNextWeek(weekStart, now, weekStartsOn)) return 'Next week';
   return formatShortWeek(weekStart);
 }
 

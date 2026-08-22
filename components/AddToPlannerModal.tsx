@@ -1,12 +1,12 @@
 'use client';
 
 import {
-  DAY_KEYS,
   DAY_SHORT,
   dayDateOf,
+  displayDayIndex,
+  displayDays,
   formatWeekLabel,
   isThisWeek,
-  todayDayIndex,
   type DayKey,
 } from '@/lib/plannerDays';
 
@@ -25,6 +25,7 @@ export interface AddToPlannerModalProps {
   onShiftWeek: (weeks: number) => void;
   onSelectDay: (dayIndex: number) => void;
   onAdd: () => void;
+  weekStartsOn?: DayKey;
 }
 
 export default function AddToPlannerModal({
@@ -37,9 +38,11 @@ export default function AddToPlannerModal({
   onShiftWeek,
   onSelectDay,
   onAdd,
+  weekStartsOn = 'monday',
 }: AddToPlannerModalProps) {
-  const today = todayDayIndex();
-  const selectedKey = DAY_KEYS[selectedDay];
+  const dayKeys = displayDays(weekStartsOn);
+  const today = displayDayIndex(new Date(), weekStartsOn);
+  const selectedKey = dayKeys[selectedDay] ?? dayKeys[0];
   const selectedDate = dayDateOf(weekStart, selectedDay);
 
   return (
@@ -57,13 +60,13 @@ export default function AddToPlannerModal({
 
         <div className="pqm-week-row">
           <button type="button" className="pqm-week-arrow" onClick={() => onShiftWeek(-1)} aria-label="Previous week">‹</button>
-          <span className="pqm-week-label">{formatWeekLabel(weekStart)}</span>
+          <span className="pqm-week-label">{formatWeekLabel(weekStart, new Date(), weekStartsOn)}</span>
           <button type="button" className="pqm-week-arrow" onClick={() => onShiftWeek(1)} aria-label="Next week">›</button>
         </div>
 
         <div className="pqm-day-list" role="listbox" aria-label="Day of the week">
-          {DAY_KEYS.map((key, index) => {
-            const isToday = index === today && isThisWeek(weekStart);
+          {dayKeys.map((key, index) => {
+            const isToday = index === today && isThisWeek(weekStart, new Date(), weekStartsOn);
             const isSelected = index === selectedDay;
             const meals = weekPlan[index] || [];
             const date = dayDateOf(weekStart, index);

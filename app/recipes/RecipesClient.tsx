@@ -6,11 +6,17 @@ import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
 import {
-  buildPlannerPostBody,
-  getThisMonday,
+  calendarDateOf,
+  displayDayIndex,
+  getThisDisplayWeek,
+  isoDate,
   parseDayOfWeek,
+  parseWeekStartDay,
   shiftWeek,
-  todayDayIndex,
+  startOfDisplayWeek,
+  storageCoords,
+  storageWeeksForDisplayWeek,
+  type DayKey,
 } from '@/lib/plannerDays';
 
 
@@ -88,8 +94,9 @@ export default function RecipesPage() {
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
-  const [plannerWeek, setPlannerWeek] = useState(() => getThisMonday());
-  const [plannerDay, setPlannerDay] = useState(() => todayDayIndex());
+  const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
+  const [plannerWeek, setPlannerWeek] = useState(() => getThisDisplayWeek('monday'));
+  const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
   const [addingToPlan, setAddingToPlan] = useState(false);
   const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
 
@@ -106,6 +113,20 @@ export default function RecipesPage() {
   }, []);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/preferences');
+        if (!res.ok) return;
+        const d = await res.json();
+        const day = parseWeekStartDay(d.weekStartDay);
+        setWeekStartsOn(day);
+        setPlannerWeek(getThisDisplayWeek(day));
+        setPlannerDay(displayDayIndex(new Date(), day));
+      } catch { /* Monday default */ }
+    })();
+  }, []);
 
   // Auto-open recipe from ?open=<id> query param (linked from planner)
   const searchParams = useSearchParams();
@@ -179,18 +200,24 @@ export default function RecipesPage() {
 
   const fetchWeekPlan = async (week: string) => {
     try {
-      const res = await fetch(`/api/planner?weekStart=${week}`);
-      const plans = await res.json();
-      if (!Array.isArray(plans)) return;
+      const storageWeeks = storageWeeksForDisplayWeek(week, weekStartsOn);
+      const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
       const map: Record<number, PlannedMeal[]> = {};
-      for (const p of plans) {
-        const day = parseDayOfWeek(p.day_of_week);
-        if (day === null) continue;
-        if (!map[day]) map[day] = [];
-        map[day].push({
-          title: p.recipe?.title || 'Meal',
-          meal_type: p.meal_type || 'dinner',
-        });
+      for (let i = 0; i < results.length; i++) {
+        const plans = await results[i].json();
+        if (!Array.isArray(plans)) continue;
+        for (const p of plans) {
+          const storedDay = parseDayOfWeek(p.day_of_week);
+          if (storedDay === null) continue;
+          const cal = calendarDateOf(storageWeeks[i], storedDay);
+          if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== week) continue;
+          const display = displayDayIndex(cal, weekStartsOn);
+          if (!map[display]) map[display] = [];
+          map[display].push({
+            title: p.recipe?.title || 'Meal',
+            meal_type: p.meal_type || 'dinner',
+          });
+        }
       }
       setWeekPlan(map);
     } catch { /* silent */ }
@@ -200,21 +227,21 @@ export default function RecipesPage() {
     if (!plannerModal) return;
     setAddingToPlan(true);
     try {
-      const body = buildPlannerPostBody({
-        weekStart: plannerWeek,
-        dayOfWeek: plannerDay,
-        recipeId: plannerModal.recipe.id,
-        servings: plannerModal.recipe.servings,
-      });
+      const date = calendarDateOf(plannerWeek, plannerDay);
+      const coords = storageCoords(date);
       const res = await fetch('/api/planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          week_start: coords.weekStart,
+          day_of_week: coords.dayOfWeek,
+          meal_type: 'dinner',
+          recipe_id: plannerModal.recipe.id,
+          servings: plannerModal.recipe.servings || 4,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      const when = new Date(`${plannerWeek}T00:00:00`);
-      when.setDate(when.getDate() + body.day_of_week);
-      const dayLabel = when.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+      const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       showToast(`Dinner added for ${dayLabel}`, 'success');
       setPlannerModal(null);
     } catch (e) {
@@ -226,7 +253,7 @@ export default function RecipesPage() {
 
   useEffect(() => {
     if (plannerModal) fetchWeekPlan(plannerWeek);
-  }, [plannerModal, plannerWeek]);
+  }, [plannerModal, plannerWeek, weekStartsOn]);
 
   const handleScrape = async () => {
     if (!scrapeUrl.trim()) return;
@@ -334,8 +361,8 @@ export default function RecipesPage() {
   );
 
   const openPlannerModal = (recipe: Recipe) => {
-    setPlannerWeek(getThisMonday());
-    setPlannerDay(todayDayIndex());
+    setPlannerWeek(getThisDisplayWeek(weekStartsOn));
+    setPlannerDay(displayDayIndex(new Date(), weekStartsOn));
     setPlannerModal({ recipe });
   };
 
@@ -350,6 +377,7 @@ export default function RecipesPage() {
       onShiftWeek={weeks => setPlannerWeek(shiftWeek(plannerWeek, weeks))}
       onSelectDay={setPlannerDay}
       onAdd={handleAddToPlanner}
+      weekStartsOn={weekStartsOn}
     />
   );
 

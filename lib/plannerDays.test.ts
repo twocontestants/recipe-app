@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPlannerPostBody,
+  calendarDateOf,
   dayDateOf,
+  displayDayIndex,
+  displayDays,
   formatWeekLabel,
   indexToDayKey,
   parseDayOfWeek,
+  parseWeekStartDay,
   shiftWeek,
+  startOfDisplayWeek,
+  storageCoords,
+  storageWeeksForDisplayWeek,
   todayDayIndex,
 } from './plannerDays';
 
@@ -89,5 +96,55 @@ describe('week helpers', () => {
     expect(todayDayIndex(new Date('2026-08-19T10:00:00'))).toBe(2);
     expect(indexToDayKey(2)).toBe('wednesday');
     expect(dayDateOf('2026-08-17', 2).getDate()).toBe(19);
+  });
+});
+
+describe('parseWeekStartDay', () => {
+  it('accepts any weekday name or Monday-canonical index', () => {
+    expect(parseWeekStartDay('sunday')).toBe('sunday');
+    expect(parseWeekStartDay('Thursday')).toBe('thursday');
+    expect(parseWeekStartDay(0)).toBe('monday');
+    expect(parseWeekStartDay(6)).toBe('sunday');
+  });
+
+  it('falls back to monday for junk values', () => {
+    expect(parseWeekStartDay('nope')).toBe('monday');
+    expect(parseWeekStartDay(undefined)).toBe('monday');
+    expect(parseWeekStartDay(9)).toBe('monday');
+  });
+});
+
+describe('display week math', () => {
+  const wed = new Date('2026-08-19T10:00:00');
+
+  it('finds the start of the display week for any weekday', () => {
+    expect(startOfDisplayWeek(wed, 'sunday').getDate()).toBe(16);
+    expect(startOfDisplayWeek(wed, 'monday').getDate()).toBe(17);
+    expect(startOfDisplayWeek(wed, 'wednesday').getDate()).toBe(19);
+  });
+
+  it('rotates the seven days from the chosen start', () => {
+    expect(displayDays('thursday')).toEqual([
+      'thursday', 'friday', 'saturday', 'sunday', 'monday', 'tuesday', 'wednesday',
+    ]);
+  });
+
+  it('keeps a stored Wednesday on 19 Aug when the start day changes', () => {
+    const stored = { weekStart: '2026-08-17', dayOfWeek: 2 };
+    const cal = calendarDateOf(stored.weekStart, stored.dayOfWeek);
+    expect(cal.getDate()).toBe(19);
+    expect(displayDayIndex(cal, 'sunday')).toBe(3);
+    expect(displayDayIndex(cal, 'thursday')).toBe(6);
+    expect(calendarDateOf(stored.weekStart, stored.dayOfWeek).getDate()).toBe(19);
+  });
+
+  it('loads one or two Monday storage weeks for a display week', () => {
+    expect(storageWeeksForDisplayWeek('2026-08-17', 'monday')).toEqual(['2026-08-17']);
+    expect(storageWeeksForDisplayWeek('2026-08-16', 'sunday')).toEqual(['2026-08-10', '2026-08-17']);
+  });
+
+  it('writes Monday-canonical coords for a Sunday calendar date', () => {
+    const sun = new Date('2026-08-16T00:00:00');
+    expect(storageCoords(sun)).toEqual({ weekStart: '2026-08-10', dayOfWeek: 6 });
   });
 });
