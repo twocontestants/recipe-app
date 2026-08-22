@@ -501,12 +501,15 @@ export default function PlannerClient() {
     } catch { /* occupancy falls back to the week already on screen */ }
   };
 
-  const onMealPointerDown = (e: React.PointerEvent, mealId: string, fromDay: number) => {
+  const onDragHandlePointerDown = (e: React.PointerEvent, mealId: string, fromDay: number) => {
     if (e.button !== 0) return;
     if (!shouldAllowDrag(mealId)) return;
-    if ((e.target as HTMLElement).closest('.pl-card-actions')) return;
+    e.preventDefault();
+    e.stopPropagation();
     clearHoldTimer();
-    holdEl.current = e.currentTarget as HTMLElement;
+    const handle = e.currentTarget as HTMLElement;
+    holdEl.current = handle;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* capture is best-effort */ }
     const originIso = formatDate(getDayDate(weekStart, fromDay));
     updateDrag({
       mealId,
@@ -521,8 +524,7 @@ export default function PlannerClient() {
     });
     holdTimer.current = setTimeout(() => {
       const session = dragRef.current;
-      if (!session || session.mealId !== mealId) return;
-      try { holdEl.current?.setPointerCapture(session.pointerId); } catch { /* already released */ }
+      if (!session || session.mealId !== mealId || session.pointerId !== e.pointerId) return;
       const days = surroundingTenDays(session.originIso);
       setRailDays(days);
       void loadRailMeals(days);
@@ -530,9 +532,9 @@ export default function PlannerClient() {
     }, HOLD_MS);
   };
 
-  const onMealPointerMove = (e: React.PointerEvent) => {
+  const applyPointerMove = (e: PointerEvent) => {
     const session = dragRef.current;
-    if (!session) return;
+    if (!session || e.pointerId !== session.pointerId) return;
     const dx = e.clientX - session.startX;
     const dy = e.clientY - session.startY;
     if (!session.armed) {
@@ -548,19 +550,68 @@ export default function PlannerClient() {
     updateDrag({ ...session, x: e.clientX, y: e.clientY, target });
   };
 
-  const finishHoldDrag = (e: React.PointerEvent, cancelled: boolean) => {
-    clearHoldTimer();
+  const finishHoldDrag = (e: PointerEvent, cancelled: boolean) => {
     const session = dragRef.current;
+    if (!session || e.pointerId !== session.pointerId) return;
+    clearHoldTimer();
     holdEl.current = null;
     hideRail();
     updateDrag(null);
-    if (!session?.armed) return;
+    if (!session.armed) return;
     suppressCardClick.current = true;
     e.preventDefault();
-    e.stopPropagation();
     if (cancelled || !session.target) return;
     void moveMealToDate(session.mealId, new Date(`${session.target.iso}T00:00:00`));
   };
+
+  const applyPointerMoveRef = useRef(applyPointerMove);
+  const finishHoldDragRef = useRef(finishHoldDrag);
+  applyPointerMoveRef.current = applyPointerMove;
+  finishHoldDragRef.current = finishHoldDrag;
+
+  // Keep the drag alive after the finger leaves the handle. The rail used to
+  // vanish because the card lost the pointer and fired cancel.
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => applyPointerMoveRef.current(e);
+    const onUp = (e: PointerEvent) => finishHoldDragRef.current(e, false);
+    const onCancel = (e: PointerEvent) => {
+      const session = dragRef.current;
+      if (!session || e.pointerId !== session.pointerId) return;
+      if (!session.armed) {
+        finishHoldDragRef.current(e, true);
+        return;
+      }
+      applyPointerMoveRef.current(e);
+    };
+    const onTouchEnd = () => {
+      const session = dragRef.current;
+      if (!session?.armed) return;
+      finishHoldDragRef.current({ pointerId: session.pointerId, preventDefault() {} } as PointerEvent, false);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('touchend', onTouchEnd);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!drag?.armed) return;
+    const html = document.documentElement;
+    const prevTouch = html.style.touchAction;
+    const prevUser = html.style.userSelect;
+    html.style.touchAction = 'none';
+    html.style.userSelect = 'none';
+    return () => {
+      html.style.touchAction = prevTouch;
+      html.style.userSelect = prevUser;
+    };
+  }, [drag?.armed]);
 
   // ── Notes ───────────────────────────────────────────────────────────────────
 
@@ -756,10 +807,6 @@ export default function PlannerClient() {
                             if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`;
                           }}
                           title="View recipe"
-                          onPointerDown={e => onMealPointerDown(e, meal.id, dayIndex)}
-                          onPointerMove={onMealPointerMove}
-                          onPointerUp={e => finishHoldDrag(e, false)}
-                          onPointerCancel={e => finishHoldDrag(e, true)}
                         >
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
@@ -779,6 +826,26 @@ export default function PlannerClient() {
                             </div>
                           </div>
                           <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
+                            {shouldAllowDrag(meal.id) && (
+                              <button
+                                type="button"
+                                className={`pl-card-btn pl-drag-handle${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
+                                title="Hold to move"
+                                aria-label="Hold to move"
+                                onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+                                onContextMenu={e => e.preventDefault()}
+                                onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                  <polyline points="5 9 2 12 5 15"/>
+                                  <polyline points="9 5 12 2 15 5"/>
+                                  <polyline points="15 19 12 22 9 19"/>
+                                  <polyline points="19 9 22 12 19 15"/>
+                                  <line x1="2" y1="12" x2="22" y2="12"/>
+                                  <line x1="12" y1="2" x2="12" y2="22"/>
+                                </svg>
+                              </button>
+                            )}
                             <button
                               className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
                               title="Meal options"
@@ -1220,6 +1287,8 @@ export default function PlannerClient() {
         .pl-card-actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; flex-shrink: 0; align-self: center; }
         .pl-card-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; padding: 0; }
         .pl-card-btn:hover, .pl-card-btn.is-open { border-color: var(--rust); color: var(--rust); }
+        .pl-drag-handle { touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+        .pl-drag-handle:active, .pl-drag-handle.is-dragging { cursor: grabbing; border-color: var(--rust); color: var(--rust); }
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
