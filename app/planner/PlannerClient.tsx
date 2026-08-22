@@ -595,6 +595,7 @@ export default function PlannerClient() {
       hits.push({ pick: 'earlier', left: r.left, right: r.right, top: r.top, bottom: r.bottom });
     }
     for (const [index, iso] of railDays.entries()) {
+      if (dragRef.current && isRailOrigin(iso, dragRef.current.originIso)) continue;
       const el = railEls.current[index];
       if (!el) continue;
       const r = el.getBoundingClientRect();
@@ -1101,17 +1102,17 @@ export default function PlannerClient() {
           </div>
           {railDays.map((iso, index) => {
             const date = parseLocalIso(iso);
-            const occupied = dayOccupied(occupancyMeals, iso);
+            const origin = isRailOrigin(iso, drag.originIso);
+            const occupied = !origin && dayOccupied(occupancyMeals, iso);
             const titles = titlesOnDay(occupancyMeals, iso);
-            const hot = drag.target?.type === 'rail-day' && drag.target.iso === iso;
+            const hot = !origin && drag.target?.type === 'rail-day' && drag.target.iso === iso;
             return (
               <div
                 key={iso}
                 ref={el => { railEls.current[index] = el; }}
-                className={`pl-rail-day${occupied ? ' is-occupied' : ''}${hot ? ' is-hot' : ''}${iso === drag.originIso ? ' is-origin' : ''}`}
+                className={`pl-rail-day${occupied ? ' is-occupied' : ''}${hot ? ' is-hot' : ''}${origin ? ' is-origin' : ''}`}
               >
                 <div className="pl-rail-circle">{date.getDate()}</div>
-                {isRailOrigin(iso, drag.originIso) && <div className="pl-rail-from">From</div>}
                 <div className="pl-rail-wd">
                   {date.toLocaleDateString('en-AU', { weekday: 'short' })}
                 </div>
@@ -1460,12 +1461,16 @@ export default function PlannerClient() {
         }
         .pl-rail-pick { flex: 0 0 auto; flex-shrink: 0; padding: 8px 0 6px; }
         .pl-rail-day.is-hot { background: rgba(181, 69, 27, 0.1); }
-        .pl-rail-day.is-origin .pl-rail-circle { box-shadow: 0 0 0 2px var(--parchment), 0 0 0 3px var(--rust); }
-        .pl-rail-from {
-          font-size: 0.52rem; font-weight: 700; letter-spacing: 0.08em;
-          text-transform: uppercase; color: var(--rust); line-height: 1;
+        .pl-rail-day.is-origin { opacity: 0.38; }
+        .pl-rail-day.is-origin .pl-rail-circle {
+          border-style: dashed;
+          border-color: var(--border);
+          background: transparent;
+          color: var(--ink-muted);
+          box-shadow: none;
         }
-        .pl-rail-day.is-origin .pl-rail-wd { color: var(--rust); font-weight: 600; }
+        .pl-rail-day.is-origin .pl-rail-wd,
+        .pl-rail-day.is-origin .pl-rail-preview { color: var(--ink-muted); font-weight: 400; }
         .pl-rail-preview {
           font-size: 0.58rem; line-height: 1.2; text-align: center;
           color: var(--ink-soft); max-width: 100%;
