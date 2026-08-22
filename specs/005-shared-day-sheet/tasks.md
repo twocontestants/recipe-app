@@ -79,7 +79,7 @@
 
 ## Phase 6: Polish
 
-- [ ] T012 Run `npm test` and `npm run build`; update `specs/005-shared-day-sheet/quickstart.md` if commands differ
+- [x] T012 Run `npm test` and `npm run build`; update `specs/005-shared-day-sheet/quickstart.md` if commands differ
 
 ---
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-22
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "For Earlier or Later, open a similar interface to Add to planner from Recipes. Modularise so it can be reused as we update it. Also show which date the meal is being dragged from on the sidebar."
 
