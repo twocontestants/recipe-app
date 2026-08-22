@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMealPlanForWeek, addToMealPlan, removeFromMealPlan } from '@/lib/db';
+import { parseDayOfWeek } from '@/lib/plannerDays';
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,10 +29,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const dayOfWeek = parseDayOfWeek(body.day_of_week);
+    if (dayOfWeek === null) {
+      return NextResponse.json(
+        { error: 'day_of_week must be 0–6 or a weekday name' },
+        { status: 400 }
+      );
+    }
+
     const plan = await addToMealPlan({
       week_start: body.week_start,
       recipe_id: body.recipe_id,
-      day_of_week: body.day_of_week,
+      day_of_week: dayOfWeek,
       meal_type: body.meal_type || 'dinner',
       servings: body.servings || 4,
     });
