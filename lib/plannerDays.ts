@@ -112,7 +112,7 @@ export function displayDayIndex(date: Date, weekStartsOn: DayKey = 'monday'): nu
 }
 
 export function getThisDisplayWeek(weekStartsOn: DayKey = 'monday', now = new Date()): string {
-  return formatWeekStart(startOfDisplayWeek(now, weekStartsOn));
+  return localDateIso(startOfDisplayWeek(now, weekStartsOn));
 }
 
 /** Monday-canonical storage pair for a calendar date. */
@@ -185,7 +185,7 @@ export function mondayOfWeek(weekStart: string): Date {
 export function shiftWeek(weekStart: string, weeks: number): string {
   const d = mondayOfWeek(weekStart);
   d.setDate(d.getDate() + weeks * 7);
-  return formatWeekStart(d);
+  return localDateIso(d);
 }
 
 export function isThisWeek(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): boolean {

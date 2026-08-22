@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
@@ -16,6 +16,12 @@ import {
   storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
+import {
+  invalidateStorageWeeks,
+  missingStorageWeeks,
+  readStorageWeeks,
+  writeStorageWeek,
+} from '@/lib/plannerWeekCache';
 
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
@@ -97,6 +103,7 @@ export default function RecipesPage() {
   const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
   const [addingToPlan, setAddingToPlan] = useState(false);
   const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
+  const weekCacheRef = useRef(new Map<string, unknown[]>());
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -199,13 +206,15 @@ export default function RecipesPage() {
   const fetchWeekPlan = async (week: string) => {
     try {
       const storageWeeks = storageWeeksForDisplayWeek(week, weekStartsOn);
-      const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
-      const plans: unknown[] = [];
-      for (const res of results) {
-        const data = await res.json();
-        if (Array.isArray(data)) plans.push(...data);
+      const missing = missingStorageWeeks(storageWeeks, weekCacheRef.current);
+      if (missing.length) {
+        const results = await Promise.all(missing.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
+        for (let i = 0; i < results.length; i++) {
+          const data = await results[i].json();
+          writeStorageWeek(weekCacheRef.current, missing[i], Array.isArray(data) ? data : []);
+        }
       }
-      setWeekPlan(weekPlanFromMeals(plans, week, weekStartsOn));
+      setWeekPlan(weekPlanFromMeals(readStorageWeeks(weekCacheRef.current, storageWeeks), week, weekStartsOn));
     } catch { /* silent */ }
   };
 
@@ -227,6 +236,7 @@ export default function RecipesPage() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
+      invalidateStorageWeeks(weekCacheRef.current, [coords.weekStart]);
       const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       showToast(`Dinner added for ${dayLabel}`, 'success');
       setPlannerModal(null);

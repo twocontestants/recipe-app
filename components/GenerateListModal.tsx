@@ -4,14 +4,14 @@ import { useState, useEffect } from 'react';
 import { showToast } from './Toast';
 import {
   DAY_SHORT,
-  calendarDateOf,
+  dayDateOf,
   indexToDayKey,
   formatWeekLabel,
   getThisDisplayWeek,
   isoDate,
   parseDayOfWeek,
   shiftWeek,
-  startOfDisplayWeek,
+  storageCoords,
   storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
@@ -59,18 +59,24 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
           const storageWeeks = storageWeeksForDisplayWeek(wk, weekStartsOn);
           const results = await Promise.all(storageWeeks.map(sw => fetch(`/api/planner?weekStart=${sw}`)));
           const entries: MealEntry[] = [];
-          for (let i = 0; i < results.length; i++) {
-            const plans = await results[i].json();
-            if (!Array.isArray(plans)) continue;
-            for (const p of plans) {
-              const storedDay = p.day_of_week;
-              const cal = calendarDateOf(storageWeeks[i], storedDay);
-              if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== wk) continue;
+          const plans: unknown[] = [];
+          for (const res of results) {
+            const data = await res.json();
+            if (Array.isArray(data)) plans.push(...data);
+          }
+          for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const coords = storageCoords(dayDateOf(wk, dayIndex));
+            for (const raw of plans) {
+              if (!raw || typeof raw !== 'object') continue;
+              const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string };
+              const storedDay = parseDayOfWeek(p.day_of_week);
+              if (storedDay === null || !p.recipe_id) continue;
+              if (isoDate(p.week_start ?? '') !== coords.weekStart || storedDay !== coords.dayOfWeek) continue;
               entries.push({
                 recipe_id: p.recipe_id,
                 recipe_title: p.recipe?.title ?? 'Unknown',
                 day_of_week: storedDay,
-                week_start: storageWeeks[i],
+                week_start: coords.weekStart,
               });
             }
           }

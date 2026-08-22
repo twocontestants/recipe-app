@@ -1,8 +1,7 @@
+import { mealOnIso } from './plannerDrag';
 import {
-  calendarDateOf,
-  displayDayIndex,
-  formatWeekStart,
-  isoDate,
+  dayDateOf,
+  localDateIso,
   parseDayOfWeek,
   parseLocalIso,
   shiftWeek,
@@ -21,7 +20,7 @@ export interface SheetAnchor {
 }
 
 export function displayWeekOf(iso: string, weekStartsOn: DayKey): string {
-  return formatWeekStart(startOfDisplayWeek(parseLocalIso(iso), weekStartsOn));
+  return localDateIso(startOfDisplayWeek(parseLocalIso(iso), weekStartsOn));
 }
 
 export function sheetAnchorForRailPick(
@@ -42,24 +41,30 @@ export function weekPlanFromMeals(
   weekStartsOn: DayKey = 'monday',
 ): Record<number, SheetMeal[]> {
   const map: Record<number, SheetMeal[]> = {};
-  for (const raw of plans) {
-    if (!raw || typeof raw !== 'object') continue;
-    const plan = raw as {
-      week_start?: string | Date;
-      day_of_week?: unknown;
-      meal_type?: string;
-      recipe?: { title?: string | null } | null;
-    };
-    const storedDay = parseDayOfWeek(plan.day_of_week);
-    if (storedDay === null || plan.week_start == null) continue;
-    const cal = calendarDateOf(isoDate(plan.week_start), storedDay);
-    if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== displayWeekStart) continue;
-    const display = displayDayIndex(cal, weekStartsOn);
-    if (!map[display]) map[display] = [];
-    map[display].push({
-      title: plan.recipe?.title?.trim() || 'Meal',
-      meal_type: plan.meal_type || 'dinner',
-    });
+  for (let index = 0; index < 7; index++) {
+    const iso = localDateIso(dayDateOf(displayWeekStart, index));
+    for (const raw of plans) {
+      if (!raw || typeof raw !== 'object') continue;
+      const plan = raw as {
+        week_start?: string | Date;
+        day_of_week?: unknown;
+        meal_type?: string;
+        recipe?: { title?: string | null } | null;
+      };
+      const day = parseDayOfWeek(plan.day_of_week);
+      if (day === null || plan.week_start == null) continue;
+      if (!mealOnIso({
+        week_start: plan.week_start,
+        day_of_week: day,
+        meal_type: plan.meal_type,
+        recipe: plan.recipe,
+      }, iso)) continue;
+      if (!map[index]) map[index] = [];
+      map[index].push({
+        title: plan.recipe?.title?.trim() || 'Meal',
+        meal_type: plan.meal_type || 'dinner',
+      });
+    }
   }
   return map;
 }

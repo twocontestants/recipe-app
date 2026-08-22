@@ -6,6 +6,7 @@ import {
   displayDayIndex,
   displayDays,
   formatWeekLabel,
+  getThisDisplayWeek,
   indexToDayKey,
   localDateIso,
   parseDayOfWeek,
@@ -105,6 +106,15 @@ describe('week helpers', () => {
     expect(formatWeekLabel('2026-08-17', now)).toBe('This week');
     expect(formatWeekLabel('2026-08-24', now)).toBe('Next week');
     expect(formatWeekLabel('2026-08-31', now)).toMatch(/31/);
+  });
+
+  it('keeps This week / Next week after a local week shift', () => {
+    const now = new Date(2026, 7, 19, 10, 0, 0);
+    const thisWeek = getThisDisplayWeek('monday', now);
+    expect(formatWeekLabel(thisWeek, now)).toBe('This week');
+    expect(formatWeekLabel(shiftWeek(thisWeek, 1), now)).toBe('Next week');
+    expect(formatWeekLabel(shiftWeek(thisWeek, 2), now)).not.toBe('Next week');
+    expect(formatWeekLabel(shiftWeek(shiftWeek(thisWeek, 1), -1), now)).toBe('This week');
   });
 
   it('maps today and day dates from a Monday week start', () => {

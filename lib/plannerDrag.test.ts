@@ -3,8 +3,10 @@ import {
   dayOccupied,
   holdArmed,
   movementExceededThreshold,
+  railDayCount,
   resolveDragTarget,
   shouldAllowDrag,
+  surroundingRailDays,
   surroundingTenDays,
   titlesOnDay,
   type RailHit,
@@ -36,16 +38,38 @@ describe('shouldAllowDrag', () => {
 });
 
 describe('surroundingTenDays', () => {
-  it('is two days before the origin, the origin, and five days after', () => {
+  it('is the origin plus two days before and two after', () => {
     expect(surroundingTenDays('2026-08-19')).toEqual([
       '2026-08-17',
       '2026-08-18',
       '2026-08-19',
       '2026-08-20',
       '2026-08-21',
+    ]);
+  });
+});
+
+describe('railDayCount / surroundingRailDays', () => {
+  it('uses five numbered days on a phone-height screen', () => {
+    expect(railDayCount(667)).toBe(5);
+    expect(railDayCount(400)).toBe(5);
+  });
+
+  it('grows to more odd-length windows on a taller screen', () => {
+    expect(railDayCount(900)).toBeGreaterThanOrEqual(7);
+    expect(railDayCount(900) % 2).toBe(1);
+    expect(railDayCount(1400)).toBeLessThanOrEqual(11);
+  });
+
+  it('keeps the origin in the middle of a longer window', () => {
+    expect(surroundingRailDays('2026-08-19', 7)).toEqual([
+      '2026-08-16',
+      '2026-08-17',
+      '2026-08-18',
+      '2026-08-19',
+      '2026-08-20',
+      '2026-08-21',
       '2026-08-22',
-      '2026-08-23',
-      '2026-08-24',
     ]);
   });
 });

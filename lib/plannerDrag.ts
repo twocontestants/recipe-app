@@ -1,9 +1,14 @@
-import { isoDate, localDateIso, parseLocalIso, storageCoords } from './plannerDays';
+import { isoDate, localDateIso, parseDayOfWeek, parseLocalIso, storageCoords } from './plannerDays';
 
 export const HOLD_MS = 400;
 export const MOVE_CANCEL_PX = 8;
-export const RAIL_DAYS = 8;
+export const RAIL_MIN_DAYS = 5;
+export const RAIL_MAX_DAYS = 11;
+export const RAIL_DAYS = RAIL_MIN_DAYS;
 export const RAIL_DAYS_BEFORE = 2;
+export const RAIL_PICK_HEIGHT = 52;
+export const RAIL_DAY_SLOT = 88;
+export const RAIL_CHROME = 16;
 
 export interface HitRect {
   left: number;
@@ -53,10 +58,22 @@ export function addCalendarDays(iso: string, days: number): string {
   return localDateIso(d);
 }
 
+export function railDayCount(viewportHeight: number): number {
+  const avail = viewportHeight - RAIL_CHROME - 2 * RAIL_PICK_HEIGHT;
+  const raw = Math.floor(avail / RAIL_DAY_SLOT);
+  const odd = raw % 2 === 0 ? raw - 1 : raw;
+  return Math.min(RAIL_MAX_DAYS, Math.max(RAIL_MIN_DAYS, odd));
+}
+
+export function surroundingRailDays(originIso: string, count = RAIL_MIN_DAYS): string[] {
+  const n = Math.max(1, count);
+  const before = Math.floor((n - 1) / 2);
+  return Array.from({ length: n }, (_, i) => addCalendarDays(originIso, i - before));
+}
+
+/** Default rail window: origin ± 2. */
 export function surroundingTenDays(originIso: string): string[] {
-  return Array.from({ length: RAIL_DAYS }, (_, i) =>
-    addCalendarDays(originIso, i - RAIL_DAYS_BEFORE),
-  );
+  return surroundingRailDays(originIso, RAIL_MIN_DAYS);
 }
 
 export function storageWeeksForIsos(isos: string[]): string[] {
@@ -96,8 +113,10 @@ export function resolveDragTarget(
 
 export function mealOnIso(meal: OccupancyMeal, iso: string): boolean {
   if (meal.meal_type && meal.meal_type !== 'dinner') return false;
+  const day = parseDayOfWeek(meal.day_of_week);
+  if (day === null) return false;
   const coords = storageCoords(parseLocalIso(iso));
-  return isoDate(meal.week_start) === coords.weekStart && meal.day_of_week === coords.dayOfWeek;
+  return isoDate(meal.week_start) === coords.weekStart && day === coords.dayOfWeek;
 }
 
 export function dayOccupied(meals: OccupancyMeal[], iso: string): boolean {

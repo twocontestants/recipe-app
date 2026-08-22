@@ -65,6 +65,20 @@ describe('weekPlanFromMeals', () => {
     expect(map[2]).toBeUndefined();
   });
 
+  it('still lists Wednesday after shifting away and back', () => {
+    const plans = [{
+      week_start: '2026-08-17',
+      day_of_week: 2,
+      meal_type: 'dinner',
+      recipe: { title: 'Pie' },
+    }];
+    const back = shiftWeek(shiftWeek(week, 1), -1);
+    expect(back).toBe(week);
+    expect(weekPlanFromMeals(plans, back, 'monday')[2]).toEqual([
+      { title: 'Pie', meal_type: 'dinner' },
+    ]);
+  });
+
   it('does not use weekday-name keys', () => {
     const map = weekPlanFromMeals(
       [{

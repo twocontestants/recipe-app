@@ -32,15 +32,22 @@ import {
   HOLD_MS,
   dayOccupied,
   movementExceededThreshold,
+  railDayCount,
   resolveDragTarget,
   shouldAllowDrag,
   storageWeeksForIsos,
-  surroundingTenDays,
+  surroundingRailDays,
   titlesOnDay,
   type DragTarget,
   type RailHit,
   type WeekHit,
 } from '@/lib/plannerDrag';
+import {
+  invalidateStorageWeeks,
+  missingStorageWeeks,
+  readStorageWeeks,
+  writeStorageWeek,
+} from '@/lib/plannerWeekCache';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -165,6 +172,20 @@ export default function PlannerClient() {
   } | null>(null);
   const [moveSheetPlan, setMoveSheetPlan] = useState<Record<number, PlannedMeal[]>>({});
   const [moveSheetSaving, setMoveSheetSaving] = useState(false);
+  const weekCacheRef = useRef(new Map<string, MealPlan[]>());
+
+  const ensureStorageWeeks = async (weeks: string[]): Promise<MealPlan[]> => {
+    const missing = missingStorageWeeks(weeks, weekCacheRef.current);
+    if (missing.length) {
+      const fetched = await Promise.all(missing.map(async week => {
+        const res = await fetch(`/api/planner?weekStart=${week}`);
+        const data = res.ok ? await res.json() : [];
+        return [week, Array.isArray(data) ? data as MealPlan[] : []] as const;
+      }));
+      for (const [week, meals] of fetched) writeStorageWeek(weekCacheRef.current, week, meals);
+    }
+    return readStorageWeeks(weekCacheRef.current, weeks);
+  };
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -210,7 +231,10 @@ export default function PlannerClient() {
         const notesRes = weekPairs[i * 2 + 1];
         const wkPlans = await plansRes.json();
         const wkNotes = await notesRes.json();
-        if (Array.isArray(wkPlans)) plans.push(...wkPlans);
+        if (Array.isArray(wkPlans)) {
+          writeStorageWeek(weekCacheRef.current, storageWeeks[i], wkPlans);
+          plans.push(...wkPlans);
+        }
         if (wkNotes && typeof wkNotes === 'object') {
           for (const [day, note] of Object.entries(wkNotes as Record<string, string>)) {
             const cal = getDayDate(new Date(`${storageWeeks[i]}T00:00:00`), Number(day));
@@ -358,6 +382,7 @@ export default function PlannerClient() {
           body: JSON.stringify({ week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
         });
         if (!res.ok) throw new Error();
+        invalidateStorageWeeks(weekCacheRef.current, [coords.weekStart]);
         const when = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
         showToast(`Added to ${when}`, 'success');
       } catch {
@@ -379,6 +404,7 @@ export default function PlannerClient() {
       });
       if (!res.ok) throw new Error();
       const real = await res.json();
+      invalidateStorageWeeks(weekCacheRef.current, [coords.weekStart]);
       setMealPlans(prev => prev.map(m => m.id === tempId ? { ...real, recipe } : m));
     } catch {
       setMealPlans(prev => prev.filter(m => m.id !== tempId));
@@ -393,6 +419,7 @@ export default function PlannerClient() {
     try {
       const res = await fetch(`/api/planner?id=${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
+      if (snapshot) invalidateStorageWeeks(weekCacheRef.current, [isoDate(snapshot.week_start)]);
     } catch {
       if (snapshot) setMealPlans(prev => [...prev, snapshot]);
       showToast('Failed to remove meal', 'error');
@@ -437,6 +464,7 @@ export default function PlannerClient() {
       });
       if (!res.ok) throw new Error();
       const real = await res.json();
+      invalidateStorageWeeks(weekCacheRef.current, [isoDate(meal.week_start), toCoords.weekStart]);
       if (sameDisplayWeek) {
         setMealPlans(prev => prev.map(m => m.id === mealId ? { ...real, recipe: meal.recipe } : m));
       } else {
@@ -477,12 +505,7 @@ export default function PlannerClient() {
     (async () => {
       try {
         const storageWeeks = storageWeeksForDisplayWeek(moveSheet.weekStart, weekStartsOn);
-        const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
-        const plans: unknown[] = [];
-        for (const res of results) {
-          const data = await res.json();
-          if (Array.isArray(data)) plans.push(...data);
-        }
+        const plans = await ensureStorageWeeks(storageWeeks);
         if (!cancelled) setMoveSheetPlan(weekPlanFromMeals(plans, moveSheet.weekStart, weekStartsOn));
       } catch {
         if (!cancelled) setMoveSheetPlan({});
@@ -567,15 +590,9 @@ export default function PlannerClient() {
   const loadRailMeals = async (days: string[]) => {
     const gen = ++railFetchGen.current;
     try {
-      const weeks = storageWeeksForIsos(days);
-      const batches = await Promise.all(weeks.map(async weekStartIso => {
-        const res = await fetch(`/api/planner?weekStart=${weekStartIso}`);
-        if (!res.ok) return [] as MealPlan[];
-        const data = await res.json();
-        return Array.isArray(data) ? data as MealPlan[] : [];
-      }));
+      const meals = await ensureStorageWeeks(storageWeeksForIsos(days));
       if (gen !== railFetchGen.current) return;
-      setRailMeals(batches.flat());
+      setRailMeals(meals);
     } catch { /* occupancy falls back to the week already on screen */ }
   };
 
@@ -603,7 +620,8 @@ export default function PlannerClient() {
     holdTimer.current = setTimeout(() => {
       const session = dragRef.current;
       if (!session || session.mealId !== mealId || session.pointerId !== e.pointerId) return;
-      const days = surroundingTenDays(session.originIso);
+      const viewport = window.visualViewport?.height ?? window.innerHeight;
+      const days = surroundingRailDays(session.originIso, railDayCount(viewport));
       setRailDays(days);
       void loadRailMeals(days);
       updateDrag({ ...session, armed: true });
@@ -1368,7 +1386,7 @@ export default function PlannerClient() {
           border-radius: 10px;
           padding: 2px 0;
         }
-        .pl-rail-pick { flex: 0 0 auto; padding: 8px 0 6px; }
+        .pl-rail-pick { flex: 0 0 auto; flex-shrink: 0; padding: 8px 0 6px; }
         .pl-rail-day.is-hot { background: rgba(181, 69, 27, 0.1); }
         .pl-rail-day.is-origin .pl-rail-circle { box-shadow: 0 0 0 2px var(--parchment), 0 0 0 3px var(--rust); }
         .pl-rail-from {
