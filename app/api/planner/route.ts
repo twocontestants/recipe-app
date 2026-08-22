@@ -1,14 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMealPlanForWeek, addToMealPlan, removeFromMealPlan } from '@/lib/db';
+import { getMealPlanForWeek, getMealPlansForWeeks, addToMealPlan, removeFromMealPlan } from '@/lib/db';
 import { parseDayOfWeek } from '@/lib/plannerDays';
+import {
+  PLANNER_RANGE_MAX_DAYS,
+  inclusiveDayCount,
+  isDayIso,
+  storageWeeksForDateRange,
+} from '@/lib/plannerMonth';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const weekStart = searchParams.get('weekStart');
-    
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
+
+    if (from && to) {
+      if (!isDayIso(from) || !isDayIso(to) || from > to) {
+        return NextResponse.json({ error: 'from and to must be YYYY-MM-DD with from ≤ to' }, { status: 400 });
+      }
+      if (inclusiveDayCount(from, to) > PLANNER_RANGE_MAX_DAYS) {
+        return NextResponse.json({ error: 'date range is too long' }, { status: 400 });
+      }
+      const plans = await getMealPlansForWeeks(storageWeeksForDateRange(from, to));
+      return NextResponse.json(plans);
+    }
+
     if (!weekStart) {
-      return NextResponse.json({ error: 'weekStart parameter required' }, { status: 400 });
+      return NextResponse.json({ error: 'weekStart or from/to parameters required' }, { status: 400 });
     }
 
     const plans = await getMealPlanForWeek(weekStart);

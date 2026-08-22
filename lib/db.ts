@@ -274,9 +274,34 @@ export async function deleteRecipe(id: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]> {
-  const result = await pool().query(
-    `SELECT mp.*,
+function mapMealPlanRow(row: Record<string, unknown>): MealPlan {
+  return {
+    id: row.id as string,
+    week_start: row.week_start as string,
+    recipe_id: row.recipe_id as string,
+    day_of_week: row.day_of_week as number,
+    meal_type: row.meal_type as string,
+    servings: row.servings as number,
+    recipe: {
+      id: row.recipe_id as string,
+      title: row.recipe_title as string,
+      description: row.recipe_description as string,
+      image_url: row.recipe_image_url as string,
+      ingredients: (row.recipe_ingredients as Recipe['ingredients']) ?? [],
+      steps: (row.recipe_steps as string[]) ?? [],
+      servings: row.recipe_servings as number,
+      prep_time: row.recipe_prep_time as number,
+      cook_time: row.recipe_cook_time as number,
+      tags: (row.recipe_tags as string[]) ?? [],
+      primary_protein: row.recipe_primary_protein as string,
+      source_url: row.recipe_source_url as string,
+      created_at: row.recipe_created_at as string,
+      updated_at: row.recipe_updated_at as string,
+    },
+  };
+}
+
+const MEAL_PLAN_SELECT = `SELECT mp.*,
             r.title       AS recipe_title,
             r.description AS recipe_description,
             r.image_url   AS recipe_image_url,
@@ -291,35 +316,21 @@ export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]>
             r.created_at  AS recipe_created_at,
             r.updated_at  AS recipe_updated_at
      FROM meal_plans mp
-     JOIN recipes r ON mp.recipe_id = r.id
-     WHERE mp.week_start = $1
-     ORDER BY mp.day_of_week, mp.meal_type`,
-    [weekStart]
+     JOIN recipes r ON mp.recipe_id = r.id`;
+
+export async function getMealPlansForWeeks(weekStarts: string[]): Promise<MealPlan[]> {
+  if (!weekStarts.length) return [];
+  const result = await pool().query(
+    `${MEAL_PLAN_SELECT}
+     WHERE mp.week_start = ANY($1::date[])
+     ORDER BY mp.week_start, mp.day_of_week, mp.meal_type`,
+    [weekStarts],
   );
-  return result.rows.map((row) => ({
-    id: row.id,
-    week_start: row.week_start,
-    recipe_id: row.recipe_id,
-    day_of_week: row.day_of_week,
-    meal_type: row.meal_type,
-    servings: row.servings,
-    recipe: {
-      id: row.recipe_id,
-      title: row.recipe_title,
-      description: row.recipe_description,
-      image_url: row.recipe_image_url,
-      ingredients: row.recipe_ingredients ?? [],
-      steps: row.recipe_steps ?? [],
-      servings: row.recipe_servings,
-      prep_time: row.recipe_prep_time,
-      cook_time: row.recipe_cook_time,
-      tags: row.recipe_tags ?? [],
-      primary_protein: row.recipe_primary_protein,
-      source_url: row.recipe_source_url,
-      created_at: row.recipe_created_at,
-      updated_at: row.recipe_updated_at,
-    },
-  }));
+  return result.rows.map(mapMealPlanRow);
+}
+
+export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]> {
+  return getMealPlansForWeeks([weekStart]);
 }
 
 export async function addToMealPlan(data: Omit<MealPlan, 'id'>): Promise<MealPlan> {

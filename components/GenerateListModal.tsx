@@ -9,10 +9,10 @@ import {
   formatWeekLabel,
   getThisDisplayWeek,
   isoDate,
+  localDateIso,
   parseDayOfWeek,
   shiftWeek,
   storageCoords,
-  storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
 
@@ -54,35 +54,34 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
     const fetchAll = async () => {
       setLoading(true);
       const map: Record<string, MealEntry[]> = {};
-      await Promise.all(weeks.map(async (wk) => {
-        try {
-          const storageWeeks = storageWeeksForDisplayWeek(wk, weekStartsOn);
-          const results = await Promise.all(storageWeeks.map(sw => fetch(`/api/planner?weekStart=${sw}`)));
-          const entries: MealEntry[] = [];
-          const plans: unknown[] = [];
-          for (const res of results) {
-            const data = await res.json();
-            if (Array.isArray(data)) plans.push(...data);
+      const from = prevWeek;
+      const to = localDateIso(dayDateOf(nextWeek, 6));
+      let plans: unknown[] = [];
+      try {
+        const res = await fetch(`/api/planner?from=${from}&to=${to}`);
+        const data = await res.json();
+        if (Array.isArray(data)) plans = data;
+      } catch { plans = []; }
+      for (const wk of weeks) {
+        const entries: MealEntry[] = [];
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+          const coords = storageCoords(dayDateOf(wk, dayIndex));
+          for (const raw of plans) {
+            if (!raw || typeof raw !== 'object') continue;
+            const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string };
+            const storedDay = parseDayOfWeek(p.day_of_week);
+            if (storedDay === null || !p.recipe_id) continue;
+            if (isoDate(p.week_start ?? '') !== coords.weekStart || storedDay !== coords.dayOfWeek) continue;
+            entries.push({
+              recipe_id: p.recipe_id,
+              recipe_title: p.recipe?.title ?? 'Unknown',
+              day_of_week: storedDay,
+              week_start: coords.weekStart,
+            });
           }
-          for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const coords = storageCoords(dayDateOf(wk, dayIndex));
-            for (const raw of plans) {
-              if (!raw || typeof raw !== 'object') continue;
-              const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string };
-              const storedDay = parseDayOfWeek(p.day_of_week);
-              if (storedDay === null || !p.recipe_id) continue;
-              if (isoDate(p.week_start ?? '') !== coords.weekStart || storedDay !== coords.dayOfWeek) continue;
-              entries.push({
-                recipe_id: p.recipe_id,
-                recipe_title: p.recipe?.title ?? 'Unknown',
-                day_of_week: storedDay,
-                week_start: coords.weekStart,
-              });
-            }
-          }
-          map[wk] = entries;
-        } catch { map[wk] = []; }
-      }));
+        }
+        map[wk] = entries;
+      }
       setMeals(map);
       // Default-select all meals from the defaultWeekStart (or this week)
       const defaultWk = defaultWeekStart ?? thisWeek;

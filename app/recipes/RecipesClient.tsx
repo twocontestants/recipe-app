@@ -5,7 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
+import { usePlannerLive } from '@/components/usePlannerLive';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
+import { fetchMealsForMonths } from '@/lib/loadPlannerMonth';
 import {
   calendarDateOf,
   displayDayIndex,
@@ -13,15 +15,9 @@ import {
   parseWeekStartDay,
   shiftWeek,
   storageCoords,
-  storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
-import {
-  invalidateStorageWeeks,
-  missingStorageWeeks,
-  readStorageWeeks,
-  writeStorageWeek,
-} from '@/lib/plannerWeekCache';
+import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
 
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
@@ -103,7 +99,44 @@ export default function RecipesPage() {
   const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
   const [addingToPlan, setAddingToPlan] = useState(false);
   const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
-  const weekCacheRef = useRef(new Map<string, unknown[]>());
+  const mealStoreRef = useRef(new Map<string, unknown>());
+  const loadedMonthsRef = useRef(new Set<string>());
+  const plannerWeekRef = useRef(plannerWeek);
+  plannerWeekRef.current = plannerWeek;
+  const weekStartsOnRef = useRef(weekStartsOn);
+  weekStartsOnRef.current = weekStartsOn;
+
+  const snapshotMeals = () => [...mealStoreRef.current.values()];
+
+  const applyWeekPlan = (week: string, meals: unknown[]) => {
+    setWeekPlan(weekPlanFromMeals(meals, week, weekStartsOnRef.current));
+  };
+
+  const ensureMonths = async (keys: string[]): Promise<unknown[]> => {
+    const needed = missingMonths(keys, loadedMonthsRef.current);
+    if (needed.length) {
+      const meals = await fetchMealsForMonths(needed);
+      for (const meal of meals) {
+        if (meal && typeof meal === 'object' && 'id' in meal) {
+          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
+        }
+      }
+      for (const key of needed) loadedMonthsRef.current.add(key);
+    }
+    return snapshotMeals();
+  };
+
+  const reloadPlannerCopy = async () => {
+    loadedMonthsRef.current.clear();
+    mealStoreRef.current.clear();
+    if (!plannerModal) return;
+    try {
+      const meals = await ensureMonths(monthsForDisplayWeek(plannerWeekRef.current));
+      applyWeekPlan(plannerWeekRef.current, meals);
+    } catch { /* keep current sheet copy */ }
+  };
+
+  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadPlannerCopy(); });
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -205,16 +238,8 @@ export default function RecipesPage() {
 
   const fetchWeekPlan = async (week: string) => {
     try {
-      const storageWeeks = storageWeeksForDisplayWeek(week, weekStartsOn);
-      const missing = missingStorageWeeks(storageWeeks, weekCacheRef.current);
-      if (missing.length) {
-        const results = await Promise.all(missing.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
-        for (let i = 0; i < results.length; i++) {
-          const data = await results[i].json();
-          writeStorageWeek(weekCacheRef.current, missing[i], Array.isArray(data) ? data : []);
-        }
-      }
-      setWeekPlan(weekPlanFromMeals(readStorageWeeks(weekCacheRef.current, storageWeeks), week, weekStartsOn));
+      const meals = await ensureMonths(monthsForDisplayWeek(week));
+      applyWeekPlan(week, meals);
     } catch { /* silent */ }
   };
 
@@ -236,7 +261,9 @@ export default function RecipesPage() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      invalidateStorageWeeks(weekCacheRef.current, [coords.weekStart]);
+      loadedMonthsRef.current.clear();
+      mealStoreRef.current.clear();
+      broadcastPlannerChanged();
       const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
       showToast(`Dinner added for ${dayLabel}`, 'success');
       setPlannerModal(null);

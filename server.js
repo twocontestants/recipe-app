@@ -61,6 +61,15 @@ app.prepare().then(() => {
       socket.to(listId).emit('list-changed');
     });
 
+    // Household planner: persist via HTTP, then tell the other clients to
+    // re-read their month copy. socket.to excludes the sender.
+    socket.on('join-planner', () => {
+      socket.join('planner');
+    });
+    socket.on('planner-changed', () => {
+      socket.to('planner').emit('planner-changed');
+    });
+
     socket.on('disconnect', () => {
       if (currentList) {
         const room = io.sockets.adapter.rooms.get(currentList);
