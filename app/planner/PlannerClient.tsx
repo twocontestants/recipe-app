@@ -8,7 +8,6 @@ import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import {
-  dayDateOf,
   displayDayIndex,
   displayDays,
   formatWeekLabel,
@@ -20,12 +19,17 @@ import {
   type DayKey,
 } from '@/lib/plannerDays';
 import {
-  adjacentWeekIso,
+  HOLD_MS,
+  dayOccupied,
   movementExceededThreshold,
   resolveDragTarget,
   shouldAllowDrag,
-  type DayRect,
+  storageWeeksForIsos,
+  surroundingTenDays,
+  titlesOnDay,
   type DragTarget,
+  type RailHit,
+  type WeekHit,
 } from '@/lib/plannerDrag';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
@@ -120,18 +124,25 @@ export default function PlannerClient() {
 
   const todayRef = useRef<HTMLDivElement | null>(null);
   const dayEls = useRef<(HTMLDivElement | null)[]>([]);
+  const railEls = useRef<(HTMLDivElement | null)[]>([]);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdEl = useRef<HTMLElement | null>(null);
+  const railFetchGen = useRef(0);
   const suppressCardClick = useRef(false);
   const dragRef = useRef<{
     mealId: string;
-    fromDay: number;
+    originIso: string;
+    pointerId: number;
     startX: number;
     startY: number;
     x: number;
     y: number;
-    dragging: boolean;
+    armed: boolean;
     target: DragTarget;
   } | null>(null);
   const [drag, setDrag] = useState<typeof dragRef.current>(null);
+  const [railDays, setRailDays] = useState<string[]>([]);
+  const [railMeals, setRailMeals] = useState<MealPlan[]>([]);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -427,11 +438,33 @@ export default function PlannerClient() {
     await moveMealToDate(mealId, getDayDate(weekStart, toDay));
   };
 
-  const dayRects = (): DayRect[] =>
+  const occupancyMeals = (() => {
+    const map = new Map<string, MealPlan>();
+    for (const meal of mealPlans) map.set(meal.id, meal);
+    for (const meal of railMeals) if (!map.has(meal.id)) map.set(meal.id, meal);
+    return [...map.values()];
+  })();
+
+  const weekHits = (): WeekHit[] =>
     dayEls.current.flatMap((el, index) => {
       if (!el) return [];
       const r = el.getBoundingClientRect();
-      return [{ index, top: r.top, bottom: r.bottom }];
+      return [{
+        index,
+        iso: formatDate(getDayDate(weekStart, index)),
+        left: r.left,
+        right: r.right,
+        top: r.top,
+        bottom: r.bottom,
+      }];
+    });
+
+  const railHits = (): RailHit[] =>
+    railDays.flatMap((iso, index) => {
+      const el = railEls.current[index];
+      if (!el) return [];
+      const r = el.getBoundingClientRect();
+      return [{ iso, left: r.left, right: r.right, top: r.top, bottom: r.bottom }];
     });
 
   const updateDrag = (next: typeof dragRef.current) => {
@@ -439,21 +472,62 @@ export default function PlannerClient() {
     setDrag(next);
   };
 
+  const clearHoldTimer = () => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  };
+
+  const hideRail = () => {
+    railFetchGen.current += 1;
+    setRailDays([]);
+    setRailMeals([]);
+    railEls.current = [];
+  };
+
+  const loadRailMeals = async (days: string[]) => {
+    const gen = ++railFetchGen.current;
+    try {
+      const weeks = storageWeeksForIsos(days);
+      const batches = await Promise.all(weeks.map(async weekStartIso => {
+        const res = await fetch(`/api/planner?weekStart=${weekStartIso}`);
+        if (!res.ok) return [] as MealPlan[];
+        const data = await res.json();
+        return Array.isArray(data) ? data as MealPlan[] : [];
+      }));
+      if (gen !== railFetchGen.current) return;
+      setRailMeals(batches.flat());
+    } catch { /* occupancy falls back to the week already on screen */ }
+  };
+
   const onMealPointerDown = (e: React.PointerEvent, mealId: string, fromDay: number) => {
     if (e.button !== 0) return;
     if (!shouldAllowDrag(mealId)) return;
     if ((e.target as HTMLElement).closest('.pl-card-actions')) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    clearHoldTimer();
+    holdEl.current = e.currentTarget as HTMLElement;
+    const originIso = formatDate(getDayDate(weekStart, fromDay));
     updateDrag({
       mealId,
-      fromDay,
+      originIso,
+      pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
       x: e.clientX,
       y: e.clientY,
-      dragging: false,
+      armed: false,
       target: null,
     });
+    holdTimer.current = setTimeout(() => {
+      const session = dragRef.current;
+      if (!session || session.mealId !== mealId) return;
+      try { holdEl.current?.setPointerCapture(session.pointerId); } catch { /* already released */ }
+      const days = surroundingTenDays(session.originIso);
+      setRailDays(days);
+      void loadRailMeals(days);
+      updateDrag({ ...session, armed: true });
+    }, HOLD_MS);
   };
 
   const onMealPointerMove = (e: React.PointerEvent) => {
@@ -461,32 +535,31 @@ export default function PlannerClient() {
     if (!session) return;
     const dx = e.clientX - session.startX;
     const dy = e.clientY - session.startY;
-    const dragging = session.dragging || movementExceededThreshold(dx, dy);
-    if (dragging) e.preventDefault();
-    const target = dragging
-      ? resolveDragTarget(e.clientY, window.innerHeight, dayRects())
-      : null;
-    updateDrag({ ...session, x: e.clientX, y: e.clientY, dragging, target });
+    if (!session.armed) {
+      if (movementExceededThreshold(dx, dy)) {
+        clearHoldTimer();
+        holdEl.current = null;
+        updateDrag(null);
+      }
+      return;
+    }
+    e.preventDefault();
+    const target = resolveDragTarget(e.clientX, e.clientY, weekHits(), railHits());
+    updateDrag({ ...session, x: e.clientX, y: e.clientY, target });
   };
 
-  const onMealPointerUp = (e: React.PointerEvent) => {
+  const finishHoldDrag = (e: React.PointerEvent, cancelled: boolean) => {
+    clearHoldTimer();
     const session = dragRef.current;
+    holdEl.current = null;
+    hideRail();
     updateDrag(null);
-    if (!session) return;
-    if (!session.dragging) return;
+    if (!session?.armed) return;
     suppressCardClick.current = true;
     e.preventDefault();
     e.stopPropagation();
-    if (!session.target) return;
-    if (session.target.type === 'day') {
-      void moveMeal(session.mealId, session.fromDay, session.target.index);
-      return;
-    }
-    const destWeek = adjacentWeekIso(
-      formatDate(weekStart),
-      session.target.type === 'next-week' ? 1 : -1,
-    );
-    void moveMealToDate(session.mealId, dayDateOf(destWeek, session.fromDay));
+    if (cancelled || !session.target) return;
+    void moveMealToDate(session.mealId, new Date(`${session.target.iso}T00:00:00`));
   };
 
   // ── Notes ───────────────────────────────────────────────────────────────────
@@ -630,7 +703,7 @@ export default function PlannerClient() {
       {loading ? (
         <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : (
-        <div className={`pl-days${drag?.dragging ? ' is-dragging' : ''}`}>
+        <div className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}>
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
             const todayIdx = todayDisplayIdx;
@@ -646,7 +719,7 @@ export default function PlannerClient() {
                   dayEls.current[dayIndex] = el;
                   if (isToday) todayRef.current = el;
                 }}
-                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.dragging && drag.target?.type === 'day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
+                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
               >
                 {/* Day header */}
                 <div className="pl-day-header">
@@ -674,7 +747,7 @@ export default function PlannerClient() {
                       return (
                         <div
                           key={meal.id}
-                          className={`pl-recipe-card${drag?.dragging && drag.mealId === meal.id ? ' is-dragging' : ''}`}
+                          className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
                           onClick={() => {
                             if (suppressCardClick.current) {
                               suppressCardClick.current = false;
@@ -685,11 +758,8 @@ export default function PlannerClient() {
                           title="View recipe"
                           onPointerDown={e => onMealPointerDown(e, meal.id, dayIndex)}
                           onPointerMove={onMealPointerMove}
-                          onPointerUp={onMealPointerUp}
-                          onPointerCancel={() => {
-                            if (dragRef.current?.dragging) suppressCardClick.current = true;
-                            updateDrag(null);
-                          }}
+                          onPointerUp={e => finishHoldDrag(e, false)}
+                          onPointerCancel={e => finishHoldDrag(e, true)}
                         >
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
@@ -774,13 +844,32 @@ export default function PlannerClient() {
         </div>
       )}
 
-      {drag?.dragging && drag.target?.type === 'prev-week' && (
-        <div className="pl-week-drop is-top is-hot" aria-live="polite">Previous week</div>
+      {drag?.armed && railDays.length > 0 && (
+        <div className="pl-rail" aria-live="polite" aria-label="Nearby days">
+          {railDays.map((iso, index) => {
+            const date = new Date(`${iso}T00:00:00`);
+            const occupied = dayOccupied(occupancyMeals, iso);
+            const titles = titlesOnDay(occupancyMeals, iso);
+            const hot = drag.target?.type === 'rail-day' && drag.target.iso === iso;
+            return (
+              <div
+                key={iso}
+                ref={el => { railEls.current[index] = el; }}
+                className={`pl-rail-day${occupied ? ' is-occupied' : ''}${hot ? ' is-hot' : ''}${iso === drag.originIso ? ' is-origin' : ''}`}
+              >
+                <div className="pl-rail-preview">
+                  {titles.length ? titles.join(' · ') : '\u00a0'}
+                </div>
+                <div className="pl-rail-circle">{date.getDate()}</div>
+                <div className="pl-rail-wd">
+                  {date.toLocaleDateString('en-AU', { weekday: 'short' })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
-      {drag?.dragging && drag.target?.type === 'next-week' && (
-        <div className="pl-week-drop is-bottom is-hot" aria-live="polite">Next week</div>
-      )}
-      {drag?.dragging && (
+      {drag?.armed && (
         <div className="pl-drag-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden>
           {mealPlans.find(m => m.id === drag.mealId)?.recipe?.title ?? 'Moving…'}
         </div>
@@ -1064,26 +1153,50 @@ export default function PlannerClient() {
         .pl-meal-stack { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
 
         /* Recipe card */
-        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; touch-action: none; }
+        .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
-        .pl-recipe-card.is-dragging { opacity: 0.4; }
-        .pl-week-drop {
-          position: fixed; left: 0; right: 0; z-index: 40;
-          height: 56px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 0.95rem; font-weight: 700; font-family: var(--font-body);
-          background: var(--parchment);
-          border: 2px dashed var(--border);
-          color: var(--ink-muted);
+        .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
+        .pl-rail {
+          position: fixed; top: 0; right: 0; bottom: 0; z-index: 36;
+          width: 92px;
+          display: flex; flex-direction: column;
+          padding: 8px 6px env(safe-area-inset-bottom, 8px);
+          background: rgba(247, 242, 233, 0.97);
+          border-left: 1px solid var(--border);
+          box-shadow: -10px 0 28px rgba(60, 42, 30, 0.1);
           pointer-events: none;
         }
-        .pl-week-drop.is-top { top: 0; }
-        .pl-week-drop.is-bottom { bottom: 0; }
-        .pl-week-drop.is-hot {
-          background: var(--rust);
-          color: #fff;
-          border-color: var(--rust);
+        .pl-rail-day {
+          flex: 1 1 0;
+          min-height: 0;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          gap: 2px;
+          border-radius: 10px;
+          padding: 2px 0;
         }
+        .pl-rail-day.is-hot { background: rgba(181, 69, 27, 0.1); }
+        .pl-rail-day.is-origin .pl-rail-circle { box-shadow: 0 0 0 2px var(--parchment), 0 0 0 3px var(--rust); }
+        .pl-rail-preview {
+          font-size: 0.58rem; line-height: 1.2; text-align: center;
+          color: var(--ink-soft); max-width: 100%;
+          overflow: hidden; display: -webkit-box;
+          -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+          min-height: 1.4em;
+        }
+        .pl-rail-circle {
+          width: 32px; height: 32px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.76rem; font-weight: 700;
+          border: 2px dashed var(--border);
+          background: transparent; color: var(--ink-muted);
+        }
+        .pl-rail-day.is-occupied .pl-rail-circle {
+          border-style: solid; border-color: var(--rust);
+          background: var(--rust); color: #fff;
+        }
+        .pl-rail-day.is-hot .pl-rail-circle { transform: scale(1.08); }
+        .pl-rail-wd { font-size: 0.58rem; color: var(--ink-muted); letter-spacing: 0.02em; }
         .pl-drag-ghost {
           position: fixed; z-index: 50;
           pointer-events: none;

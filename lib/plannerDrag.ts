@@ -1,50 +1,107 @@
-import { shiftWeek } from './plannerDays';
+import { formatWeekStart, isoDate, mondayOfWeek, storageCoords } from './plannerDays';
 
-export const DRAG_THRESHOLD_PX = 8;
-export const EDGE_BAND_PX = 56;
+export const HOLD_MS = 400;
+export const MOVE_CANCEL_PX = 8;
+export const RAIL_DAYS = 10;
+export const RAIL_DAYS_BEFORE = 4;
 
-export interface DayRect {
-  index: number;
+export interface HitRect {
+  left: number;
+  right: number;
   top: number;
   bottom: number;
 }
 
+export interface WeekHit extends HitRect {
+  index: number;
+  iso: string;
+}
+
+export interface RailHit extends HitRect {
+  iso: string;
+}
+
 export type DragTarget =
-  | { type: 'day'; index: number }
-  | { type: 'prev-week' }
-  | { type: 'next-week' }
+  | { type: 'week-day'; index: number; iso: string }
+  | { type: 'rail-day'; iso: string }
   | null;
+
+export interface OccupancyMeal {
+  week_start: string | Date;
+  day_of_week: number;
+  meal_type?: string;
+  recipe?: { title?: string | null } | null;
+}
+
+export function holdArmed(elapsedMs: number, holdMs = HOLD_MS): boolean {
+  return elapsedMs >= holdMs;
+}
 
 export function movementExceededThreshold(
   dx: number,
   dy: number,
-  threshold = DRAG_THRESHOLD_PX,
+  threshold = MOVE_CANCEL_PX,
 ): boolean {
   return Math.hypot(dx, dy) >= threshold;
 }
 
-export function resolveDragTarget(
-  pointerY: number,
-  viewportHeight: number,
-  days: DayRect[],
-  edgeBand = EDGE_BAND_PX,
-): DragTarget {
-  if (pointerY <= edgeBand) return { type: 'prev-week' };
-  if (pointerY >= viewportHeight - edgeBand) return { type: 'next-week' };
+export function addCalendarDays(iso: string, days: number): string {
+  const d = mondayOfWeek(iso);
+  d.setDate(d.getDate() + days);
+  return formatWeekStart(d);
+}
 
-  const sorted = [...days].sort((a, b) => a.top - b.top);
-  for (let i = 0; i < sorted.length; i++) {
-    const day = sorted[i];
-    const last = i === sorted.length - 1;
-    if (pointerY >= day.top && (last ? pointerY <= day.bottom : pointerY < day.bottom)) {
-      return { type: 'day', index: day.index };
+export function surroundingTenDays(originIso: string): string[] {
+  return Array.from({ length: RAIL_DAYS }, (_, i) =>
+    addCalendarDays(originIso, i - RAIL_DAYS_BEFORE),
+  );
+}
+
+export function storageWeeksForIsos(isos: string[]): string[] {
+  const seen = new Set<string>();
+  const weeks: string[] = [];
+  for (const iso of isos) {
+    const { weekStart } = storageCoords(new Date(`${iso}T00:00:00`));
+    if (!seen.has(weekStart)) {
+      seen.add(weekStart);
+      weeks.push(weekStart);
     }
   }
+  return weeks;
+}
+
+export function pointInRect(x: number, y: number, rect: HitRect): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+export function resolveDragTarget(
+  x: number,
+  y: number,
+  weekHits: WeekHit[],
+  railHits: RailHit[],
+): DragTarget {
+  const rail = railHits.find(hit => pointInRect(x, y, hit));
+  if (rail) return { type: 'rail-day', iso: rail.iso };
+  const week = weekHits.find(hit => pointInRect(x, y, hit));
+  if (week) return { type: 'week-day', index: week.index, iso: week.iso };
   return null;
 }
 
-export function adjacentWeekIso(displayWeekStartIso: string, direction: -1 | 1): string {
-  return shiftWeek(displayWeekStartIso, direction);
+export function mealOnIso(meal: OccupancyMeal, iso: string): boolean {
+  if (meal.meal_type && meal.meal_type !== 'dinner') return false;
+  const coords = storageCoords(new Date(`${iso}T00:00:00`));
+  return isoDate(meal.week_start) === coords.weekStart && meal.day_of_week === coords.dayOfWeek;
+}
+
+export function dayOccupied(meals: OccupancyMeal[], iso: string): boolean {
+  return meals.some(meal => mealOnIso(meal, iso));
+}
+
+export function titlesOnDay(meals: OccupancyMeal[], iso: string): string[] {
+  return meals
+    .filter(meal => mealOnIso(meal, iso))
+    .map(meal => meal.recipe?.title?.trim() ?? '')
+    .filter(Boolean);
 }
 
 export function shouldAllowDrag(mealId: string): boolean {
