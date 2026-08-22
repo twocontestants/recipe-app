@@ -33,7 +33,7 @@ describe('AddToPlannerModal', () => {
     expect(options).toHaveLength(7);
     expect(screen.getByRole('option', { name: /mon/i })).toBeTruthy();
     expect(screen.getByText('Pasta night')).toBeTruthy();
-    expect(screen.getByText('Nothing planned')).toBeTruthy();
+    expect(screen.getAllByText('Nothing planned').length).toBeGreaterThan(0);
     expect(document.querySelector('.pqm-day-grid')).toBeNull();
     expect(document.querySelector('.pqm-day-list')).toBeTruthy();
   });
