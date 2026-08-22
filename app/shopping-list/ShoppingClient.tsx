@@ -1118,12 +1118,12 @@ export default function ShoppingListClient() {
         .shop-item-wrap.item-dragging { opacity: 0.35; }
         .shop-item-wrap.drop-before-item::before { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; margin-bottom:1px; }
         .shop-item-wrap.drop-after-item::after { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; margin-top:1px; }
-        .shop-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.35rem; border-radius: 5px; border-bottom: 1px solid var(--parchment); transition: background 0.1s; }
+        .shop-item { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0.35rem; border-radius: 5px; border-bottom: 1px solid var(--parchment); transition: background 0.1s; }
         .shop-item:hover { background: var(--parchment); }
         .shop-item.is-checked { opacity: 0.42; }
-        .item-drag-handle { cursor: grab; color: var(--border); display: flex; align-items: center; flex-shrink: 0; padding: 2px; border-radius: 3px; transition: color 0.15s; }
+        .item-drag-handle { cursor: grab; color: var(--border); display: flex; align-items: center; flex-shrink: 0; padding: 2px; margin-top: 4px; border-radius: 3px; transition: color 0.15s; }
         .item-drag-handle:hover { color: var(--ink-muted); }
-        .shop-checkbox { width: 20px; height: 20px; border: 1.5px solid var(--border); border-radius: 5px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; background: white; cursor: pointer; }
+        .shop-checkbox { width: 20px; height: 20px; border: 1.5px solid var(--border); border-radius: 5px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; background: white; cursor: pointer; margin-top: 2px; }
         .shop-item.is-checked .shop-checkbox { background: var(--sage); border-color: var(--sage); }
         .shop-checkbox svg { display: none; }
         .shop-item.is-checked .shop-checkbox svg { display: block; }
@@ -1139,13 +1139,13 @@ export default function ShoppingListClient() {
            indented to line up under the item name. Kept deliberately quiet. */
         .shop-subitems { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px); }
         .shop-subitems.is-checked { opacity: 0.42; }
-        .shop-subitem { display: flex; align-items: center; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
+        .shop-subitem { display: flex; align-items: flex-start; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
         .shop-subitem-handle { display: flex; align-items: center; color: var(--ink-muted); opacity: 0; cursor: grab; flex-shrink: 0; transition: opacity 0.12s; touch-action: none; }
         .shop-subitem:hover .shop-subitem-handle { opacity: 0.5; }
         .shop-subitem-handle:hover { opacity: 0.9 !important; }
         .shop-subitem-handle.is-disabled { cursor: default; opacity: 0 !important; }
         .shop-subitem-handle:active { cursor: grabbing; }
-        .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; }
+        .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
         .shop-subitem-amount { font-family: var(--font-display); font-size: 0.8rem; color: var(--rust); white-space: nowrap; flex-shrink: 0; opacity: 0.85; }
         .shop-subitem-recipe { font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font-style: italic; flex-shrink: 0; }
         a.shop-subitem-recipe { text-decoration: none; }
@@ -1162,22 +1162,22 @@ export default function ShoppingListClient() {
         .all-done { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; background: var(--sage-light); border: 1px solid #cdd6c3; border-radius: 10px; margin: 1rem 0; }
         .all-done-emoji { font-size: 1.5rem; }
         .all-done strong { display: block; color: var(--sage); font-size: 0.95rem; margin-bottom: 2px; }
-        .shop-item-name { font-size: clamp(16px, 0.9rem, 18px); color: var(--ink); display: block; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; outline: none; transition: background 0.12s, box-shadow 0.12s; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .shop-item-name { font-size: clamp(16px, 0.9rem, 18px); color: var(--ink); display: block; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; outline: none; transition: background 0.12s, box-shadow 0.12s; cursor: text; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.35; }
         .shop-item-name.checked-text { text-decoration: line-through; }
         .shop-item-name[contenteditable="true"]:hover { background: rgba(181,69,27,0.06); }
-        .shop-item-name[contenteditable="true"]:focus { background: white; box-shadow: 0 0 0 1.5px var(--rust); white-space: normal; overflow: visible; }
-        .shop-item-amount-wrap { flex-shrink: 0; }
+        .shop-item-name[contenteditable="true"]:focus { background: white; box-shadow: 0 0 0 1.5px var(--rust); }
+        .shop-item-amount-wrap { flex-shrink: 0; padding-top: 1px; }
         .shop-item-amount { font-family: var(--font-display); font-size: clamp(16px, 0.95rem, 18px); color: var(--rust); white-space: nowrap; display: block; border-radius: 3px; padding: 2px 5px; margin: -2px -5px; outline: none; min-width: 28px; text-align: right; transition: background 0.12s, box-shadow 0.12s; cursor: text; }
         .shop-item-amount[contenteditable="true"]:empty::before { content: attr(data-placeholder); color: var(--border); font-family: var(--font-body); font-size: 0.78rem; }
         .shop-item-amount[contenteditable="true"]:hover { background: rgba(181,69,27,0.06); }
         .shop-item-amount[contenteditable="true"]:focus { background: white; box-shadow: 0 0 0 1.5px var(--rust); }
         .shop-item-checker { font-size: 0.68rem; color: var(--ink-muted); font-style: italic; white-space: nowrap; flex-shrink: 0; }
-        .item-delete-btn { background: none; border: none; color: var(--border); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0; }
+        .item-delete-btn { background: none; border: none; color: var(--border); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0; margin-top: 1px; }
         .shop-item:hover .item-delete-btn { opacity: 1; }
         .item-delete-btn:hover { color: var(--rust); background: rgba(181,69,27,0.08); }
 
         /* Move-to-aisle: kept visible (incl. on mobile) since it replaces a long drag. */
-        .item-move-btn { background: none; border: none; color: var(--ink-muted); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0.5; }
+        .item-move-btn { background: none; border: none; color: var(--ink-muted); cursor: pointer; padding: 3px; display: flex; align-items: center; flex-shrink: 0; border-radius: 4px; transition: all 0.15s; opacity: 0.5; margin-top: 1px; }
         .shop-item:hover .item-move-btn { opacity: 0.8; }
         .item-move-btn:hover { color: var(--rust); background: rgba(181,69,27,0.08); opacity: 1; }
 
@@ -1224,8 +1224,7 @@ export default function ShoppingListClient() {
         .add-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .add-cancel-btn { padding: 0.38rem 0.75rem; background: white; color: var(--ink-muted); border: 1px solid var(--border); border-radius: 5px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
 
-        /* Prevent horizontal overflow on all screens */
-        .shop-item-name[contenteditable="true"]:focus { white-space: normal; overflow: visible; word-break: break-word; }
+        .shop-item-name[contenteditable="true"]:focus { word-break: break-word; }
 
         /* Mobile */
         @media (max-width: 600px) {
