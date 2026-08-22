@@ -118,7 +118,7 @@ export default function PlannerClient() {
   // Note save debounce timers
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
-  const todayRef = useRef<HTMLDivElement>(null);
+  const todayRef = useRef<HTMLDivElement | null>(null);
   const dayEls = useRef<(HTMLDivElement | null)[]>([]);
   const suppressCardClick = useRef(false);
   const dragRef = useRef<{
