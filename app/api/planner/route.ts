@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMealPlanForWeek, getMealPlansForWeeks, addToMealPlan, removeFromMealPlan } from '@/lib/db';
+import { getMealPlanForWeek, getMealPlansForWeeks, getMealPlansInDateWindow, addToMealPlan, removeFromMealPlan } from '@/lib/db';
 import { parseDayOfWeek } from '@/lib/plannerDays';
 import {
   PLANNER_RANGE_MAX_DAYS,
   inclusiveDayCount,
   isDayIso,
-  storageWeeksForDateRange,
+  parseWeekStartList,
+  plannerQueryWindow,
 } from '@/lib/plannerMonth';
 
 export async function GET(req: NextRequest) {
@@ -22,8 +23,13 @@ export async function GET(req: NextRequest) {
       if (inclusiveDayCount(from, to) > PLANNER_RANGE_MAX_DAYS) {
         return NextResponse.json({ error: 'date range is too long' }, { status: 400 });
       }
-      const plans = await getMealPlansForWeeks(storageWeeksForDateRange(from, to));
-      return NextResponse.json(plans);
+      const window = plannerQueryWindow(from, to);
+      const rangePlans = await getMealPlansInDateWindow(window.from, window.to);
+      const extraWeeks = parseWeekStartList(searchParams.get('weeks'));
+      if (!extraWeeks.length) return NextResponse.json(rangePlans);
+      const extraPlans = await getMealPlansForWeeks(extraWeeks);
+      const seen = new Set(rangePlans.map(plan => plan.id));
+      return NextResponse.json(rangePlans.concat(extraPlans.filter(plan => !seen.has(plan.id))));
     }
 
     if (!weekStart) {

@@ -7,7 +7,7 @@ import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
-import { fetchMealsForMonths } from '@/lib/loadPlannerMonth';
+import { fetchMealsForMonths, fetchMealsForWeeks } from '@/lib/loadPlannerMonth';
 import {
   calendarDateOf,
   displayDayIndex,
@@ -15,6 +15,7 @@ import {
   parseWeekStartDay,
   shiftWeek,
   storageCoords,
+  storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
 import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
@@ -116,6 +117,7 @@ export default function RecipesPage() {
     const needed = missingMonths(keys, loadedMonthsRef.current);
     if (needed.length) {
       const meals = await fetchMealsForMonths(needed);
+      if (!meals.length) return snapshotMeals();
       for (const meal of meals) {
         if (meal && typeof meal === 'object' && 'id' in meal) {
           mealStoreRef.current.set(String((meal as { id: string }).id), meal);
@@ -127,12 +129,19 @@ export default function RecipesPage() {
   };
 
   const reloadPlannerCopy = async () => {
-    loadedMonthsRef.current.clear();
-    mealStoreRef.current.clear();
     if (!plannerModal) return;
     try {
-      const meals = await ensureMonths(monthsForDisplayWeek(plannerWeekRef.current));
-      applyWeekPlan(plannerWeekRef.current, meals);
+      loadedMonthsRef.current.clear();
+      await ensureMonths(monthsForDisplayWeek(plannerWeekRef.current));
+      const weekMeals = await fetchMealsForWeeks(
+        storageWeeksForDisplayWeek(plannerWeekRef.current, weekStartsOnRef.current),
+      );
+      for (const meal of weekMeals) {
+        if (meal && typeof meal === 'object' && 'id' in meal) {
+          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
+        }
+      }
+      applyWeekPlan(plannerWeekRef.current, snapshotMeals());
     } catch { /* keep current sheet copy */ }
   };
 
@@ -238,8 +247,14 @@ export default function RecipesPage() {
 
   const fetchWeekPlan = async (week: string) => {
     try {
-      const meals = await ensureMonths(monthsForDisplayWeek(week));
-      applyWeekPlan(week, meals);
+      await ensureMonths(monthsForDisplayWeek(week));
+      const weekMeals = await fetchMealsForWeeks(storageWeeksForDisplayWeek(week, weekStartsOnRef.current));
+      for (const meal of weekMeals) {
+        if (meal && typeof meal === 'object' && 'id' in meal) {
+          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
+        }
+      }
+      applyWeekPlan(week, snapshotMeals());
     } catch { /* silent */ }
   };
 

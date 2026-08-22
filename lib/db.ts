@@ -329,6 +329,17 @@ export async function getMealPlansForWeeks(weekStarts: string[]): Promise<MealPl
   return result.rows.map(mapMealPlanRow);
 }
 
+/** Inclusive week_start window. Avoids timezone-dependent Monday key lists. */
+export async function getMealPlansInDateWindow(from: string, to: string): Promise<MealPlan[]> {
+  const result = await pool().query(
+    `${MEAL_PLAN_SELECT}
+     WHERE mp.week_start >= $1::date AND mp.week_start <= $2::date
+     ORDER BY mp.week_start, mp.day_of_week, mp.meal_type`,
+    [from, to],
+  );
+  return result.rows.map(mapMealPlanRow);
+}
+
 export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]> {
   return getMealPlansForWeeks([weekStart]);
 }

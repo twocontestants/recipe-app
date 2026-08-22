@@ -3,6 +3,11 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 
+/** Only resync after the tab was hidden. First paint / leftover focus must not wipe the store. */
+export function shouldResyncPlanner(wasHidden: boolean, visibilityState: string): boolean {
+  return wasHidden && visibilityState === 'visible';
+}
+
 export function usePlannerLive(onRemoteChange: () => void) {
   const onRemoteChangeRef = useRef(onRemoteChange);
   onRemoteChangeRef.current = onRemoteChange;
@@ -14,14 +19,23 @@ export function usePlannerLive(onRemoteChange: () => void) {
     socketRef.current = socket;
     socket.on('connect', () => socket.emit('join-planner'));
     socket.on('planner-changed', () => onRemoteChangeRef.current());
-    const resync = () => {
-      if (document.visibilityState === 'visible') onRemoteChangeRef.current();
+
+    let wasHidden = typeof document !== 'undefined' && document.hidden;
+    const maybeResync = () => {
+      if (document.visibilityState !== 'visible') {
+        wasHidden = true;
+        return;
+      }
+      if (!shouldResyncPlanner(wasHidden, document.visibilityState)) return;
+      wasHidden = false;
+      onRemoteChangeRef.current();
     };
-    window.addEventListener('focus', resync);
-    document.addEventListener('visibilitychange', resync);
+
+    window.addEventListener('focus', maybeResync);
+    document.addEventListener('visibilitychange', maybeResync);
     return () => {
-      window.removeEventListener('focus', resync);
-      document.removeEventListener('visibilitychange', resync);
+      window.removeEventListener('focus', maybeResync);
+      document.removeEventListener('visibilitychange', maybeResync);
       socket.disconnect();
       socketRef.current = null;
     };

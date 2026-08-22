@@ -15,6 +15,7 @@ import {
   storageCoords,
   type DayKey,
 } from '@/lib/plannerDays';
+import { storageWeeksForDateRange } from '@/lib/plannerMonth';
 
 interface MealEntry {
   recipe_id: string;
@@ -58,7 +59,8 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       const to = localDateIso(dayDateOf(nextWeek, 6));
       let plans: unknown[] = [];
       try {
-        const res = await fetch(`/api/planner?from=${from}&to=${to}`);
+        const weeksParam = storageWeeksForDateRange(from, to).join(',');
+        const res = await fetch(`/api/planner?from=${from}&to=${to}&weeks=${encodeURIComponent(weeksParam)}`);
         const data = await res.json();
         if (Array.isArray(data)) plans = data;
       } catch { plans = []; }

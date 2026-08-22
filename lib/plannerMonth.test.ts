@@ -6,6 +6,8 @@ import {
   monthKeyOf,
   monthRange,
   monthsForDisplayWeek,
+  parseWeekStartList,
+  plannerQueryWindow,
   storageWeeksForDateRange,
 } from './plannerMonth';
 
@@ -46,5 +48,27 @@ describe('missingMonths / adjacentMonthKeys', () => {
 describe('inclusiveDayCount', () => {
   it('counts both ends', () => {
     expect(inclusiveDayCount('2026-08-01', '2026-08-31')).toBe(31);
+  });
+});
+
+describe('plannerQueryWindow', () => {
+  it('pads the month so Sunday-stored AU weeks still match', () => {
+    expect(plannerQueryWindow('2026-08-01', '2026-08-31')).toEqual({
+      from: '2026-07-18',
+      to: '2026-09-07',
+    });
+    const window = plannerQueryWindow('2026-08-01', '2026-08-31');
+    expect('2026-08-16' >= window.from && '2026-08-16' <= window.to).toBe(true);
+    expect('2026-08-17' >= window.from && '2026-08-17' <= window.to).toBe(true);
+  });
+});
+
+describe('parseWeekStartList', () => {
+  it('keeps valid unique YYYY-MM-DD keys', () => {
+    expect(parseWeekStartList('2026-08-16,2026-08-17,2026-08-16,nope')).toEqual([
+      '2026-08-16',
+      '2026-08-17',
+    ]);
+    expect(parseWeekStartList(null)).toEqual([]);
   });
 });

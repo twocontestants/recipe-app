@@ -9,7 +9,7 @@ import PickerRecipeRow from '@/components/PickerRecipeRow';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
-import { fetchMealsForMonths } from '@/lib/loadPlannerMonth';
+import { fetchMealsForMonths, fetchMealsForWeeks, mergePlannerMeals } from '@/lib/loadPlannerMonth';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -179,6 +179,8 @@ export default function PlannerClient() {
   const loadedMonthsRef = useRef(new Set<string>());
   const weekStartRef = useRef(weekStart);
   weekStartRef.current = weekStart;
+  const weekStartsOnRef = useRef(weekStartsOn);
+  weekStartsOnRef.current = weekStartsOn;
   const recipesRef = useRef(recipes);
   recipesRef.current = recipes;
 
@@ -192,6 +194,7 @@ export default function PlannerClient() {
     const needed = missingMonths(keys, loadedMonthsRef.current);
     if (needed.length) {
       const meals = await fetchMealsForMonths(needed);
+      if (!meals.length) return snapshotMealPlans();
       const weeks = new Set(needed.flatMap(key => {
         const { from, to } = monthRange(key);
         return storageWeeksForDateRange(from, to);
@@ -206,11 +209,18 @@ export default function PlannerClient() {
   };
 
   const reloadFromServer = async () => {
-    const keys = monthsForDisplayWeek(formatDate(weekStartRef.current));
+    const displayIso = formatDate(weekStartRef.current);
+    const keys = monthsForDisplayWeek(displayIso);
+    const storageWeeks = storageWeeksForDisplayWeek(displayIso, weekStartsOnRef.current);
     try {
-      const meals = await fetchMealsForMonths(keys);
+      const [monthMeals, weekMeals] = await Promise.all([
+        fetchMealsForMonths(keys),
+        fetchMealsForWeeks(storageWeeks),
+      ]);
+      const meals = mergePlannerMeals(monthMeals, weekMeals);
+      if (!meals.length && mealStoreRef.current.size > 0) return;
       mealStoreRef.current = new Map(meals.map(meal => [meal.id, meal]));
-      loadedMonthsRef.current = new Set(keys);
+      if (meals.length) loadedMonthsRef.current = new Set(keys);
       setMealPlans(snapshotMealPlans());
     } catch { /* keep the copy already on screen */ }
   };
@@ -252,11 +262,14 @@ export default function PlannerClient() {
         ? Promise.resolve(recipesRef.current)
         : fetch('/api/recipes').then(res => res.json());
       const notesPromise = Promise.all(storageWeeks.map(wk => fetch(`/api/planner-notes?weekStart=${wk}`)));
-      const [recs, plans, notesResults] = await Promise.all([
+      const [recs, , weekPlans, notesResults] = await Promise.all([
         recipesPromise,
         ensureMonths(monthKeys),
+        fetchMealsForWeeks(storageWeeks),
         notesPromise,
       ]);
+      mergeMealPlans(weekPlans);
+      const plans = snapshotMealPlans();
       const nts: Record<number, string> = {};
       for (let i = 0; i < storageWeeks.length; i++) {
         const wkNotes = await notesResults[i].json();
