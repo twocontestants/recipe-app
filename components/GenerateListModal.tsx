@@ -173,15 +173,15 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
         .glm-week-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); font-weight: 500; }
         .glm-week-toggle { font-size: 0.72rem; color: var(--rust); background: none; border: none; cursor: pointer; font-family: var(--font-body); padding: 0; }
         .glm-meal-row {
-          display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+          display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px;
           border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
           cursor: pointer; transition: background 0.12s;
         }
         .glm-meal-row.is-selected { background: rgba(181,69,27,0.05); border-color: rgba(181,69,27,0.3); }
         .glm-check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
         .glm-meal-row.is-selected .glm-check { background: var(--rust); border-color: var(--rust); }
-        .glm-meal-name { flex: 1; font-size: 0.88rem; color: var(--ink); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .glm-meal-day { font-size: 0.72rem; color: var(--ink-muted); flex-shrink: 0; }
+        .glm-meal-name { flex: 1; font-size: 0.88rem; color: var(--ink); min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+        .glm-meal-day { font-size: 0.72rem; color: var(--ink-muted); flex-shrink: 0; padding-top: 2px; }
         .glm-empty { font-size: 0.8rem; color: var(--ink-muted); font-style: italic; padding: 8px 0; }
         .glm-subtitle-field { margin-top: 16px; }
         .glm-subtitle-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); margin-bottom: 6px; display: block; }

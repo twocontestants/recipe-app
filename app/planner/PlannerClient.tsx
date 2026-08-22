@@ -1097,11 +1097,11 @@ export default function PlannerClient() {
           transform: translate(-8px, -8px);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .pl-recipe-img { width: 80px; height: 66px; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
+        .pl-recipe-img { width: 80px; min-height: 66px; align-self: stretch; flex-shrink: 0; background: var(--parchment); overflow: hidden; }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
         .pl-recipe-info { flex: 1; min-width: 0; padding: 0.65rem 0.75rem; display: flex; flex-direction: column; justify-content: center; }
-        .pl-recipe-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
-        .pl-recipe-name { font-size: 0.9rem; color: var(--ink); font-weight: 400; line-height: 1.3; }
+        .pl-recipe-top { display: flex; align-items: flex-start; gap: 0.4rem 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+        .pl-recipe-name { flex: 1 1 10rem; min-width: 0; font-size: 0.9rem; color: var(--ink); font-weight: 400; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
         .pl-recipe-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.72rem; color: var(--ink-muted); }
         .pl-recipe-tag { background: var(--parchment); border: 1px solid var(--border); border-radius: 99px; padding: 1px 6px; font-size: 0.66rem; color: var(--ink-soft); }
         .pl-card-actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; flex-shrink: 0; align-self: center; }
@@ -1202,7 +1202,7 @@ export default function PlannerClient() {
         .pl-picker-thumb { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--parchment); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
         .pl-picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
         .pl-picker-info { flex: 1; min-width: 0; }
-        .pl-picker-name { display: block; font-size: 0.9rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .pl-picker-name { display: block; font-size: 0.9rem; color: var(--ink); white-space: normal; overflow-wrap: anywhere; }
         .pl-picker-meta { font-size: 0.72rem; color: var(--ink-muted); }
 
         /* Magic modal */
@@ -1242,7 +1242,7 @@ export default function PlannerClient() {
           .pl-btn-magic, .pl-btn-gen { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
           .pl-day { padding: 1rem 0; }
           .pl-day-name { font-size: 1.1rem; }
-          .pl-recipe-img { width: 64px; height: 56px; }
+          .pl-recipe-img { width: 64px; min-height: 56px; height: auto; }
           .pl-recipe-name { font-size: 0.85rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
