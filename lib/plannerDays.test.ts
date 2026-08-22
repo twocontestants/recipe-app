@@ -51,6 +51,7 @@ describe('buildPlannerPostBody', () => {
       servings: 3,
     });
     expect(body).toEqual({
+      planned_on: '2026-08-20',
       week_start: '2026-08-17',
       recipe_id: 'recipe-1',
       day_of_week: 3,

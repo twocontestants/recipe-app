@@ -16,14 +16,12 @@ import {
   monthKeyOf,
   monthRange,
   monthsForDisplayWeek,
-  storageWeeksForDateRange,
 } from '@/lib/plannerMonth';
 import {
   dayDateOf,
   displayDayIndex,
   displayDays,
   formatWeekLabel,
-  isoDate,
   localDateIso,
   parseLocalIso,
   parseWeekStartDay,
@@ -33,6 +31,7 @@ import {
   storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
+import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
   isRailOrigin,
   sheetAnchorForRailPick,
@@ -197,12 +196,12 @@ export default function PlannerClient() {
     if (needed.length) {
       const meals = await fetchMealsForMonths(needed);
       if (!meals.length) return snapshotMealPlans();
-      const weeks = new Set(needed.flatMap(key => {
+      for (const key of needed) {
         const { from, to } = monthRange(key);
-        return storageWeeksForDateRange(from, to);
-      }));
-      for (const [id, meal] of mealStoreRef.current) {
-        if (weeks.has(isoDate(meal.week_start))) mealStoreRef.current.delete(id);
+        for (const [id, meal] of mealStoreRef.current) {
+          const on = plannedOnOf(meal);
+          if (on >= from && on <= to) mealStoreRef.current.delete(id);
+        }
       }
       mergeMealPlans(meals);
       for (const key of needed) loadedMonthsRef.current.add(key);
@@ -249,8 +248,7 @@ export default function PlannerClient() {
 
   const mealOnDisplayDay = (m: MealPlan, displayIndex: number) => {
     const date = getDayDate(weekStart, displayIndex);
-    const coords = storageCoords(date);
-    return isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek && m.meal_type === 'dinner';
+    return mealOnDate(m, formatDate(date)) && m.meal_type === 'dinner';
   };
 
   const fetchData = useCallback(async () => {
@@ -289,14 +287,12 @@ export default function PlannerClient() {
       const newSuggestions: Record<number, Recipe[]> = {};
       for (let d = 0; d < 7; d++) {
         const date = getDayDate(weekStart, d);
-        const coords = storageCoords(date);
+        const dayIso = formatDate(date);
         const dayMeals = plans.filter((m: MealPlan) =>
-          isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek && m.meal_type === 'dinner'
+          mealOnDate(m, dayIso) && m.meal_type === 'dinner'
         );
         if (!dayMeals.length) {
-          const otherProteins = plans.filter((m: MealPlan) => !(
-            isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek
-          )).map(m => m.recipe?.primary_protein);
+          const otherProteins = plans.filter((m: MealPlan) => !mealOnDate(m, dayIso)).map(m => m.recipe?.primary_protein);
           newSuggestions[d] = suggestForDay(recs, otherProteins, 3);
         }
       }
@@ -421,7 +417,7 @@ export default function PlannerClient() {
       try {
         const res = await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
+          body: JSON.stringify({ planned_on: formatDate(date), week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
         });
         if (!res.ok) throw new Error();
         broadcastPlannerChanged();
@@ -436,14 +432,14 @@ export default function PlannerClient() {
     const tempId = `tmp-${Date.now()}`;
     const optimistic: MealPlan = {
       id: tempId, recipe_id: recipeId, day_of_week: coords.dayOfWeek,
-      meal_type: 'dinner', servings, week_start: coords.weekStart, recipe: recipe as any,
+      meal_type: 'dinner', servings, planned_on: formatDate(date), week_start: coords.weekStart, recipe: recipe as any,
     };
     setMealPlans(prev => [...prev, optimistic]);
     mealStoreRef.current.set(tempId, optimistic);
     try {
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
+        body: JSON.stringify({ planned_on: formatDate(date), week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
       });
       if (!res.ok) throw new Error();
       const real = { ...await res.json(), recipe } as MealPlan;
@@ -495,13 +491,13 @@ export default function PlannerClient() {
     const meal = mealPlans.find(m => m.id === mealId);
     if (!meal) return;
     const toCoords = storageCoords(date);
-    if (isoDate(meal.week_start) === toCoords.weekStart && meal.day_of_week === toCoords.dayOfWeek) return;
+    if (mealOnDate(meal, formatDate(date))) return;
 
     const destWeek = startOfDisplayWeek(date, weekStartsOn);
     const sameDisplayWeek = formatDate(destWeek) === formatDate(weekStart);
 
     if (sameDisplayWeek) {
-      setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toCoords.dayOfWeek, week_start: toCoords.weekStart } : m));
+      setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, planned_on: formatDate(date), day_of_week: toCoords.dayOfWeek, week_start: toCoords.weekStart } : m));
     } else {
       setMealPlans(prev => prev.filter(m => m.id !== mealId));
     }
@@ -510,7 +506,7 @@ export default function PlannerClient() {
       await fetch(`/api/planner?id=${mealId}`, { method: 'DELETE' });
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: toCoords.weekStart, recipe_id: meal.recipe_id, day_of_week: toCoords.dayOfWeek, meal_type: 'dinner', servings: meal.servings }),
+        body: JSON.stringify({ planned_on: formatDate(date), week_start: toCoords.weekStart, recipe_id: meal.recipe_id, day_of_week: toCoords.dayOfWeek, meal_type: 'dinner', servings: meal.servings }),
       });
       if (!res.ok) throw new Error();
       const real = { ...await res.json(), recipe: meal.recipe } as MealPlan;
@@ -866,7 +862,7 @@ export default function PlannerClient() {
       for (let day = 0; day < 7; day++) {
         await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: storageCoords(getDayDate(weekStart, day)).weekStart, recipe_id: picks[day], day_of_week: storageCoords(getDayDate(weekStart, day)).dayOfWeek, meal_type: 'dinner', servings: magicSettings.servings }),
+          body: JSON.stringify({ planned_on: formatDate(getDayDate(weekStart, day)), week_start: storageCoords(getDayDate(weekStart, day)).weekStart, recipe_id: picks[day], day_of_week: storageCoords(getDayDate(weekStart, day)).dayOfWeek, meal_type: 'dinner', servings: magicSettings.servings }),
         });
       }
       for (const key of monthsForDisplayWeek(formatDate(weekStart))) {

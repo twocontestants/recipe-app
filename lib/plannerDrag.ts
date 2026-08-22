@@ -1,4 +1,5 @@
-import { isoDate, localDateIso, parseDayOfWeek, parseLocalIso, storageCoords } from './plannerDays';
+import { localDateIso, parseLocalIso, storageCoords } from './plannerDays';
+import { mealOnDate } from './plannerDate';
 
 export const HOLD_MS = 400;
 export const MOVE_CANCEL_PX = 8;
@@ -36,8 +37,9 @@ export type DragTarget =
   | null;
 
 export interface OccupancyMeal {
-  week_start: string | Date;
-  day_of_week: number;
+  planned_on?: string | Date | null;
+  week_start?: string | Date;
+  day_of_week?: number;
   meal_type?: string;
   recipe?: { title?: string | null } | null;
 }
@@ -121,10 +123,7 @@ export function resolveDragTarget(
 
 export function mealOnIso(meal: OccupancyMeal, iso: string): boolean {
   if (meal.meal_type && meal.meal_type !== 'dinner') return false;
-  const day = parseDayOfWeek(meal.day_of_week);
-  if (day === null) return false;
-  const coords = storageCoords(parseLocalIso(iso));
-  return isoDate(meal.week_start) === coords.weekStart && day === coords.dayOfWeek;
+  return mealOnDate(meal, iso);
 }
 
 export function dayOccupied(meals: OccupancyMeal[], iso: string): boolean {

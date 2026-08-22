@@ -37,10 +37,37 @@ describe('sheetAnchorForRailPick', () => {
 describe('weekPlanFromMeals', () => {
   const week = displayWeekOf('2026-08-19', 'monday');
 
+  it('groups a dinner by planned_on when that field is present', () => {
+    const map = weekPlanFromMeals(
+      [{
+        planned_on: '2026-08-19',
+        meal_type: 'dinner',
+        recipe: { title: 'Pie' },
+      }],
+      week,
+      'monday',
+    );
+    expect(map[2]).toEqual([{ title: 'Pie', meal_type: 'dinner' }]);
+  });
+
   it('groups a Monday-canonical dinner under the display-day index', () => {
     const map = weekPlanFromMeals(
       [{
         week_start: '2026-08-17',
+        day_of_week: 2,
+        meal_type: 'dinner',
+        recipe: { title: 'Pie' },
+      }],
+      week,
+      'monday',
+    );
+    expect(map[2]).toEqual([{ title: 'Pie', meal_type: 'dinner' }]);
+  });
+
+  it('groups a legacy Sunday-keyed dinner on the kitchen Wednesday', () => {
+    const map = weekPlanFromMeals(
+      [{
+        week_start: '2026-08-16',
         day_of_week: 2,
         meal_type: 'dinner',
         recipe: { title: 'Pie' },

@@ -1,3 +1,5 @@
+import { coordsFromPlannedOn, inferPlannedOn } from './plannerDate';
+
 export const DAY_KEYS = [
   'monday',
   'tuesday',
@@ -169,9 +171,9 @@ export function mondayOf(date: Date): Date {
   return d;
 }
 
-/** Match PlannerClient: local midnight formatted via ISO so both pages share a week key. */
+/** Local calendar date of the given instant. Do not use toISOString() — that shifts the day east of UTC. */
 export function formatWeekStart(date: Date): string {
-  return date.toISOString().split('T')[0];
+  return localDateIso(date);
 }
 
 export function getThisMonday(now = new Date()): string {
@@ -221,6 +223,7 @@ export function dayDateOf(weekStart: string, dayIndex: number): Date {
 }
 
 export interface PlannerPostBody {
+  planned_on: string;
   week_start: string;
   recipe_id: string;
   day_of_week: number;
@@ -228,12 +231,13 @@ export interface PlannerPostBody {
   servings: number;
 }
 
-/** Body the planner API expects. Always emits an integer day so Postgres CHECK passes. */
+/** Body the planner API expects. Date is source of truth; week fields stay in sync. */
 export function buildPlannerPostBody(input: {
   weekStart: string;
   dayOfWeek: unknown;
   recipeId: string;
   servings?: number;
+  plannedOn?: string;
 }): PlannerPostBody {
   const day_of_week = parseDayOfWeek(input.dayOfWeek);
   if (day_of_week === null) {
@@ -242,10 +246,13 @@ export function buildPlannerPostBody(input: {
   if (!input.weekStart || !input.recipeId) {
     throw new Error('week_start and recipe_id are required');
   }
+  const planned_on = input.plannedOn ?? inferPlannedOn(input.weekStart, day_of_week);
+  const coords = coordsFromPlannedOn(planned_on);
   return {
-    week_start: input.weekStart,
+    planned_on,
+    week_start: coords.weekStart,
     recipe_id: input.recipeId,
-    day_of_week,
+    day_of_week: coords.dayOfWeek,
     meal_type: 'dinner',
     servings: input.servings && input.servings > 0 ? input.servings : 4,
   };

@@ -152,7 +152,7 @@ describe('resolveDragTarget', () => {
 });
 
 const meals = [
-  { week_start: '2026-08-17', day_of_week: 2, meal_type: 'dinner', recipe: { title: 'Tacos' } },
+  { planned_on: '2026-08-19', week_start: '2026-08-17', day_of_week: 2, meal_type: 'dinner', recipe: { title: 'Tacos' } },
 ];
 
 describe('dayOccupied / titlesOnDay', () => {

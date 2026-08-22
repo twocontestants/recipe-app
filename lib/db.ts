@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { autoTag } from './autotag';
 import { parseDayOfWeek } from './plannerDays';
+import { coordsFromPlannedOn, inferPlannedOn, weekSpanForStoredKey } from './plannerDate';
 import type { ShoppingOp } from './shoppingOps';
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
@@ -41,6 +42,7 @@ export interface Recipe {
 
 export interface MealPlan {
   id: string;
+  planned_on: string;
   week_start: string;
   recipe_id: string;
   day_of_week: number;
@@ -119,6 +121,7 @@ export async function setupDatabase() {
   // merge key), so one row covers every surface form that normalises to it.
   await ensureIngredientCategoriesTable();
   await ensureAppSettingsTable();
+  await ensurePlannedOnColumns();
 }
 
 let _appSettingsReady = false;
@@ -274,9 +277,45 @@ export async function deleteRecipe(id: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
+let _plannedOnReady = false;
+const PLANNED_ON_SQL = `CASE
+        WHEN EXTRACT(ISODOW FROM week_start) = 1 THEN week_start + day_of_week
+        ELSE week_start + ((8 - EXTRACT(ISODOW FROM week_start))::int) + day_of_week
+      END`;
+
+export async function ensurePlannedOnColumns(): Promise<void> {
+  if (_plannedOnReady) return;
+  await pool().query(`ALTER TABLE meal_plans ADD COLUMN IF NOT EXISTS planned_on DATE`);
+  await pool().query(
+    `UPDATE meal_plans SET planned_on = (${PLANNED_ON_SQL}) WHERE planned_on IS NULL`,
+  );
+  await pool().query(`
+    UPDATE meal_plans SET
+      week_start = planned_on - ((EXTRACT(ISODOW FROM planned_on) - 1)::int),
+      day_of_week = (EXTRACT(ISODOW FROM planned_on) - 1)::int
+    WHERE planned_on IS NOT NULL
+  `);
+  await pool().query(`ALTER TABLE meal_plans ALTER COLUMN planned_on SET NOT NULL`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_meal_plans_planned_on ON meal_plans(planned_on)`);
+
+  await pool().query(`ALTER TABLE planner_notes ADD COLUMN IF NOT EXISTS note_on DATE`);
+  await pool().query(
+    `UPDATE planner_notes SET note_on = (${PLANNED_ON_SQL}) WHERE note_on IS NULL`,
+  );
+  await pool().query(`
+    UPDATE planner_notes SET
+      week_start = note_on - ((EXTRACT(ISODOW FROM note_on) - 1)::int),
+      day_of_week = (EXTRACT(ISODOW FROM note_on) - 1)::int
+    WHERE note_on IS NOT NULL
+  `);
+  await pool().query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_notes_note_on ON planner_notes(note_on)`);
+  _plannedOnReady = true;
+}
+
 function mapMealPlanRow(row: Record<string, unknown>): MealPlan {
   return {
     id: row.id as string,
+    planned_on: String(row.planned_on).slice(0, 10),
     week_start: row.week_start as string,
     recipe_id: row.recipe_id as string,
     day_of_week: row.day_of_week as number,
@@ -319,22 +358,28 @@ const MEAL_PLAN_SELECT = `SELECT mp.*,
      JOIN recipes r ON mp.recipe_id = r.id`;
 
 export async function getMealPlansForWeeks(weekStarts: string[]): Promise<MealPlan[]> {
+  await ensurePlannedOnColumns();
   if (!weekStarts.length) return [];
+  const spans = weekStarts.map(weekSpanForStoredKey);
+  const clauses = spans.map((_, i) => `(mp.planned_on >= $${i * 2 + 1}::date AND mp.planned_on <= $${i * 2 + 2}::date)`);
+  const params = spans.flatMap(span => [span.from, span.to]);
   const result = await pool().query(
     `${MEAL_PLAN_SELECT}
-     WHERE mp.week_start = ANY($1::date[])
-     ORDER BY mp.week_start, mp.day_of_week, mp.meal_type`,
-    [weekStarts],
+     WHERE ${clauses.join(' OR ')}
+        OR mp.week_start = ANY($${params.length + 1}::date[])
+     ORDER BY mp.planned_on, mp.meal_type`,
+    [...params, weekStarts],
   );
   return result.rows.map(mapMealPlanRow);
 }
 
-/** Inclusive week_start window. Avoids timezone-dependent Monday key lists. */
+/** Inclusive planned_on window. Name kept so existing callers keep working. */
 export async function getMealPlansInDateWindow(from: string, to: string): Promise<MealPlan[]> {
+  await ensurePlannedOnColumns();
   const result = await pool().query(
     `${MEAL_PLAN_SELECT}
-     WHERE mp.week_start >= $1::date AND mp.week_start <= $2::date
-     ORDER BY mp.week_start, mp.day_of_week, mp.meal_type`,
+     WHERE mp.planned_on >= $1::date AND mp.planned_on <= $2::date
+     ORDER BY mp.planned_on, mp.meal_type`,
     [from, to],
   );
   return result.rows.map(mapMealPlanRow);
@@ -344,15 +389,23 @@ export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]>
   return getMealPlansForWeeks([weekStart]);
 }
 
-export async function addToMealPlan(data: Omit<MealPlan, 'id'>): Promise<MealPlan> {
-  const dayOfWeek = parseDayOfWeek(data.day_of_week);
-  if (dayOfWeek === null) {
-    throw new Error('day_of_week must be 0–6 or a weekday name');
-  }
+export async function addToMealPlan(data: {
+  planned_on?: string;
+  week_start: string;
+  recipe_id: string;
+  day_of_week: unknown;
+  meal_type: string;
+  servings: number;
+}): Promise<MealPlan> {
+  await ensurePlannedOnColumns();
+  const plannedOn = data.planned_on
+    ? String(data.planned_on).slice(0, 10)
+    : inferPlannedOn(String(data.week_start).slice(0, 10), data.day_of_week);
+  const coords = coordsFromPlannedOn(plannedOn);
   const result = await pool().query(
-    `INSERT INTO meal_plans (week_start, recipe_id, day_of_week, meal_type, servings)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [data.week_start, data.recipe_id, dayOfWeek, data.meal_type, data.servings]
+    `INSERT INTO meal_plans (planned_on, week_start, recipe_id, day_of_week, meal_type, servings)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [plannedOn, coords.weekStart, data.recipe_id, coords.dayOfWeek, data.meal_type, data.servings]
   );
   return result.rows[0] as MealPlan;
 }
@@ -372,9 +425,12 @@ function normalizeRecipe(row: Record<string, unknown>): Recipe {
 }
 
 export async function getPlannerNotes(weekStart: string): Promise<Record<number, string>> {
+  await ensurePlannedOnColumns();
+  const span = weekSpanForStoredKey(weekStart);
   const result = await pool().query(
-    'SELECT day_of_week, note FROM planner_notes WHERE week_start = $1',
-    [weekStart]
+    `SELECT day_of_week, note FROM planner_notes
+     WHERE (note_on >= $1::date AND note_on <= $2::date) OR week_start = $3::date`,
+    [span.from, span.to, weekStart],
   );
   const map: Record<number, string> = {};
   for (const row of result.rows) map[row.day_of_week] = row.note;
@@ -382,14 +438,20 @@ export async function getPlannerNotes(weekStart: string): Promise<Record<number,
 }
 
 export async function setPlannerNote(weekStart: string, dayOfWeek: number, note: string): Promise<void> {
+  await ensurePlannedOnColumns();
+  const plannedOn = inferPlannedOn(weekStart, dayOfWeek);
+  const coords = coordsFromPlannedOn(plannedOn);
   if (!note.trim()) {
-    await pool().query('DELETE FROM planner_notes WHERE week_start = $1 AND day_of_week = $2', [weekStart, dayOfWeek]);
+    await pool().query(
+      'DELETE FROM planner_notes WHERE note_on = $1 OR (week_start = $2 AND day_of_week = $3)',
+      [plannedOn, coords.weekStart, coords.dayOfWeek],
+    );
   } else {
     await pool().query(
-      `INSERT INTO planner_notes (week_start, day_of_week, note)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (week_start, day_of_week) DO UPDATE SET note = $3, updated_at = NOW()`,
-      [weekStart, dayOfWeek, note.trim()]
+      `INSERT INTO planner_notes (note_on, week_start, day_of_week, note)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (week_start, day_of_week) DO UPDATE SET note = $4, note_on = $1, updated_at = NOW()`,
+      [plannedOn, coords.weekStart, coords.dayOfWeek, note.trim()],
     );
   }
 }

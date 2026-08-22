@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMealPlanForWeek, getMealPlansForWeeks, getMealPlansInDateWindow, addToMealPlan, removeFromMealPlan } from '@/lib/db';
 import { parseDayOfWeek } from '@/lib/plannerDays';
+import { inferPlannedOn } from '@/lib/plannerDate';
 import {
   PLANNER_RANGE_MAX_DAYS,
   inclusiveDayCount,
   isDayIso,
   parseWeekStartList,
-  plannerQueryWindow,
 } from '@/lib/plannerMonth';
 
 export async function GET(req: NextRequest) {
@@ -23,8 +23,7 @@ export async function GET(req: NextRequest) {
       if (inclusiveDayCount(from, to) > PLANNER_RANGE_MAX_DAYS) {
         return NextResponse.json({ error: 'date range is too long' }, { status: 400 });
       }
-      const window = plannerQueryWindow(from, to);
-      const rangePlans = await getMealPlansInDateWindow(window.from, window.to);
+      const rangePlans = await getMealPlansInDateWindow(from, to);
       const extraWeeks = parseWeekStartList(searchParams.get('weeks'));
       if (!extraWeeks.length) return NextResponse.json(rangePlans);
       const extraPlans = await getMealPlansForWeeks(extraWeeks);
@@ -47,15 +46,24 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     
-    if (!body.week_start || !body.recipe_id || body.day_of_week === undefined) {
+    if (!body.recipe_id) {
+      return NextResponse.json({ error: 'recipe_id is required' }, { status: 400 });
+    }
+
+    const plannedOn = typeof body.planned_on === 'string' && isDayIso(body.planned_on)
+      ? body.planned_on
+      : body.week_start != null && body.day_of_week !== undefined
+        ? inferPlannedOn(String(body.week_start).slice(0, 10), body.day_of_week)
+        : null;
+    if (!plannedOn) {
       return NextResponse.json(
-        { error: 'week_start, recipe_id, and day_of_week are required' },
-        { status: 400 }
+        { error: 'planned_on or week_start and day_of_week are required' },
+        { status: 400 },
       );
     }
 
-    const dayOfWeek = parseDayOfWeek(body.day_of_week);
-    if (dayOfWeek === null) {
+    const dayOfWeek = body.day_of_week !== undefined ? parseDayOfWeek(body.day_of_week) : 0;
+    if (body.day_of_week !== undefined && dayOfWeek === null) {
       return NextResponse.json(
         { error: 'day_of_week must be 0–6 or a weekday name' },
         { status: 400 }
@@ -63,9 +71,10 @@ export async function POST(req: NextRequest) {
     }
 
     const plan = await addToMealPlan({
-      week_start: body.week_start,
+      planned_on: plannedOn,
+      week_start: body.week_start ? String(body.week_start).slice(0, 10) : plannedOn,
       recipe_id: body.recipe_id,
-      day_of_week: dayOfWeek,
+      day_of_week: dayOfWeek ?? 0,
       meal_type: body.meal_type || 'dinner',
       servings: body.servings || 4,
     });

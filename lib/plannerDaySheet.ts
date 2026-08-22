@@ -46,16 +46,16 @@ export function weekPlanFromMeals(
     for (const raw of plans) {
       if (!raw || typeof raw !== 'object') continue;
       const plan = raw as {
+        planned_on?: string | Date | null;
         week_start?: string | Date;
         day_of_week?: unknown;
         meal_type?: string;
         recipe?: { title?: string | null } | null;
       };
-      const day = parseDayOfWeek(plan.day_of_week);
-      if (day === null || plan.week_start == null) continue;
       if (!mealOnIso({
+        planned_on: plan.planned_on,
         week_start: plan.week_start,
-        day_of_week: day,
+        day_of_week: typeof plan.day_of_week === 'number' ? plan.day_of_week : parseDayOfWeek(plan.day_of_week) ?? undefined,
         meal_type: plan.meal_type,
         recipe: plan.recipe,
       }, iso)) continue;

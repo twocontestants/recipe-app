@@ -12,6 +12,7 @@ import {
   calendarDateOf,
   displayDayIndex,
   getThisDisplayWeek,
+  localDateIso,
   parseWeekStartDay,
   shiftWeek,
   storageCoords,
@@ -268,6 +269,7 @@ export default function RecipesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          planned_on: localDateIso(date),
           week_start: coords.weekStart,
           day_of_week: coords.dayOfWeek,
           meal_type: 'dinner',

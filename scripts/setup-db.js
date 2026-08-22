@@ -33,6 +33,8 @@ async function setup() {
 
     CREATE INDEX IF NOT EXISTS idx_meal_plans_week ON meal_plans(week_start);
     CREATE INDEX IF NOT EXISTS idx_recipes_created ON recipes(created_at DESC);
+    ALTER TABLE meal_plans ADD COLUMN IF NOT EXISTS planned_on DATE;
+    CREATE INDEX IF NOT EXISTS idx_meal_plans_planned_on ON meal_plans(planned_on);
   `;
   console.log('Database setup complete');
 }

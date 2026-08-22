@@ -8,7 +8,6 @@ import {
   indexToDayKey,
   formatWeekLabel,
   getThisDisplayWeek,
-  isoDate,
   localDateIso,
   parseDayOfWeek,
   shiftWeek,
@@ -16,6 +15,7 @@ import {
   type DayKey,
 } from '@/lib/plannerDays';
 import { storageWeeksForDateRange } from '@/lib/plannerMonth';
+import { mealOnDate } from '@/lib/plannerDate';
 
 interface MealEntry {
   recipe_id: string;
@@ -67,17 +67,19 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       for (const wk of weeks) {
         const entries: MealEntry[] = [];
         for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-          const coords = storageCoords(dayDateOf(wk, dayIndex));
+          const day = dayDateOf(wk, dayIndex);
+          const coords = storageCoords(day);
+          const iso = localDateIso(day);
           for (const raw of plans) {
             if (!raw || typeof raw !== 'object') continue;
-            const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string };
+            const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string; planned_on?: string };
             const storedDay = parseDayOfWeek(p.day_of_week);
-            if (storedDay === null || !p.recipe_id) continue;
-            if (isoDate(p.week_start ?? '') !== coords.weekStart || storedDay !== coords.dayOfWeek) continue;
+            if (!p.recipe_id) continue;
+            if (!mealOnDate(p, iso)) continue;
             entries.push({
               recipe_id: p.recipe_id,
               recipe_title: p.recipe?.title ?? 'Unknown',
-              day_of_week: storedDay,
+              day_of_week: storedDay ?? coords.dayOfWeek,
               week_start: coords.weekStart,
             });
           }
