@@ -76,6 +76,24 @@ describe('resolveDragTarget', () => {
     });
   });
 
+  it('does not let a full-width first day steal a rail drop, or the rail steal a first-day drop', () => {
+    const firstDay: WeekHit[] = [
+      { index: 0, iso: '2026-08-17', left: 0, right: 400, top: 0, bottom: 120 },
+    ];
+    const topRail: RailHit[] = [
+      { iso: '2026-08-16', left: 310, right: 400, top: 0, bottom: 120 },
+    ];
+    expect(resolveDragTarget(80, 60, firstDay, topRail)).toEqual({
+      type: 'week-day',
+      index: 0,
+      iso: '2026-08-17',
+    });
+    expect(resolveDragTarget(340, 60, firstDay, topRail)).toEqual({
+      type: 'rail-day',
+      iso: '2026-08-16',
+    });
+  });
+
   it('returns null over empty space', () => {
     expect(resolveDragTarget(120, 40, weekHits, railHits)).toBeNull();
   });

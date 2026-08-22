@@ -7,7 +7,9 @@ import {
   displayDays,
   formatWeekLabel,
   indexToDayKey,
+  localDateIso,
   parseDayOfWeek,
+  parseLocalIso,
   parseWeekStartDay,
   shiftWeek,
   startOfDisplayWeek,
@@ -76,6 +78,19 @@ describe('buildPlannerPostBody', () => {
         recipeId: 'recipe-1',
       }),
     ).toThrow(/day_of_week/);
+  });
+});
+
+describe('local calendar dates', () => {
+  it('round-trips Monday 17 Aug without shifting it to Sunday', () => {
+    const monday = new Date(2026, 7, 17, 0, 0, 0, 0);
+    expect(localDateIso(monday)).toBe('2026-08-17');
+    const parsed = parseLocalIso('2026-08-17');
+    expect(parsed.getFullYear()).toBe(2026);
+    expect(parsed.getMonth()).toBe(7);
+    expect(parsed.getDate()).toBe(17);
+    expect(parsed.getDay()).toBe(1);
+    expect(storageCoords(parsed).dayOfWeek).toBe(0);
   });
 });
 

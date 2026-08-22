@@ -148,6 +148,19 @@ export function isoDate(value: string | Date): string {
   return String(value).slice(0, 10);
 }
 
+/** Local calendar YYYY-MM-DD. Do not use toISOString() — that shifts the day east of UTC. */
+export function localDateIso(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function parseLocalIso(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
 export function mondayOf(date: Date): Date {
   const d = new Date(date);
   const day = d.getDay();

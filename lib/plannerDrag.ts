@@ -1,4 +1,4 @@
-import { formatWeekStart, isoDate, mondayOfWeek, storageCoords } from './plannerDays';
+import { isoDate, localDateIso, parseLocalIso, storageCoords } from './plannerDays';
 
 export const HOLD_MS = 400;
 export const MOVE_CANCEL_PX = 8;
@@ -46,9 +46,9 @@ export function movementExceededThreshold(
 }
 
 export function addCalendarDays(iso: string, days: number): string {
-  const d = mondayOfWeek(iso);
+  const d = parseLocalIso(iso);
   d.setDate(d.getDate() + days);
-  return formatWeekStart(d);
+  return localDateIso(d);
 }
 
 export function surroundingTenDays(originIso: string): string[] {
@@ -61,7 +61,7 @@ export function storageWeeksForIsos(isos: string[]): string[] {
   const seen = new Set<string>();
   const weeks: string[] = [];
   for (const iso of isos) {
-    const { weekStart } = storageCoords(new Date(`${iso}T00:00:00`));
+    const { weekStart } = storageCoords(parseLocalIso(iso));
     if (!seen.has(weekStart)) {
       seen.add(weekStart);
       weeks.push(weekStart);
@@ -80,16 +80,20 @@ export function resolveDragTarget(
   weekHits: WeekHit[],
   railHits: RailHit[],
 ): DragTarget {
+  const railLeft = railHits.reduce((min, hit) => Math.min(min, hit.left), Infinity);
+  const weeks = Number.isFinite(railLeft)
+    ? weekHits.map(hit => ({ ...hit, right: Math.min(hit.right, railLeft) }))
+    : weekHits;
+  const week = weeks.find(hit => pointInRect(x, y, hit));
+  if (week) return { type: 'week-day', index: week.index, iso: week.iso };
   const rail = railHits.find(hit => pointInRect(x, y, hit));
   if (rail) return { type: 'rail-day', iso: rail.iso };
-  const week = weekHits.find(hit => pointInRect(x, y, hit));
-  if (week) return { type: 'week-day', index: week.index, iso: week.iso };
   return null;
 }
 
 export function mealOnIso(meal: OccupancyMeal, iso: string): boolean {
   if (meal.meal_type && meal.meal_type !== 'dinner') return false;
-  const coords = storageCoords(new Date(`${iso}T00:00:00`));
+  const coords = storageCoords(parseLocalIso(iso));
   return isoDate(meal.week_start) === coords.weekStart && meal.day_of_week === coords.dayOfWeek;
 }
 

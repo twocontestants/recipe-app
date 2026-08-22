@@ -12,6 +12,8 @@ import {
   displayDays,
   formatWeekLabel,
   isoDate,
+  localDateIso,
+  parseLocalIso,
   parseWeekStartDay,
   startOfDisplayWeek,
   storageCoords,
@@ -61,7 +63,7 @@ function ProteinBadge({ protein }: { protein?: string }) {
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
-function formatDate(d: Date): string { return d.toISOString().split('T')[0]; }
+function formatDate(d: Date): string { return localDateIso(d); }
 function getDayDate(weekStart: Date, i: number): Date {
   const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
@@ -561,7 +563,11 @@ export default function PlannerClient() {
     suppressCardClick.current = true;
     e.preventDefault();
     if (cancelled || !session.target) return;
-    void moveMealToDate(session.mealId, new Date(`${session.target.iso}T00:00:00`));
+    if (session.target.type === 'week-day') {
+      void moveMealToDate(session.mealId, getDayDate(weekStart, session.target.index));
+      return;
+    }
+    void moveMealToDate(session.mealId, parseLocalIso(session.target.iso));
   };
 
   const applyPointerMoveRef = useRef(applyPointerMove);
