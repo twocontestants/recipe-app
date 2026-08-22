@@ -808,6 +808,25 @@ export default function PlannerClient() {
                           }}
                           title="View recipe"
                         >
+                          <button
+                            type="button"
+                            className={`pl-drag-handle${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${shouldAllowDrag(meal.id) ? '' : ' is-disabled'}`}
+                            title="Hold to move"
+                            aria-label="Hold to move"
+                            disabled={!shouldAllowDrag(meal.id)}
+                            onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+                            onContextMenu={e => e.preventDefault()}
+                            onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
+                          >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <polyline points="5 9 2 12 5 15"/>
+                              <polyline points="9 5 12 2 15 5"/>
+                              <polyline points="15 19 12 22 9 19"/>
+                              <polyline points="19 9 22 12 19 15"/>
+                              <line x1="2" y1="12" x2="22" y2="12"/>
+                              <line x1="12" y1="2" x2="12" y2="22"/>
+                            </svg>
+                          </button>
                           {(recipe as any)?.image_url && (
                             <div className="pl-recipe-img">
                               <img src={(recipe as any).image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -826,26 +845,6 @@ export default function PlannerClient() {
                             </div>
                           </div>
                           <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
-                            {shouldAllowDrag(meal.id) && (
-                              <button
-                                type="button"
-                                className={`pl-card-btn pl-drag-handle${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
-                                title="Hold to move"
-                                aria-label="Hold to move"
-                                onClick={e => { e.preventDefault(); e.stopPropagation(); }}
-                                onContextMenu={e => e.preventDefault()}
-                                onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                  <polyline points="5 9 2 12 5 15"/>
-                                  <polyline points="9 5 12 2 15 5"/>
-                                  <polyline points="15 19 12 22 9 19"/>
-                                  <polyline points="19 9 22 12 19 15"/>
-                                  <line x1="2" y1="12" x2="22" y2="12"/>
-                                  <line x1="12" y1="2" x2="12" y2="22"/>
-                                </svg>
-                              </button>
-                            )}
                             <button
                               className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
                               title="Meal options"
@@ -1287,8 +1286,16 @@ export default function PlannerClient() {
         .pl-card-actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; flex-shrink: 0; align-self: center; }
         .pl-card-btn { background: white; border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: var(--ink-muted); transition: all 0.18s; padding: 0; }
         .pl-card-btn:hover, .pl-card-btn.is-open { border-color: var(--rust); color: var(--rust); }
-        .pl-drag-handle { touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-        .pl-drag-handle:active, .pl-drag-handle.is-dragging { cursor: grabbing; border-color: var(--rust); color: var(--rust); }
+        .pl-drag-handle {
+          flex-shrink: 0; align-self: stretch; width: 40px;
+          display: flex; align-items: center; justify-content: center;
+          background: var(--parchment); border: none; border-right: 1px solid var(--border);
+          color: var(--ink); cursor: grab; padding: 0;
+          touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+        }
+        .pl-drag-handle:hover { color: var(--rust); background: rgba(181, 69, 27, 0.08); }
+        .pl-drag-handle:active, .pl-drag-handle.is-dragging { cursor: grabbing; color: var(--rust); background: rgba(181, 69, 27, 0.12); }
+        .pl-drag-handle.is-disabled { opacity: 0.35; cursor: default; }
 
         /* Empty slot */
         .pl-empty-slot { margin-bottom: 0.75rem; }
