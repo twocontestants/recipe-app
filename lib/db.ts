@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { autoTag } from './autotag';
+import { parseDayOfWeek } from './plannerDays';
 import type { ShoppingOp } from './shoppingOps';
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
@@ -322,10 +323,14 @@ export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]>
 }
 
 export async function addToMealPlan(data: Omit<MealPlan, 'id'>): Promise<MealPlan> {
+  const dayOfWeek = parseDayOfWeek(data.day_of_week);
+  if (dayOfWeek === null) {
+    throw new Error('day_of_week must be 0–6 or a weekday name');
+  }
   const result = await pool().query(
     `INSERT INTO meal_plans (week_start, recipe_id, day_of_week, meal_type, servings)
      VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [data.week_start, data.recipe_id, data.day_of_week, data.meal_type, data.servings]
+    [data.week_start, data.recipe_id, dayOfWeek, data.meal_type, data.servings]
   );
   return result.rows[0] as MealPlan;
 }

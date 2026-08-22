@@ -4,6 +4,20 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
+import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
+import {
+  calendarDateOf,
+  displayDayIndex,
+  getThisDisplayWeek,
+  isoDate,
+  parseDayOfWeek,
+  parseWeekStartDay,
+  shiftWeek,
+  startOfDisplayWeek,
+  storageCoords,
+  storageWeeksForDisplayWeek,
+  type DayKey,
+} from '@/lib/plannerDays';
 
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
@@ -51,36 +65,6 @@ function ProteinBadge({ protein, size = 'sm' }: { protein?: string; size?: 'sm' 
 }
 
 
-// ── Planner date helpers ──────────────────────────────────────────────────
-function getThisMonday(): string {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff); d.setHours(0, 0, 0, 0);
-  return d.toISOString().split('T')[0];
-}
-function todayDayKey(): string {
-  const KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-  const d = new Date().getDay();
-  return KEYS[d === 0 ? 6 : d - 1];
-}
-function mondayOfWeek(weekStart: string): Date {
-  return new Date(weekStart + 'T00:00:00');
-}
-function formatShortWeek(weekStart: string): string {
-  const mon = mondayOfWeek(weekStart);
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-  return `${mon.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${sun.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`;
-}
-function isThisWeek(weekStart: string): boolean {
-  return weekStart === getThisMonday();
-}
-function isNextWeek(weekStart: string): boolean {
-  const next = new Date(getThisMonday() + 'T00:00:00');
-  next.setDate(next.getDate() + 7);
-  return weekStart === next.toISOString().split('T')[0];
-}
-
 const EMPTY_RECIPE = {
   title: '',
   description: '',
@@ -110,11 +94,11 @@ export default function RecipesPage() {
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
-  const [plannerWeek, setPlannerWeek] = useState(() => getThisMonday());
-  const [plannerDay, setPlannerDay] = useState(() => todayDayKey());
-  const [plannerMeal, setPlannerMeal] = useState('dinner');
+  const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
+  const [plannerWeek, setPlannerWeek] = useState(() => getThisDisplayWeek('monday'));
+  const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
   const [addingToPlan, setAddingToPlan] = useState(false);
-  const [weekPlan, setWeekPlan] = useState<Record<string, string[]>>({});
+  const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -129,6 +113,20 @@ export default function RecipesPage() {
   }, []);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/preferences');
+        if (!res.ok) return;
+        const d = await res.json();
+        const day = parseWeekStartDay(d.weekStartDay);
+        setWeekStartsOn(day);
+        setPlannerWeek(getThisDisplayWeek(day));
+        setPlannerDay(displayDayIndex(new Date(), day));
+      } catch { /* Monday default */ }
+    })();
+  }, []);
 
   // Auto-open recipe from ?open=<id> query param (linked from planner)
   const searchParams = useSearchParams();
@@ -202,13 +200,24 @@ export default function RecipesPage() {
 
   const fetchWeekPlan = async (week: string) => {
     try {
-      const res = await fetch(`/api/planner?weekStart=${week}`);
-      const plans = await res.json();
-      // Build map: dayKey → [meal_type, ...]
-      const map: Record<string, string[]> = {};
-      for (const p of plans) {
-        if (!map[p.day_of_week]) map[p.day_of_week] = [];
-        map[p.day_of_week].push(p.meal_type);
+      const storageWeeks = storageWeeksForDisplayWeek(week, weekStartsOn);
+      const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
+      const map: Record<number, PlannedMeal[]> = {};
+      for (let i = 0; i < results.length; i++) {
+        const plans = await results[i].json();
+        if (!Array.isArray(plans)) continue;
+        for (const p of plans) {
+          const storedDay = parseDayOfWeek(p.day_of_week);
+          if (storedDay === null) continue;
+          const cal = calendarDateOf(storageWeeks[i], storedDay);
+          if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== week) continue;
+          const display = displayDayIndex(cal, weekStartsOn);
+          if (!map[display]) map[display] = [];
+          map[display].push({
+            title: p.recipe?.title || 'Meal',
+            meal_type: p.meal_type || 'dinner',
+          });
+        }
       }
       setWeekPlan(map);
     } catch { /* silent */ }
@@ -218,20 +227,22 @@ export default function RecipesPage() {
     if (!plannerModal) return;
     setAddingToPlan(true);
     try {
+      const date = calendarDateOf(plannerWeek, plannerDay);
+      const coords = storageCoords(date);
       const res = await fetch('/api/planner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          week_start: plannerWeek,
-          day_of_week: plannerDay,
-          meal_type: plannerMeal,
+          week_start: coords.weekStart,
+          day_of_week: coords.dayOfWeek,
+          meal_type: 'dinner',
           recipe_id: plannerModal.recipe.id,
+          servings: plannerModal.recipe.servings || 4,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      const dayLabel = plannerDay.charAt(0).toUpperCase() + plannerDay.slice(1);
-      const mealLabel = plannerMeal.charAt(0).toUpperCase() + plannerMeal.slice(1);
-      showToast(`${mealLabel} added for ${dayLabel}! 🗓`, 'success');
+      const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+      showToast(`Dinner added for ${dayLabel}`, 'success');
       setPlannerModal(null);
     } catch (e) {
       showToast(`Failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
@@ -242,7 +253,7 @@ export default function RecipesPage() {
 
   useEffect(() => {
     if (plannerModal) fetchWeekPlan(plannerWeek);
-  }, [plannerModal, plannerWeek]);
+  }, [plannerModal, plannerWeek, weekStartsOn]);
 
   const handleScrape = async () => {
     if (!scrapeUrl.trim()) return;
@@ -349,87 +360,30 @@ export default function RecipesPage() {
     r.tags?.some(t => t.toLowerCase().includes(search.toLowerCase()))
   );
 
-  // Planner modal is shared between grid and detail views
-  const plannerModalJsx = plannerModal && (() => {
-    const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    const DAY_SHORT: Record<string,string> = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
-    const DAY_DATE: Record<string,number> = (() => {
-      const mon = mondayOfWeek(plannerWeek);
-      const map: Record<string,number> = {};
-      DAYS.forEach((k, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); map[k] = d.getDate(); });
-      return map;
-    })();
-    const today = todayDayKey();
-    const shiftWeek = (n: number) => {
-      const d = new Date(plannerWeek + 'T00:00:00'); d.setDate(d.getDate() + n * 7);
-      const newWeek = d.toISOString().split('T')[0];
-      setPlannerWeek(newWeek);
-    };
-    const weekLabel = isThisWeek(plannerWeek) ? 'This week' : isNextWeek(plannerWeek) ? 'Next week' : formatShortWeek(plannerWeek);
+  const openPlannerModal = (recipe: Recipe) => {
+    setPlannerWeek(getThisDisplayWeek(weekStartsOn));
+    setPlannerDay(displayDayIndex(new Date(), weekStartsOn));
+    setPlannerModal({ recipe });
+  };
 
-    return (
-      <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setPlannerModal(null); }}>
-        <div className="modal planner-quick-modal">
-          {/* Header */}
-          <div className="modal-header" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-            <div>
-              <h2 className="modal-title" style={{ fontSize: '1.1rem' }}>Add to Planner</h2>
-              <p className="pqm-recipe-name">{plannerModal?.recipe.title}</p>
-            </div>
-            <button className="modal-close" onClick={() => setPlannerModal(null)}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
-
-          {/* Week selector */}
-          <div className="pqm-week-row">
-            <button className="pqm-week-arrow" onClick={() => shiftWeek(-1)} title="Previous week">‹</button>
-            <span className="pqm-week-label">{weekLabel}</span>
-            <button className="pqm-week-arrow" onClick={() => shiftWeek(1)} title="Next week">›</button>
-          </div>
-
-          {/* Day grid — shows date + occupancy dots */}
-          <div className="pqm-day-grid">
-            {DAYS.map(d => {
-              const isToday = d === today && isThisWeek(plannerWeek);
-              const isSelected = d === plannerDay;
-              const occupied = weekPlan[d] || [];
-              return (
-                <button
-                  key={d}
-                  className={`pqm-day-btn ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
-                  onClick={() => setPlannerDay(d)}
-                >
-                  <span className="pqm-day-name">{DAY_SHORT[d]}</span>
-                  <span className="pqm-day-date">{DAY_DATE[d]}</span>
-                  <span className="pqm-day-dots">
-                    {occupied.length > 0
-                      ? occupied.slice(0, 3).map((_, i) => <span key={i} className="pqm-dot" />)
-                      : <span className="pqm-dot-empty" />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Action */}
-          <button
-            className="pqm-add-btn"
-            onClick={handleAddToPlanner}
-            disabled={addingToPlan}
-          >
-            {addingToPlan
-              ? <span className="loading-dots"><span/><span/><span/></span>
-              : <>Add to {DAY_SHORT[plannerDay]}</>}
-          </button>
-        </div>
-      </div>
-    );
-  })();
+  const plannerModalJsx = plannerModal && (
+    <AddToPlannerModal
+      recipeTitle={plannerModal.recipe.title}
+      weekStart={plannerWeek}
+      selectedDay={plannerDay}
+      weekPlan={weekPlan}
+      adding={addingToPlan}
+      onClose={() => setPlannerModal(null)}
+      onShiftWeek={weeks => setPlannerWeek(shiftWeek(plannerWeek, weeks))}
+      onSelectDay={setPlannerDay}
+      onAdd={handleAddToPlanner}
+      weekStartsOn={weekStartsOn}
+    />
+  );
 
   if (viewRecipe) {
     return <>
-      <RecipeDetail recipe={viewRecipe} onEdit={() => openEditModal(viewRecipe)} onDelete={() => handleDelete(viewRecipe.id)} onBack={() => setViewRecipe(null)} onAddToPlanner={() => setPlannerModal({ recipe: viewRecipe })} />
+      <RecipeDetail recipe={viewRecipe} onEdit={() => openEditModal(viewRecipe)} onDelete={() => handleDelete(viewRecipe.id)} onBack={() => setViewRecipe(null)} onAddToPlanner={() => openPlannerModal(viewRecipe)} />
       {plannerModalJsx}
     </>;
   }
@@ -486,7 +440,7 @@ export default function RecipesPage() {
                 )}
                 <button
                   className="card-plan-btn"
-                  onClick={() => setPlannerModal({ recipe })}
+                  onClick={() => openPlannerModal(recipe)}
                   title="Add to meal planner"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
@@ -508,7 +462,7 @@ export default function RecipesPage() {
                 )}
               </div>
               <div className="recipe-card-actions" onClick={e => e.stopPropagation()}>
-                <button className="btn btn-primary btn-sm" onClick={() => setPlannerModal({ recipe })}>
+                <button className="btn btn-primary btn-sm" onClick={() => openPlannerModal(recipe)}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
                   Plan
                 </button>
@@ -651,86 +605,6 @@ export default function RecipesPage() {
       )}
 
       <style>{`
-        /* ── Planner quick-add modal ── */
-        .planner-quick-modal { max-width: 400px; padding: 1.5rem; }
-        .pqm-recipe-name {
-          font-family: var(--font-display); font-style: italic;
-          color: var(--ink-soft); font-size: 0.95rem; margin: 0.1rem 0 0;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          max-width: 280px;
-        }
-        .pqm-week-row {
-          display: flex; align-items: center; gap: 0.5rem;
-          margin: 1rem 0 0.75rem; background: var(--parchment);
-          border-radius: 8px; padding: 0.4rem 0.5rem;
-        }
-        .pqm-week-label {
-          flex: 1; text-align: center; font-size: 0.82rem;
-          color: var(--ink-soft); font-weight: 500;
-        }
-        .pqm-week-arrow {
-          background: none; border: none; font-size: 1.2rem; cursor: pointer;
-          color: var(--ink-muted); padding: 0 0.35rem; line-height: 1;
-          border-radius: 4px; transition: color 0.15s;
-        }
-        .pqm-week-arrow:hover { color: var(--rust); }
-
-        /* Day grid */
-        .pqm-day-grid {
-          display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.3rem;
-          margin-bottom: 1rem;
-        }
-        @media (max-width: 600px) {
-          .planner-quick-modal { max-width: 100%; padding: 1.25rem 1.1rem; }
-          .pqm-recipe-name { max-width: 100%; }
-          .pqm-day-btn { padding: 0.45rem 0.1rem; }
-          .pqm-day-date { font-size: 0.85rem; }
-        }
-        .pqm-day-btn {
-          display: flex; flex-direction: column; align-items: center;
-          gap: 2px; padding: 0.5rem 0.2rem; border: 1.5px solid var(--border);
-          border-radius: 8px; background: white; cursor: pointer;
-          transition: all 0.15s; position: relative;
-        }
-        .pqm-day-btn:hover { border-color: var(--rust); }
-        .pqm-day-btn.today { border-color: var(--sage); }
-        .pqm-day-btn.today .pqm-day-name { color: var(--sage); }
-        .pqm-day-btn.selected {
-          border-color: var(--rust); background: var(--rust);
-        }
-        .pqm-day-btn.selected .pqm-day-name,
-        .pqm-day-btn.selected .pqm-day-date { color: white; }
-        .pqm-day-name {
-          font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em;
-          color: var(--ink-muted); font-weight: 500; line-height: 1;
-        }
-        .pqm-day-date {
-          font-size: 0.95rem; font-family: var(--font-display);
-          color: var(--ink); line-height: 1; font-weight: 300;
-        }
-        .pqm-day-dots { display: flex; gap: 2px; height: 5px; align-items: center; }
-        .pqm-dot {
-          width: 4px; height: 4px; border-radius: 50%; background: var(--sage); opacity: 0.7;
-        }
-        .pqm-day-btn.selected .pqm-dot { background: rgba(255,255,255,0.7); }
-        .pqm-dot-empty {
-          width: 4px; height: 4px; border-radius: 50%;
-          border: 1px solid var(--border); opacity: 0.4;
-        }
-
-
-        /* Add button */
-        .pqm-add-btn {
-          width: 100%; padding: 0.8rem; background: var(--rust); color: white;
-          border: none; border-radius: 8px; font-size: 0.9rem;
-          font-family: var(--font-body); cursor: pointer; transition: opacity 0.15s;
-          font-weight: 500; letter-spacing: 0.02em;
-          display: flex; align-items: center; justify-content: center; gap: 0.4rem;
-        }
-        .pqm-add-btn:hover:not(:disabled) { opacity: 0.88; }
-        .pqm-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-
         /* Card plan button — thumbnail overlay */
         .recipe-card-img-wrap { position: relative; overflow: hidden; }
         .recipe-card-img-wrap .recipe-card-img,
@@ -755,16 +629,6 @@ export default function RecipesPage() {
           text-decoration: underline; text-underline-offset: 2px;
         }
         .link-btn:hover { opacity: 0.75; }
-        .plan-picker-grid {
-          display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3rem;
-        }
-        .plan-picker-btn {
-          padding: 0.35rem 0.2rem; border: 1px solid var(--border); border-radius: 6px;
-          background: white; color: var(--ink-soft); font-size: 0.72rem; cursor: pointer;
-          font-family: var(--font-body); transition: all 0.15s; text-align: center;
-        }
-        .plan-picker-btn:hover { border-color: var(--rust); color: var(--rust); }
-        .plan-picker-btn.active { background: var(--rust); border-color: var(--rust); color: white; }
       `}</style>
 
 

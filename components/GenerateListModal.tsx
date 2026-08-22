@@ -2,6 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { showToast } from './Toast';
+import {
+  DAY_SHORT,
+  calendarDateOf,
+  indexToDayKey,
+  formatWeekLabel,
+  getThisDisplayWeek,
+  isoDate,
+  parseDayOfWeek,
+  shiftWeek,
+  startOfDisplayWeek,
+  storageWeeksForDisplayWeek,
+  type DayKey,
+} from '@/lib/plannerDays';
 
 interface MealEntry {
   recipe_id: string;
@@ -13,49 +26,23 @@ interface MealEntry {
 interface Props {
   onClose: () => void;
   onCreated: (listId: string) => void;
-  defaultWeekStart?: string; // pre-selected week (from planner)
+  defaultWeekStart?: string; // pre-selected display week (from planner)
+  weekStartsOn?: DayKey;
 }
 
-const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-
-function getMonday(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day + (day === 0 ? -6 : 1));
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-function fmtDate(d: Date): string { return d.toISOString().split('T')[0]; }
-function fmtWeekLabel(ws: string): string {
-  const d = new Date(ws + 'T00:00:00');
-  const sun = new Date(d); sun.setDate(d.getDate() + 6);
-  return `${d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – ${sun.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`;
-}
-function isThisWeek(ws: string): boolean { return ws === fmtDate(getMonday(new Date())); }
-function isNextWeek(ws: string): boolean {
-  const n = getMonday(new Date()); n.setDate(n.getDate() + 7);
-  return ws === fmtDate(n);
-}
-function isPrevWeek(ws: string): boolean {
-  const p = getMonday(new Date()); p.setDate(p.getDate() - 7);
-  return ws === fmtDate(p);
-}
-function weekTagLabel(ws: string): string {
-  if (isThisWeek(ws)) return 'this week';
-  if (isNextWeek(ws)) return 'next week';
-  if (isPrevWeek(ws)) return 'last week';
-  return fmtWeekLabel(ws);
-}
-
-export default function GenerateListModal({ onClose, onCreated, defaultWeekStart }: Props) {
-  const monday = getMonday(new Date());
-  const thisWeek = fmtDate(monday);
-  const nextMonday = new Date(monday); nextMonday.setDate(monday.getDate() + 7);
-  const nextWeek = fmtDate(nextMonday);
-  const prevMonday = new Date(monday); prevMonday.setDate(monday.getDate() - 7);
-  const prevWeek = fmtDate(prevMonday);
-
+export default function GenerateListModal({ onClose, onCreated, defaultWeekStart, weekStartsOn = 'monday' }: Props) {
+  const thisWeek = getThisDisplayWeek(weekStartsOn);
+  const nextWeek = shiftWeek(thisWeek, 1);
+  const prevWeek = shiftWeek(thisWeek, -1);
   const weeks = [prevWeek, thisWeek, nextWeek];
+
+  const weekTagLabel = (ws: string) => {
+    const label = formatWeekLabel(ws, new Date(), weekStartsOn);
+    if (label === 'This week') return 'this week';
+    if (label === 'Next week') return 'next week';
+    if (ws === prevWeek) return 'last week';
+    return label;
+  };
 
   const [meals, setMeals] = useState<Record<string, MealEntry[]>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -69,14 +56,25 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       const map: Record<string, MealEntry[]> = {};
       await Promise.all(weeks.map(async (wk) => {
         try {
-          const res = await fetch(`/api/planner?weekStart=${wk}`);
-          const plans = await res.json();
-          map[wk] = plans.map((p: any) => ({
-            recipe_id: p.recipe_id,
-            recipe_title: p.recipe?.title ?? 'Unknown',
-            day_of_week: p.day_of_week,
-            week_start: wk,
-          }));
+          const storageWeeks = storageWeeksForDisplayWeek(wk, weekStartsOn);
+          const results = await Promise.all(storageWeeks.map(sw => fetch(`/api/planner?weekStart=${sw}`)));
+          const entries: MealEntry[] = [];
+          for (let i = 0; i < results.length; i++) {
+            const plans = await results[i].json();
+            if (!Array.isArray(plans)) continue;
+            for (const p of plans) {
+              const storedDay = p.day_of_week;
+              const cal = calendarDateOf(storageWeeks[i], storedDay);
+              if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== wk) continue;
+              entries.push({
+                recipe_id: p.recipe_id,
+                recipe_title: p.recipe?.title ?? 'Unknown',
+                day_of_week: storedDay,
+                week_start: storageWeeks[i],
+              });
+            }
+          }
+          map[wk] = entries;
         } catch { map[wk] = []; }
       }));
       setMeals(map);
@@ -89,7 +87,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       setLoading(false);
     };
     fetchAll();
-  }, []);
+  }, [weekStartsOn]);
 
   const toggleMeal = (key: string) => {
     setSelected(prev => {
@@ -239,7 +237,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
                               {isSel && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
                             </div>
                             <span className="glm-meal-name">{m.recipe_title}</span>
-                            <span className="glm-meal-day">{DAY_NAMES[m.day_of_week]}</span>
+                            <span className="glm-meal-day">{DAY_SHORT[indexToDayKey(parseDayOfWeek(m.day_of_week) ?? 0)]}</span>
                           </div>
                         );
                       })}

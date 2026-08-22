@@ -7,6 +7,17 @@ import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
+import {
+  displayDayIndex,
+  displayDays,
+  formatWeekLabel,
+  isoDate,
+  parseWeekStartDay,
+  startOfDisplayWeek,
+  storageCoords,
+  storageWeeksForDisplayWeek,
+  type DayKey,
+} from '@/lib/plannerDays';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -37,35 +48,10 @@ function ProteinBadge({ protein }: { protein?: string }) {
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
-const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-
-function getMonday(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
 function formatDate(d: Date): string { return d.toISOString().split('T')[0]; }
-function formatWeekRange(monday: Date): string {
-  const sun = new Date(monday); sun.setDate(monday.getDate() + 6);
-  const fmt = (d: Date) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-  return `${fmt(monday)} – ${fmt(sun)}`;
-}
-function isThisWeek(monday: Date) { return formatDate(monday) === formatDate(getMonday(new Date())); }
-function isNextWeek(monday: Date) {
-  const n = getMonday(new Date()); n.setDate(n.getDate() + 7);
-  return formatDate(monday) === formatDate(n);
-}
-function weekLabel(monday: Date) {
-  if (isThisWeek(monday)) return 'This week';
-  if (isNextWeek(monday)) return 'Next week';
-  return formatWeekRange(monday);
-}
 function getDayDate(weekStart: Date, i: number): Date {
   const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
-function todayDayIndex() { const d = new Date().getDay(); return d === 0 ? 6 : d - 1; }
 
 // ── Suggestion logic ──────────────────────────────────────────────────────────
 
@@ -86,7 +72,10 @@ interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; pref
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlannerClient() {
-  const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()));
+  const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
+  const [weekStart, setWeekStart] = useState<Date>(() => startOfDisplayWeek(new Date(), 'monday'));
+  const dayKeys = displayDays(weekStartsOn);
+  const DAYS = dayKeys.map(k => k.charAt(0).toUpperCase() + k.slice(1));
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -124,32 +113,78 @@ export default function PlannerClient() {
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
+  const viewingThisWeek = formatDate(weekStart) === formatDate(startOfDisplayWeek(new Date(), weekStartsOn));
+  const todayDisplayIdx = displayDayIndex(new Date(), weekStartsOn);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/preferences');
+        if (!res.ok) return;
+        const d = await res.json();
+        const day = parseWeekStartDay(d.weekStartDay);
+        setWeekStartsOn(day);
+        setWeekStart(startOfDisplayWeek(new Date(), day));
+      } catch { /* keep Monday default */ }
+    })();
+  }, []);
+
+  const mealOnDisplayDay = (m: MealPlan, displayIndex: number) => {
+    const date = getDayDate(weekStart, displayIndex);
+    const coords = storageCoords(date);
+    return isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek && m.meal_type === 'dinner';
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const wk = formatDate(weekStart);
-      const [plansRes, recipesRes, notesRes] = await Promise.all([
-        fetch(`/api/planner?weekStart=${wk}`),
+      const displayIso = formatDate(weekStart);
+      const storageWeeks = storageWeeksForDisplayWeek(displayIso, weekStartsOn);
+      const [recipesRes, ...weekPairs] = await Promise.all([
         fetch('/api/recipes'),
-        fetch(`/api/planner-notes?weekStart=${wk}`),
+        ...storageWeeks.flatMap(wk => [
+          fetch(`/api/planner?weekStart=${wk}`),
+          fetch(`/api/planner-notes?weekStart=${wk}`),
+        ]),
       ]);
-  const [plans, recs, nts] = await Promise.all([plansRes.json(), recipesRes.json(), notesRes.json()]);
+      const recs = await recipesRes.json();
+      const plans: MealPlan[] = [];
+      const nts: Record<number, string> = {};
+      for (let i = 0; i < storageWeeks.length; i++) {
+        const plansRes = weekPairs[i * 2];
+        const notesRes = weekPairs[i * 2 + 1];
+        const wkPlans = await plansRes.json();
+        const wkNotes = await notesRes.json();
+        if (Array.isArray(wkPlans)) plans.push(...wkPlans);
+        if (wkNotes && typeof wkNotes === 'object') {
+          for (const [day, note] of Object.entries(wkNotes as Record<string, string>)) {
+            const cal = getDayDate(new Date(`${storageWeeks[i]}T00:00:00`), Number(day));
+            if (formatDate(startOfDisplayWeek(cal, weekStartsOn)) !== displayIso) continue;
+            nts[displayDayIndex(cal, weekStartsOn)] = note;
+          }
+        }
+      }
       setMealPlans(plans);
       setRecipes(recs);
       setNotes(nts);
-      // Compute suggestions once — stable until next full fetch
       const newSuggestions: Record<number, Recipe[]> = {};
       for (let d = 0; d < 7; d++) {
-        const dayMeals = plans.filter((m: any) => m.day_of_week === d && m.meal_type === 'dinner');
+        const date = getDayDate(weekStart, d);
+        const coords = storageCoords(date);
+        const dayMeals = plans.filter((m: MealPlan) =>
+          isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek && m.meal_type === 'dinner'
+        );
         if (!dayMeals.length) {
-          const otherProteins = plans.filter((m: any) => m.day_of_week !== d).map((m: any) => m.recipe?.primary_protein);
+          const otherProteins = plans.filter((m: MealPlan) => !(
+            isoDate(m.week_start) === coords.weekStart && m.day_of_week === coords.dayOfWeek
+          )).map(m => m.recipe?.primary_protein);
           newSuggestions[d] = suggestForDay(recs, otherProteins, 3);
         }
       }
       setSuggestions(newSuggestions);
     } catch { showToast('Failed to load planner', 'error'); }
     finally { setLoading(false); }
-  }, [weekStart]);
+  }, [weekStart, weekStartsOn]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -239,7 +274,7 @@ export default function PlannerClient() {
   }, [picker]);
 
   useEffect(() => {
-    if (!loading && todayRef.current && isThisWeek(weekStart)) {
+    if (!loading && todayRef.current && viewingThisWeek) {
       setTimeout(() => todayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     }
   }, [loading]);
@@ -247,7 +282,7 @@ export default function PlannerClient() {
   // ── Meal operations ─────────────────────────────────────────────────────────
 
   const getMealsForDay = (dayIndex: number) =>
-    mealPlans.filter(m => m.day_of_week === dayIndex && m.meal_type === 'dinner');
+    mealPlans.filter(m => mealOnDisplayDay(m, dayIndex));
 
   // ── Optimistic meal operations ─────────────────────────────────────────────
   // All three mutate local state immediately so the UI responds instantly,
@@ -256,18 +291,19 @@ export default function PlannerClient() {
 
   const addMeal = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
     const recipe = recipes.find(r => r.id === recipeId);
-    const weekStr = formatDate(targetWeekStart);
-    const sameWeek = weekStr === formatDate(weekStart);
+    const date = getDayDate(targetWeekStart, dayIndex);
+    const coords = storageCoords(date);
+    const sameWeek = formatDate(startOfDisplayWeek(date, weekStartsOn)) === formatDate(weekStart);
     const servings = recipe?.servings || 4;
 
     if (!sameWeek) {
       try {
         const res = await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
+          body: JSON.stringify({ week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
         });
         if (!res.ok) throw new Error();
-        const when = getDayDate(targetWeekStart, dayIndex).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+        const when = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
         showToast(`Added to ${when}`, 'success');
       } catch {
         showToast('Failed to add meal', 'error');
@@ -275,20 +311,18 @@ export default function PlannerClient() {
       return;
     }
 
-    // Optimistic: insert a temporary meal with a fake id
     const tempId = `tmp-${Date.now()}`;
     const optimistic: MealPlan = {
-      id: tempId, recipe_id: recipeId, day_of_week: dayIndex,
-      meal_type: 'dinner', servings, week_start: weekStr, recipe: recipe as any,
+      id: tempId, recipe_id: recipeId, day_of_week: coords.dayOfWeek,
+      meal_type: 'dinner', servings, week_start: coords.weekStart, recipe: recipe as any,
     };
     setMealPlans(prev => [...prev, optimistic]);
     try {
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: weekStr, recipe_id: recipeId, day_of_week: dayIndex, meal_type: 'dinner', servings }),
+        body: JSON.stringify({ week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
       });
       if (!res.ok) throw new Error();
-      // Replace temp entry with real one from server
       const real = await res.json();
       setMealPlans(prev => prev.map(m => m.id === tempId ? { ...real, recipe } : m));
     } catch {
@@ -319,10 +353,10 @@ export default function PlannerClient() {
     setPicker(null);
   };
 
-  const pickRecipeForDate = async (isoDate: string, recipeId: string) => {
-    const d = new Date(`${isoDate}T00:00:00`);
+  const pickRecipeForDate = async (iso: string, recipeId: string) => {
+    const d = new Date(`${iso}T00:00:00`);
     if (Number.isNaN(d.getTime())) return;
-    await pickRecipeForDay((d.getDay() + 6) % 7, recipeId, getMonday(d));
+    await pickRecipeForDay(displayDayIndex(d, weekStartsOn), recipeId, startOfDisplayWeek(d, weekStartsOn));
   };
 
   const moveMeal = async (mealId: string, fromDay: number, toDay: number) => {
@@ -330,12 +364,13 @@ export default function PlannerClient() {
     const meal = mealPlans.find(m => m.id === mealId);
     if (!meal) return;
     // Optimistic: update day_of_week in place
-    setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toDay } : m));
+    const toCoords = storageCoords(getDayDate(weekStart, toDay));
+    setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: toCoords.dayOfWeek, week_start: toCoords.weekStart } : m));
     try {
       await fetch(`/api/planner?id=${mealId}`, { method: 'DELETE' });
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: meal.recipe_id, day_of_week: toDay, meal_type: 'dinner', servings: meal.servings }),
+        body: JSON.stringify({ week_start: toCoords.weekStart, recipe_id: meal.recipe_id, day_of_week: toCoords.dayOfWeek, meal_type: 'dinner', servings: meal.servings }),
       });
       if (!res.ok) throw new Error();
       const real = await res.json();
@@ -345,7 +380,7 @@ export default function PlannerClient() {
       ));
     } catch {
       // Roll back
-      setMealPlans(prev => prev.map(m => m.id === mealId ? { ...m, day_of_week: fromDay } : m));
+      setMealPlans(prev => prev.map(m => m.id === mealId ? meal : m));
       showToast('Failed to move meal', 'error');
     }
   };
@@ -357,9 +392,10 @@ export default function PlannerClient() {
     if (noteTimers.current[dayIndex]) clearTimeout(noteTimers.current[dayIndex]);
     noteTimers.current[dayIndex] = setTimeout(async () => {
       try {
-        await fetch(`/api/planner-notes?weekStart=${formatDate(weekStart)}`, {
+        const coords = storageCoords(getDayDate(weekStart, dayIndex));
+        await fetch(`/api/planner-notes?weekStart=${coords.weekStart}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dayOfWeek: dayIndex, note: value }),
+          body: JSON.stringify({ dayOfWeek: coords.dayOfWeek, note: value }),
         });
       } catch { /* silent */ }
     }, 800);
@@ -434,7 +470,7 @@ export default function PlannerClient() {
       for (let day = 0; day < 7; day++) {
         await fetch('/api/planner', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: formatDate(weekStart), recipe_id: picks[day], day_of_week: day, meal_type: 'dinner', servings: magicSettings.servings }),
+          body: JSON.stringify({ week_start: storageCoords(getDayDate(weekStart, day)).weekStart, recipe_id: picks[day], day_of_week: storageCoords(getDayDate(weekStart, day)).dayOfWeek, meal_type: 'dinner', servings: magicSettings.servings }),
         });
       }
       await fetchData();
@@ -465,12 +501,12 @@ export default function PlannerClient() {
             <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n; })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
             </button>
-            <span className="pl-week-label">{weekLabel(weekStart)}</span>
+            <span className="pl-week-label">{formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}</span>
             <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
             </button>
-            {!isThisWeek(weekStart) && (
-              <button className="pl-today-btn" onClick={() => setWeekStart(getMonday(new Date()))}>Today</button>
+            {!viewingThisWeek && (
+              <button className="pl-today-btn" onClick={() => setWeekStart(startOfDisplayWeek(new Date(), weekStartsOn))}>Today</button>
             )}
           </div>
         </div>
@@ -493,9 +529,9 @@ export default function PlannerClient() {
         <div className="pl-days">
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
-            const todayIdx = todayDayIndex();
-            const isToday = isThisWeek(weekStart) && dayIndex === todayIdx;
-            const isPast = isThisWeek(weekStart) && dayIndex < todayIdx;
+            const todayIdx = todayDisplayIdx;
+            const isToday = viewingThisWeek && dayIndex === todayIdx;
+            const isPast = viewingThisWeek && dayIndex < todayIdx;
             const dayMeals = getMealsForDay(dayIndex);
             const daySuggestions = suggestions[dayIndex] ?? [];
 
@@ -781,6 +817,7 @@ export default function PlannerClient() {
           onClose={() => setShowGenerateList(false)}
           onCreated={(id) => { setShowGenerateList(false); window.location.href = '/shopping-list'; }}
           defaultWeekStart={formatDate(weekStart)}
+          weekStartsOn={weekStartsOn}
         />
       )}
 
