@@ -5,15 +5,13 @@ import { useSearchParams } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
+import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
 import {
   calendarDateOf,
   displayDayIndex,
   getThisDisplayWeek,
-  isoDate,
-  parseDayOfWeek,
   parseWeekStartDay,
   shiftWeek,
-  startOfDisplayWeek,
   storageCoords,
   storageWeeksForDisplayWeek,
   type DayKey,
@@ -202,24 +200,12 @@ export default function RecipesPage() {
     try {
       const storageWeeks = storageWeeksForDisplayWeek(week, weekStartsOn);
       const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
-      const map: Record<number, PlannedMeal[]> = {};
-      for (let i = 0; i < results.length; i++) {
-        const plans = await results[i].json();
-        if (!Array.isArray(plans)) continue;
-        for (const p of plans) {
-          const storedDay = parseDayOfWeek(p.day_of_week);
-          if (storedDay === null) continue;
-          const cal = calendarDateOf(storageWeeks[i], storedDay);
-          if (isoDate(startOfDisplayWeek(cal, weekStartsOn)) !== week) continue;
-          const display = displayDayIndex(cal, weekStartsOn);
-          if (!map[display]) map[display] = [];
-          map[display].push({
-            title: p.recipe?.title || 'Meal',
-            meal_type: p.meal_type || 'dinner',
-          });
-        }
+      const plans: unknown[] = [];
+      for (const res of results) {
+        const data = await res.json();
+        if (Array.isArray(data)) plans.push(...data);
       }
-      setWeekPlan(map);
+      setWeekPlan(weekPlanFromMeals(plans, week, weekStartsOn));
     } catch { /* silent */ }
   };
 

@@ -6,8 +6,10 @@ import { showToast } from '@/components/Toast';
 import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
+import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import {
+  dayDateOf,
   displayDayIndex,
   displayDays,
   formatWeekLabel,
@@ -15,14 +17,19 @@ import {
   localDateIso,
   parseLocalIso,
   parseWeekStartDay,
+  shiftWeek,
   startOfDisplayWeek,
   storageCoords,
   storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
 import {
+  isRailOrigin,
+  sheetAnchorForRailPick,
+  weekPlanFromMeals,
+} from '@/lib/plannerDaySheet';
+import {
   HOLD_MS,
-  addCalendarDays,
   dayOccupied,
   movementExceededThreshold,
   resolveDragTarget,
@@ -150,8 +157,14 @@ export default function PlannerClient() {
     earlier: null,
     later: null,
   });
-  const railDateInputRef = useRef<HTMLInputElement>(null);
-  const pendingRailPick = useRef<{ mealId: string; direction: 'earlier' | 'later' } | null>(null);
+  const [moveSheet, setMoveSheet] = useState<{
+    mealId: string;
+    recipeTitle: string;
+    weekStart: string;
+    selectedDay: number;
+  } | null>(null);
+  const [moveSheetPlan, setMoveSheetPlan] = useState<Record<number, PlannedMeal[]>>({});
+  const [moveSheetSaving, setMoveSheetSaving] = useState(false);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -447,6 +460,37 @@ export default function PlannerClient() {
     await moveMealToDate(mealId, getDayDate(weekStart, toDay));
   };
 
+  const confirmMoveSheet = async () => {
+    if (!moveSheet) return;
+    setMoveSheetSaving(true);
+    try {
+      await moveMealToDate(moveSheet.mealId, dayDateOf(moveSheet.weekStart, moveSheet.selectedDay));
+      setMoveSheet(null);
+    } finally {
+      setMoveSheetSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!moveSheet) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const storageWeeks = storageWeeksForDisplayWeek(moveSheet.weekStart, weekStartsOn);
+        const results = await Promise.all(storageWeeks.map(wk => fetch(`/api/planner?weekStart=${wk}`)));
+        const plans: unknown[] = [];
+        for (const res of results) {
+          const data = await res.json();
+          if (Array.isArray(data)) plans.push(...data);
+        }
+        if (!cancelled) setMoveSheetPlan(weekPlanFromMeals(plans, moveSheet.weekStart, weekStartsOn));
+      } catch {
+        if (!cancelled) setMoveSheetPlan({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [moveSheet, weekStartsOn]);
+
   const occupancyMeals = (() => {
     const map = new Map<string, MealPlan>();
     for (const meal of mealPlans) map.set(meal.id, meal);
@@ -489,31 +533,16 @@ export default function PlannerClient() {
     return hits;
   };
 
-  const openRailDatePicker = (mealId: string, direction: 'earlier' | 'later', days: string[]) => {
-    pendingRailPick.current = { mealId, direction };
-    const input = railDateInputRef.current;
-    if (!input) return;
-    if (direction === 'earlier') {
-      const max = days[0] ? addCalendarDays(days[0], -1) : localDateIso(new Date());
-      input.removeAttribute('min');
-      input.max = max;
-      input.value = max;
-    } else {
-      const min = days.length ? addCalendarDays(days[days.length - 1], 1) : localDateIso(new Date());
-      input.removeAttribute('max');
-      input.min = min;
-      input.value = min;
-    }
-    const open = () => {
-      try {
-        if (typeof input.showPicker === 'function') input.showPicker();
-        else input.focus();
-      } catch {
-        input.focus();
-      }
-    };
-    open();
-    requestAnimationFrame(open);
+  const openRailDaySheet = (mealId: string, direction: 'earlier' | 'later', originIso: string) => {
+    const meal = mealPlans.find(m => m.id === mealId);
+    const anchor = sheetAnchorForRailPick(direction, originIso, weekStartsOn);
+    setMoveSheetPlan({});
+    setMoveSheet({
+      mealId,
+      recipeTitle: meal?.recipe?.title?.trim() || 'Dinner',
+      weekStart: anchor.weekStart,
+      selectedDay: anchor.selectedDay,
+    });
   };
 
   const updateDrag = (next: typeof dragRef.current) => {
@@ -604,7 +633,6 @@ export default function PlannerClient() {
     if (!session || e.pointerId !== session.pointerId) return;
     clearHoldTimer();
     holdEl.current = null;
-    const daysSnapshot = railDays;
     hideRail();
     updateDrag(null);
     if (!session.armed) return;
@@ -616,7 +644,7 @@ export default function PlannerClient() {
       return;
     }
     if (session.target.type === 'rail-pick') {
-      openRailDatePicker(session.mealId, session.target.direction, daysSnapshot);
+      openRailDaySheet(session.mealId, session.target.direction, session.originIso);
       return;
     }
     void moveMealToDate(session.mealId, parseLocalIso(session.target.iso));
@@ -993,6 +1021,7 @@ export default function PlannerClient() {
                 className={`pl-rail-day${occupied ? ' is-occupied' : ''}${hot ? ' is-hot' : ''}${iso === drag.originIso ? ' is-origin' : ''}`}
               >
                 <div className="pl-rail-circle">{date.getDate()}</div>
+                {isRailOrigin(iso, drag.originIso) && <div className="pl-rail-from">From</div>}
                 <div className="pl-rail-wd">
                   {date.toLocaleDateString('en-AU', { weekday: 'short' })}
                 </div>
@@ -1015,22 +1044,24 @@ export default function PlannerClient() {
           </div>
         </div>
       )}
-      <input
-        ref={railDateInputRef}
-        type="date"
-        className="pl-picker-date-hidden"
-        aria-label="Pick a date to move this meal"
-        onChange={e => {
-          const value = e.target.value;
-          const pending = pendingRailPick.current;
-          pendingRailPick.current = null;
-          e.target.value = '';
-          e.target.removeAttribute('min');
-          e.target.removeAttribute('max');
-          if (!pending || !value) return;
-          void moveMealToDate(pending.mealId, parseLocalIso(value));
-        }}
-      />
+      {moveSheet && (
+        <PlannerDaySheet
+          title="Move on planner"
+          recipeTitle={moveSheet.recipeTitle}
+          confirmVerb="Move dinner"
+          weekStart={moveSheet.weekStart}
+          selectedDay={moveSheet.selectedDay}
+          weekPlan={moveSheetPlan}
+          confirming={moveSheetSaving}
+          onClose={() => setMoveSheet(null)}
+          onShiftWeek={weeks => setMoveSheet(current => current
+            ? { ...current, weekStart: shiftWeek(current.weekStart, weeks) }
+            : current)}
+          onSelectDay={day => setMoveSheet(current => current ? { ...current, selectedDay: day } : current)}
+          onConfirm={() => { void confirmMoveSheet(); }}
+          weekStartsOn={weekStartsOn}
+        />
+      )}
       {drag?.armed && (
         <div className="pl-drag-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden>
           {mealPlans.find(m => m.id === drag.mealId)?.recipe?.title ?? 'Moving…'}
@@ -1340,6 +1371,11 @@ export default function PlannerClient() {
         .pl-rail-pick { flex: 0 0 auto; padding: 8px 0 6px; }
         .pl-rail-day.is-hot { background: rgba(181, 69, 27, 0.1); }
         .pl-rail-day.is-origin .pl-rail-circle { box-shadow: 0 0 0 2px var(--parchment), 0 0 0 3px var(--rust); }
+        .pl-rail-from {
+          font-size: 0.52rem; font-weight: 700; letter-spacing: 0.08em;
+          text-transform: uppercase; color: var(--rust); line-height: 1;
+        }
+        .pl-rail-day.is-origin .pl-rail-wd { color: var(--rust); font-weight: 600; }
         .pl-rail-preview {
           font-size: 0.58rem; line-height: 1.2; text-align: center;
           color: var(--ink-soft); max-width: 100%;
