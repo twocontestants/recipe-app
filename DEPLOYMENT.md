@@ -11,7 +11,7 @@ without real-time sync) works fine on Vercel.
 **Railway** (recommended — easiest)
 1. Push to GitHub
 2. New project → Deploy from GitHub
-3. Set `POSTGRES_URL` env var
+3. Set `POSTGRES_URL` env var (required — never commit the connection string)
 4. Railway auto-detects `npm start` = `node server.js` ✓
 
 **Render**
