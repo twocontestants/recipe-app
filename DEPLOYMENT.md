@@ -18,7 +18,7 @@ without real-time sync) works fine on Vercel.
 1. New Web Service → connect repo
 2. Build: `npm install && npm run build`
 3. Start: `node server.js`
-4. Set `POSTGRES_URL` env var
+4. Set `POSTGRES_URL` env var (required — never commit the connection string)
 
 **Fly.io / DigitalOcean App Platform / any VPS** — all work fine.
 
