@@ -1128,9 +1128,9 @@ export default function ShoppingListClient() {
         .shop-checkbox svg { display: none; }
         .shop-item.is-checked .shop-checkbox svg { display: block; }
         .shop-item-name-wrap { flex: 1; min-width: 0; }
-        .recipe-source-bar { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin-bottom: 2px; width: 100%; }
-        .recipe-source-pip { box-sizing: border-box; display: block; width: 100%; max-width: 100%; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; font-style: italic; }
-        a.recipe-source-link { display: block; text-decoration: none; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+        .recipe-source-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 3px; margin-bottom: 2px; }
+        .recipe-source-pip { box-sizing: border-box; display: inline-block; width: fit-content; max-width: 100%; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; font-style: italic; }
+        a.recipe-source-link { display: inline-block; text-decoration: none; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }
         a.recipe-source-link:hover { color: var(--rust); border-color: var(--rust); background: rgba(181,69,27,0.06); }
         .recipe-source-ext { display: inline; vertical-align: -0.1em; margin-left: 3px; opacity: 0.6; }
         a.recipe-source-link:hover .recipe-source-ext { opacity: 1; }
@@ -1147,7 +1147,7 @@ export default function ShoppingListClient() {
         .shop-subitem-handle:active { cursor: grabbing; }
         .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
         .shop-subitem-amount { font-family: var(--font-display); font-size: 0.8rem; color: var(--rust); white-space: nowrap; flex-shrink: 0; opacity: 0.85; }
-        .shop-subitem-recipe { box-sizing: border-box; flex: 1 1 100%; width: 100%; max-width: 100%; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; font-style: italic; }
+        .shop-subitem-recipe { box-sizing: border-box; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; font-style: italic; }
         a.shop-subitem-recipe { text-decoration: none; }
 
         /* "Save this category?" prompt after a drag to a new aisle. */
