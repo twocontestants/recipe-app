@@ -1244,7 +1244,6 @@ select.settings-select {
   .shop-item-name { font-size: 0.82rem; }
   .shop-item-amount { font-size: 0.85rem; }
   .shop-category-header { padding: 0.25rem 0.2rem 0.4rem; }
-  .recipe-source-bar { max-width: 100px; }
 
   /* Forms — stack & prevent iOS focus-zoom (<16px inputs zoom the page) */
   .form-grid { grid-template-columns: 1fr; }
