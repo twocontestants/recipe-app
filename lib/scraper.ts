@@ -628,16 +628,21 @@ function heuristicScrape($: cheerio.CheerioAPI, url: string): ScrapedRecipe {
 
 // ── Ingredient line parser ─────────────────────────────────────────────────
 
-function parseIngredientLine(line: string): Ingredient {
+export function parseIngredientLine(line: string): Ingredient {
   return _parseIngredientLine(line);
 }
 
 // Normalise whitespace and comma artifacts left behind after edits.
+// WP Recipe Maker often emits notes as "(, sliced…)" because it wraps a
+// comma-prefixed note field in parentheses. Drop that leading comma so the
+// comment reads "(sliced…)" instead of "(, sliced…)".
 function tidyName(s: string): string {
   return s
     .replace(/\s+/g, ' ')
     .replace(/\s+,/g, ',')             // " ," → ","
     .replace(/,\s*(?:,\s*)+/g, ', ')   // ",," / ", ," → ", "
+    .replace(/\(\s*,+\s*/g, '(')       // "(, foo)" → "(foo)"
+    .replace(/,\s*\)/g, ')')           // "(foo,)" → "(foo)"
     .replace(/\(\s*\)/g, '')           // empty parens left behind
     .replace(/^[\s,;]+/, '')           // leading punctuation
     .replace(/[\s,;]+$/, '')           // trailing punctuation
@@ -645,22 +650,10 @@ function tidyName(s: string): string {
     .trim();
 }
 
-// Strip parenthetical notes from ingredient names.
-// e.g. "Garam masala (note 1)" → "Garam masala"
-//      "cayenne pepper (or red, Note 2)" → "cayenne pepper"
-// Keeps parentheses that look like quantities: "(500g)" or fractions "(1/2)".
-// tidyName() then removes any comma left dangling where a note was removed,
-// so we don't emit "chicken,, diced" or "salt,".
+// Keep prep comments on the name (including RecipeTin "(Note 2)" citations).
+// Only tidy punctuation — do not delete the parenthetical.
 function stripNotes(s: string): string {
-  const out = s
-    // Any parenthetical that contains a note/annotation keyword — the keyword
-    // need not be the first word, so "(5 star, note 2)" and "(or 1 tsp powder)"
-    // are both caught. Quantity parens like "(500g)"/"(about 200g)" contain no
-    // keyword and are preserved.
-    .replace(/\s*\(+[^)]*\b(?:note\s*\d*|see\s+note|optional|to\s+taste|adjust|substitute|can\s+use|alt\w*|or\s+\S)[^)]*\)*/gi, '')
-    // Trailing ", note 1" / ", see note" without parens.
-    .replace(/\s*,\s*(?:note\s*\d*|see\s+note)\b[^,)]*$/gi, '');
-  return tidyName(out);
+  return tidyName(s);
 }
 
 function _parseIngredientLine(line: string): Ingredient {
