@@ -1,0 +1,14 @@
+# Scan the working tree only (see the GitHub workflow). Full-history
+# detect would stay red because an old Neon password is already in git.
+title = "recipe-app"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Build output and dependencies (gitignored; --no-git still sees them locally)"
+paths = [
+  '''(^|/)\.next/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.git/''',
+]

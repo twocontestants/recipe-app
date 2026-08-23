@@ -1,3 +1,12 @@
+<!--
+Sync Impact Report
+- Version change: 1.1.0 → 1.2.0 (new principle + repo-wide governance)
+- Modified principles: none renamed
+- Added sections: VI. No secrets in source
+- Removed sections: none
+- Follow-up TODOs: none
+-->
+
 # Mise en Place Constitution
 
 ## Core Principles
@@ -17,14 +26,18 @@ Modals that sit above the planner must occupy leftover visible space with the sh
 ### V. Simplicity
 Prefer a flex row over absolute overlays when an icon sits beside an input. Prefer viewport-box math over device-specific hacks. Do not add libraries unless the existing stack cannot express the test.
 
+### VI. No secrets in source
+Credentials, API keys, and database connection strings MUST live in the host environment (`POSTGRES_URL`, `ANTHROPIC_API_KEY`, and the like). Source, specs, fixtures, committed examples, and agent environment files MUST NOT contain a live secret or a hardcoded fallback that embeds one. A missing env var MUST fail closed. Pull requests MUST fail a secret scan. Agents MUST leave existing leaks uncopied and MUST NOT reintroduce a convenience fallback.
+
 ## Development Workflow
 
 - Spec Kit artifacts (`specs/<feature>/spec.md`, `plan.md`, `tasks.md`) are the source of intent for the feature.
 - Tasks that add tests must be completed before the matching implementation task.
 - `npm test` must pass before a picker behavior change is considered done.
+- Secret scan (gitleaks on the working tree) MUST pass before a change is considered done.
 
 ## Governance
 
-This constitution applies to planner picker work and other UI that shares the same overlay/search patterns. Amendments are recorded in this file with a version bump.
+This constitution applies to the whole repository — planner UI, APIs, database access, and deployment config — not only picker overlays. Amendments are recorded in this file with a version bump. A pull request that adds a secret or a secret-bearing fallback is non-compliant even if the feature spec did not mention security.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-16 | **Last Amended**: 2026-08-16
+**Version**: 1.2.0 | **Ratified**: 2026-08-16 | **Last Amended**: 2026-08-23
