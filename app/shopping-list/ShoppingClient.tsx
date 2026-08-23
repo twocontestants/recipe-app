@@ -103,7 +103,6 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
                   <a key={i} className="recipe-source-pip recipe-source-link" href={url} target="_blank" rel="noopener noreferrer"
                      onClick={e => e.stopPropagation()} title={`Open original recipe: ${r}`}>
                     {r}
-                    <svg className="recipe-source-ext" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                   </a>
                 ) : (
                   <span key={i} className="recipe-source-pip">{r}</span>
@@ -138,16 +137,19 @@ function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropA
                   onClick={e => canDrag && onSubMoveClick?.(e, c.id)}
                   title="Click to move into another aisle, or drag it out"
                 ><DragHandle size={9} /></div>
-                <span className="shop-subitem-name">{c.name}</span>
-                {fmtContribAmount(c) && <span className="shop-subitem-amount">{fmtContribAmount(c)}</span>}
-                {c.recipe && (url ? (
-                  <a className="shop-subitem-recipe recipe-source-link" href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={`Open original recipe: ${c.recipe}`}>
-                    {c.recipe}
-                    <svg className="recipe-source-ext" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  </a>
-                ) : (
-                  <span className="shop-subitem-recipe">{c.recipe}</span>
-                ))}
+                <div className="shop-subitem-body">
+                  {c.recipe && (url ? (
+                    <a className="recipe-source-pip recipe-source-link" href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={`Open original recipe: ${c.recipe}`}>
+                      {c.recipe}
+                    </a>
+                  ) : (
+                    <span className="recipe-source-pip">{c.recipe}</span>
+                  ))}
+                  <div className="shop-subitem-line">
+                    <span className="shop-subitem-name">{c.name}</span>
+                    {fmtContribAmount(c) && <span className="shop-subitem-amount">{fmtContribAmount(c)}</span>}
+                  </div>
+                </div>
               </div>
             );
           })}
@@ -1132,23 +1134,21 @@ export default function ShoppingListClient() {
         .recipe-source-pip { box-sizing: border-box; display: inline-block; width: fit-content; max-width: 100%; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; font-style: italic; }
         a.recipe-source-link { display: inline-block; text-decoration: none; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }
         a.recipe-source-link:hover { color: var(--rust); border-color: var(--rust); background: rgba(181,69,27,0.06); }
-        .recipe-source-ext { display: inline; vertical-align: -0.1em; margin-left: 3px; opacity: 0.6; }
-        a.recipe-source-link:hover .recipe-source-ext { opacity: 1; }
 
-        /* Merged-item sub-lines: each contributing recipe's original wording,
+        /* Merged-item sub-lines: recipe pill above the original wording,
            indented to line up under the item name. Kept deliberately quiet. */
-        .shop-subitems { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px); }
+        .shop-subitems { display: flex; flex-direction: column; gap: 4px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px); }
         .shop-subitems.is-checked { opacity: 0.42; }
-        .shop-subitem { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
-        .shop-subitem-handle { display: flex; align-items: center; color: var(--ink-muted); opacity: 0; cursor: grab; flex-shrink: 0; transition: opacity 0.12s; touch-action: none; }
+        .shop-subitem { display: flex; align-items: flex-start; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
+        .shop-subitem-handle { display: flex; align-items: center; color: var(--ink-muted); opacity: 0; cursor: grab; flex-shrink: 0; transition: opacity 0.12s; touch-action: none; margin-top: 2px; }
         .shop-subitem:hover .shop-subitem-handle { opacity: 0.5; }
         .shop-subitem-handle:hover { opacity: 0.9 !important; }
         .shop-subitem-handle.is-disabled { cursor: default; opacity: 0 !important; }
         .shop-subitem-handle:active { cursor: grabbing; }
+        .shop-subitem-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+        .shop-subitem-line { display: flex; align-items: flex-start; gap: 0.45rem; width: 100%; }
         .shop-subitem-name { font-size: 0.8rem; color: var(--ink-soft); flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
         .shop-subitem-amount { font-family: var(--font-display); font-size: 0.8rem; color: var(--rust); white-space: nowrap; flex-shrink: 0; opacity: 0.85; }
-        .shop-subitem-recipe { box-sizing: border-box; flex: 0 0 auto; width: fit-content; max-width: 100%; min-width: 0; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; font-style: italic; }
-        a.shop-subitem-recipe { text-decoration: none; }
 
         /* "Save this category?" prompt after a drag to a new aisle. */
         .cat-pref-prompt { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; max-width: 700px; margin: 0 0 1rem; padding: 0.7rem 0.9rem; background: var(--sage-light); border: 1px solid var(--sage); border-radius: var(--radius); box-shadow: var(--shadow); animation: catPrefIn 0.18s ease-out; }
