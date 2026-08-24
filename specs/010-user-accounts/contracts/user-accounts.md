@@ -10,7 +10,7 @@ Body: `{ email, password, display_name }`. Creates `cook`. Sets session cookie. 
 
 ### POST /api/auth/login
 
-Body: `{ login, password }` where `login` is email or `Jessica`. Sets session cookie. 401 on mismatch.
+Body: `{ login, password }` where `login` is the account email or sign-in name. Sets session cookie. 401 on mismatch.
 
 ### PATCH /api/auth/password
 
@@ -75,8 +75,8 @@ Planner POST may reference any viewable recipe id (own or public). Does not copy
 
 ## UI
 
-- Guest nav: Recipes, Sign in / Create account. No Planner, Shopping, Settings.
-- Signed-in nav: Recipes, Planner, Shopping, Settings. Sign out lives in Settings, not the nav pane.
+- Guest nav: Recipes, Sign in. No Planner, Shopping, Settings.
+- Signed-in nav: Recipes, Planner, Shopping, Settings. No account name or role in the nav. Sign out lives in Settings.
 - Settings Account section: change password (current + new + confirm) and Sign out.
 - Recipe list toggle “Include public library” (default off).
 - Planner picker includes public recipes; control to show own/private only.

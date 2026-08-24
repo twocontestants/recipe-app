@@ -1,6 +1,6 @@
 import { Pool, types } from 'pg';
 import { autoTag } from './autotag';
-import { hashPassword, optionalBootstrapOwnerPassword, SESSION_MAX_AGE_SEC } from './auth';
+import { hashPassword, bootstrapOwnerLogin, bootstrapOwnerPassword, SESSION_MAX_AGE_SEC } from './auth';
 import { primaryKeyMatches } from './primaryKey';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
@@ -140,7 +140,6 @@ export async function setupDatabase() {
   await ensureAppSettingsTable();
   await ensurePlannedOnColumns();
   await ensureAccountsSchema();
-  await seedJessicaAccount({ resetPassword: true });
 }
 
 let _appSettingsReady = false;
@@ -219,11 +218,8 @@ export async function deleteCategoryDictionaryEntry(ownerId: string, name: strin
   );
 }
 
-export const JESSICA_LOGIN = 'Jessica';
-
 let _authTablesReady = false;
 let _accountsReady = false;
-let _jessicaPasswordSynced = false;
 
 async function pkColumns(table: string): Promise<string[]> {
   const result = await pool().query(
@@ -238,40 +234,60 @@ async function pkColumns(table: string): Promise<string[]> {
 }
 
 /** Users + sessions only. Sign-in must not wait on kitchen ALTER/PK migrations. */
-export async function ensureAuthTables(): Promise<AuthUser> {
-  if (!_authTablesReady) {
-    await pool().query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        login_name TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'cook'
-          CHECK (role IN ('cook', 'publisher', 'moderator')),
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    await pool().query(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
-    await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`);
-    _authTablesReady = true;
-  }
-  return seedJessicaAccount();
+export async function ensureAuthTables(): Promise<void> {
+  if (_authTablesReady) return;
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      login_name TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'cook'
+        CHECK (role IN ('cook', 'publisher', 'moderator')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`);
+  _authTablesReady = true;
+}
+
+async function firstUser(): Promise<AuthUser | null> {
+  const result = await pool().query(
+    `SELECT id, login_name, display_name, role FROM users ORDER BY created_at ASC LIMIT 1`,
+  );
+  if (!result.rows.length) return null;
+  return mapAuthUser(result.rows[0]);
+}
+
+/** First kitchen owner when the users table is empty. Not a special account afterwards. */
+async function createBootstrapOwner(): Promise<AuthUser> {
+  const login = bootstrapOwnerLogin();
+  const passwordHash = await hashPassword(bootstrapOwnerPassword());
+  const result = await pool().query(
+    `INSERT INTO users (login_name, display_name, password_hash, role)
+     VALUES ($1, $1, $2, 'moderator')
+     RETURNING id, login_name, display_name, role`,
+    [login, passwordHash],
+  );
+  return mapAuthUser(result.rows[0]);
 }
 
 export async function ensureAccountsSchema(): Promise<void> {
   if (_accountsReady) return;
 
-  const jessica = await ensureAuthTables();
+  await ensureAuthTables();
+  const owner = (await firstUser()) ?? (await createBootstrapOwner());
 
-  await addOwnerId('recipes', jessica.id);
+  await addOwnerId('recipes', owner.id);
   await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'`);
   await pool().query(`
     CREATE TABLE IF NOT EXISTS schema_flags (
@@ -279,19 +295,20 @@ export async function ensureAccountsSchema(): Promise<void> {
       value TEXT NOT NULL
     )
   `);
+  // Historical one-time flag name; do not rename or the public-library backfill would run again.
   const flagged = await pool().query(`SELECT value FROM schema_flags WHERE key = 'jessica_recipes_public_backfill'`);
   if (!flagged.rows.length) {
-    await pool().query(`UPDATE recipes SET visibility = 'public' WHERE owner_id = $1`, [jessica.id]);
+    await pool().query(`UPDATE recipes SET visibility = 'public' WHERE owner_id = $1`, [owner.id]);
     await pool().query(
       `INSERT INTO schema_flags (key, value) VALUES ('jessica_recipes_public_backfill', 'done')`,
     );
   }
 
-  await addOwnerId('meal_plans', jessica.id);
-  await addOwnerId('planner_notes', jessica.id);
-  await addOwnerId('shopping_lists', jessica.id);
-  await addOwnerId('app_settings', jessica.id);
-  await addOwnerId('ingredient_categories', jessica.id);
+  await addOwnerId('meal_plans', owner.id);
+  await addOwnerId('planner_notes', owner.id);
+  await addOwnerId('shopping_lists', owner.id);
+  await addOwnerId('app_settings', owner.id);
+  await addOwnerId('ingredient_categories', owner.id);
 
   await migrateCompositePk('app_settings', ['owner_id', 'key']);
   await migrateCompositePk('ingredient_categories', ['owner_id', 'name']);
@@ -324,9 +341,9 @@ export async function ensureAccountsSchema(): Promise<void> {
   _accountsReady = true;
 }
 
-async function addOwnerId(table: string, jessicaId: string): Promise<void> {
+async function addOwnerId(table: string, ownerId: string): Promise<void> {
   await pool().query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id)`);
-  await pool().query(`UPDATE ${table} SET owner_id = $1 WHERE owner_id IS NULL`, [jessicaId]);
+  await pool().query(`UPDATE ${table} SET owner_id = $1 WHERE owner_id IS NULL`, [ownerId]);
   await pool().query(`ALTER TABLE ${table} ALTER COLUMN owner_id SET NOT NULL`);
 }
 
@@ -336,39 +353,6 @@ async function migrateCompositePk(table: string, columns: string[]): Promise<voi
   const pkey = `${table}_pkey`;
   await pool().query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${pkey}`);
   await pool().query(`ALTER TABLE ${table} ADD PRIMARY KEY (${columns.join(', ')})`);
-}
-
-async function seedJessicaAccount(opts?: { resetPassword?: boolean }): Promise<AuthUser> {
-  const existing = await pool().query(
-    `SELECT id, login_name, display_name, role FROM users WHERE lower(login_name) = lower($1)`,
-    [JESSICA_LOGIN],
-  );
-  const password = optionalBootstrapOwnerPassword();
-
-  if (existing.rows.length) {
-    if (opts?.resetPassword && password && !_jessicaPasswordSynced) {
-      const passwordHash = await hashPassword(password);
-      await pool().query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [
-        existing.rows[0].id,
-        passwordHash,
-      ]);
-      _jessicaPasswordSynced = true;
-    }
-    return mapAuthUser(existing.rows[0]);
-  }
-
-  if (!password) {
-    throw new Error('BOOTSTRAP_OWNER_PASSWORD is not set');
-  }
-  const passwordHash = await hashPassword(password);
-  const result = await pool().query(
-    `INSERT INTO users (login_name, display_name, password_hash, role)
-     VALUES ($1, $1, $2, 'moderator')
-     RETURNING id, login_name, display_name, role`,
-    [JESSICA_LOGIN, passwordHash],
-  );
-  _jessicaPasswordSynced = true;
-  return mapAuthUser(result.rows[0]);
 }
 
 function mapAuthUser(row: Record<string, unknown>): AuthUser {

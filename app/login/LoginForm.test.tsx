@@ -30,7 +30,7 @@ describe('LoginForm', () => {
       </ToastProvider>,
     );
 
-    fireEvent.change(screen.getByLabelText(/email or name/i), { target: { value: 'Jessica' } });
+    fireEvent.change(screen.getByLabelText(/email or name/i), { target: { value: 'ada@example.com' } });
     fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'nope' } });
     fireEvent.submit(screen.getByRole('button', { name: /sign in/i }).closest('form')!);
 

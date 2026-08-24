@@ -3,28 +3,27 @@
 ## Prerequisites
 
 - Postgres (`POSTGRES_URL`)
-- Host env `BOOTSTRAP_OWNER_PASSWORD` set (not in git)
+- If no users exist yet: host env `BOOTSTRAP_OWNER_LOGIN` and `BOOTSTRAP_OWNER_PASSWORD` (not in git)
 - `npm install`
 
 ## Setup
 
 ```bash
-npm run db:setup
-# or visit /api/setup once
+# visit /api/setup once
 ```
 
-Setup fails if `BOOTSTRAP_OWNER_PASSWORD` is missing **and** Jessica does not exist yet. If Jessica already exists, a set env var resets her password to the current host value. After success, sign in as **Jessica** with that password. Existing recipes appear as Jessica’s public library; planner and settings are hers alone.
+If the users table is empty, setup creates one moderator from those env vars. If accounts already exist, setup leaves them alone and only migrates kitchen tables. Sign in with your account; change password from Settings.
 
-`BOOTSTRAP_OWNER_PASSWORD` must be set on the host that runs the Next.js app (for example Vercel), not only on a separate realtime host. `npm run db:setup` only creates legacy kitchen tables — use `/api/setup` so Jessica is seeded.
+`npm run db:setup` only creates legacy kitchen tables — use `/api/setup` for owner columns and users.
 
 ## Checks
 
-1. Signed out: Recipes shows public recipes. Planner/Shopping/Settings are absent. Add-to-planner asks to sign in.
-2. Register a new account: role is Cook; new recipe cannot be marked public.
-3. As Jessica (Moderator), grant Publisher to that account. They can publish a recipe. Guest can open it.
-4. As the second cook, add Jessica’s public recipe to the planner. Edit is blocked. Duplicate creates a private copy they can edit.
-5. Sign out, restart the Node process, sign in again — still Jessica or the second cook without re-entering a password on the same browser (cookie still valid). After restart, a still-valid cookie works because the session is in Postgres.
-6. Second cook’s planner is empty of Jessica’s dinners (except the public recipe they added themselves).
+1. Signed out: Recipes shows public recipes. Planner/Shopping/Settings are absent. Nav has Sign in. Add-to-planner asks to sign in.
+2. Register a new account: role is Cook; new recipe cannot be marked public. Nav does not show name or role.
+3. As a Moderator, grant Publisher to that account. They can publish a recipe. Guest can open it.
+4. As the second cook, add a public recipe to the planner. Edit is blocked. Duplicate creates a private copy they can edit.
+5. Sign out from Settings, restart the Node process, sign in again — still signed in on the same browser (cookie still valid) because the session is in Postgres.
+6. Second cook’s planner does not show the first cook’s private dinners.
 
 ## Tests
 

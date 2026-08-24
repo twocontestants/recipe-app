@@ -1300,26 +1300,6 @@ select.settings-select {
   }
 }
 
-.sidebar-account {
-  margin-top: auto;
-  padding-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-.sidebar-account-name {
-  color: var(--cream);
-  font-size: 0.8rem;
-  padding: 0 0.75rem;
-}
-.sidebar-account-role {
-  color: rgba(255,255,255,0.4);
-  font-size: 0.68rem;
-  text-transform: capitalize;
-  padding: 0 0.75rem 0.35rem;
-}
-.sidebar-version { margin-top: 0.5rem; }
-
 .login-page {
   min-height: 100vh;
   display: flex;

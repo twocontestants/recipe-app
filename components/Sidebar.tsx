@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 
-export const APP_VERSION = '1.9.0';
+export const APP_VERSION = '1.10.0';
 
 const kitchenItems = [
   {
@@ -32,7 +32,7 @@ const kitchenItems = [
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l-.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l-.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06.06a2 2 0 112.83 2.83l.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
       </svg>
     ),
   },
@@ -48,10 +48,21 @@ const recipesItem = {
   ),
 };
 
+const signInItem = {
+  href: '/login',
+  label: 'Sign in',
+  icon: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+      <path d="M10 17l5-5-5-5M15 12H3"/>
+    </svg>
+  ),
+};
+
 export function Sidebar() {
   const pathname = usePathname();
   const { user, loading } = useAuth();
-  const items = user ? [recipesItem, ...kitchenItems] : [recipesItem];
+  const items = user ? [recipesItem, ...kitchenItems] : [recipesItem, ...(loading ? [] : [signInItem])];
 
   return (
     <nav className="sidebar">
@@ -71,19 +82,6 @@ export function Sidebar() {
             <span>{item.label}</span>
           </Link>
         ))}
-      </div>
-
-      <div className="sidebar-account">
-        {loading ? null : user ? (
-          <>
-            <span className="sidebar-account-name">{user.display_name}</span>
-            <span className="sidebar-account-role">{user.role}</span>
-          </>
-        ) : (
-          <Link href="/login" className="nav-link">
-            Sign in
-          </Link>
-        )}
       </div>
 
       <div className="sidebar-version">v{APP_VERSION}</div>
