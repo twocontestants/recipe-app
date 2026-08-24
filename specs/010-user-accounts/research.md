@@ -12,15 +12,15 @@
 - **Rationale**: No new dependency. Adequate for a household app.
 - **Alternatives considered**: bcrypt/argon2 libraries (extra dep). Plain text (unacceptable).
 
-## Jessica seed account
+## Bootstrap owner
 
-- **Decision**: On setup, if no user named Jessica exists, create Moderator Jessica. Password from `BOOTSTRAP_OWNER_PASSWORD`. If Jessica already exists and that env var is set, reset her password hash to the current value (recovery for a first seed that used a mistyped or untrimmed env). Attach every recipe/planner/shopping-list/settings row with a null owner to Jessica. Mark those recipes public. Fail closed if Jessica must be created and the env var is missing.
-- **Rationale**: Cook asked that the current kitchen belong to Jessica. Constitution VI: do not embed the password in source. Returning the existing row without updating the hash left Jessica un-sign-in-able after a bad first seed.
-- **Alternatives considered**: First signup claims the data (rejected). Hardcoded password in setup script (non-compliant). Leave an existing hash forever (blocked recovery).
+- **Decision**: If setup runs with zero users, create one moderator from `BOOTSTRAP_OWNER_LOGIN` + `BOOTSTRAP_OWNER_PASSWORD`. If any user already exists, use the oldest account as the owner for leftover unowned kitchen rows. Do not hardcode a display name or login. Do not reset an existing account’s password from env.
+- **Rationale**: The first kitchen owner is a normal account. A hardcoded login made that person a special case in every setup path. Password changes belong in Settings.
+- **Alternatives considered**: Hardcoded seed login (rejected). Reset a named account on every `/api/setup` (overwrites Settings). First signup claims leftover data (still fine if someone registers before setup).
 
 ## Sign-in must not migrate the kitchen
 
-- **Decision**: Login, register, and session lookup only ensure `users` + `sessions` (and Jessica seed/reset). Kitchen owner columns, ratings tables, and composite primary-key rewrites run from `/api/setup` and from kitchen APIs, not from `/api/auth/login`.
+- **Decision**: Login, register, and session lookup only ensure `users` + `sessions`. Kitchen owner columns, ratings tables, and composite primary-key rewrites run from `/api/setup` and from kitchen APIs, not from `/api/auth/login`.
 - **Rationale**: `ALTER TABLE` / drop-and-recreate primary keys on every sign-in can lock and hang, which looks like a stuck “Please wait…” button with no error.
 - **Alternatives considered**: Keep calling `setupDatabase()` from login (hung). A separate migrator process (extra ops).
 
@@ -44,9 +44,9 @@
 
 ## Email password reset
 
-- **Decision**: Email reset stays out of this slice (no mailer). Signed-in cooks change their password from Settings (current password required). Jessica can use that form like anyone else. Setup-time recovery still works: if `BOOTSTRAP_OWNER_PASSWORD` is set, visiting `/api/setup` resets Jessica’s hash. Login does not overwrite a password she set in Settings.
-- **Rationale**: Spec assumed email reset; shipping it without a mailer would be fake. A Settings form is enough for a household app. Resetting Jessica on every process start would undo that form.
-- **Alternatives considered**: Console-print reset tokens (not household-safe). Moderator-forced reset (not needed if each cook can change their own). Reset Jessica’s hash on every sign-in (blocked Settings changes).
+- **Decision**: Email reset stays out of this slice (no mailer). Signed-in cooks change their password from Settings (current password required). Setup does not overwrite an existing hash from env.
+- **Rationale**: Spec assumed email reset; shipping it without a mailer would be fake. A Settings form is enough for a household app.
+- **Alternatives considered**: Console-print reset tokens (not household-safe). Moderator-forced reset (not needed if each cook can change their own). Reset a named account’s hash on setup (blocked Settings changes).
 
 ## Socket.IO planner rooms
 

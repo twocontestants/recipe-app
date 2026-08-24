@@ -3,15 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
 import type { AuthUser } from '@/lib/roles';
 
-const jessica: AuthUser = {
-  id: 'jess-1',
-  login_name: 'Jessica',
-  display_name: 'Jessica',
+const signedIn: AuthUser = {
+  id: 'u1',
+  login_name: 'ada@example.com',
+  display_name: 'Ada Lovelace',
   role: 'moderator',
 };
 
 const authState = {
-  user: jessica as AuthUser | null,
+  user: signedIn as AuthUser | null,
   loading: false,
   refresh: async () => {},
   logout: vi.fn(async () => {}),
@@ -29,18 +29,19 @@ vi.mock('./AuthProvider', () => ({
 describe('Sidebar', () => {
   afterEach(() => {
     cleanup();
-    authState.user = jessica;
+    authState.user = signedIn;
     authState.loading = false;
   });
 
-  it('keeps Sign out out of the nav when signed in', () => {
+  it('does not show the account name, role, or Sign out in the nav', () => {
     render(<Sidebar />);
-    expect(screen.getByText('Jessica')).toBeTruthy();
+    expect(screen.queryByText('Ada Lovelace')).toBeNull();
+    expect(screen.queryByText(/moderator/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /sign out/i })).toBeNull();
-    expect(screen.queryByText(/sign out/i)).toBeNull();
+    expect(screen.getByRole('link', { name: /settings/i })).toBeTruthy();
   });
 
-  it('still offers Sign in when signed out', () => {
+  it('offers Sign in in the nav when signed out', () => {
     authState.user = null;
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: /sign in/i })).toBeTruthy();

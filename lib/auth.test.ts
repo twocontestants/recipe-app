@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  bootstrapOwnerLogin,
   bootstrapOwnerPassword,
   hashPassword,
   isSessionId,
   newSessionId,
+  optionalBootstrapOwnerLogin,
   optionalBootstrapOwnerPassword,
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -61,5 +63,25 @@ describe('bootstrap password', () => {
     process.env.BOOTSTRAP_OWNER_PASSWORD = '   ';
     expect(optionalBootstrapOwnerPassword()).toBeNull();
     expect(() => bootstrapOwnerPassword()).toThrow(/BOOTSTRAP_OWNER_PASSWORD/);
+  });
+});
+
+describe('bootstrap login', () => {
+  const previous = process.env.BOOTSTRAP_OWNER_LOGIN;
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.BOOTSTRAP_OWNER_LOGIN;
+    else process.env.BOOTSTRAP_OWNER_LOGIN = previous;
+  });
+
+  it('fails closed when the host env is missing', () => {
+    delete process.env.BOOTSTRAP_OWNER_LOGIN;
+    expect(() => bootstrapOwnerLogin()).toThrow(/BOOTSTRAP_OWNER_LOGIN/);
+    expect(optionalBootstrapOwnerLogin()).toBeNull();
+  });
+
+  it('returns a trimmed host value', () => {
+    process.env.BOOTSTRAP_OWNER_LOGIN = '  kitchen.owner@example.com  ';
+    expect(bootstrapOwnerLogin()).toBe('kitchen.owner@example.com');
   });
 });

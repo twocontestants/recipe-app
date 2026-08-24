@@ -49,6 +49,20 @@ export function sessionCookieOptions() {
   };
 }
 
+export function optionalBootstrapOwnerLogin(): string | null {
+  const value = process.env.BOOTSTRAP_OWNER_LOGIN;
+  if (!value || !value.trim()) return null;
+  return value.trim();
+}
+
+export function bootstrapOwnerLogin(): string {
+  const value = optionalBootstrapOwnerLogin();
+  if (!value) {
+    throw new Error('BOOTSTRAP_OWNER_LOGIN is not set');
+  }
+  return value;
+}
+
 export function optionalBootstrapOwnerPassword(): string | null {
   const value = process.env.BOOTSTRAP_OWNER_PASSWORD;
   if (!value || !value.trim()) return null;
