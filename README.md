@@ -2,6 +2,10 @@
 
 A full-stack recipe management app built with Next.js 14 and Vercel Postgres.
 
+Accounts are per cook. Guests can browse public recipes. Planner, shopping lists, settings, ratings, and notes require sign-in. Sessions are stored in Postgres (they survive a process restart).
+
+The first setup creates a **Jessica** moderator account that owns any existing kitchen data. Set `BOOTSTRAP_OWNER_PASSWORD` in the host environment before running setup — never commit that value.
+
 ## Features
 
 - **Recipe Library** — Save recipes manually or import from any recipe website via URL scraping (supports JSON-LD schema, AllRecipes, BBC Good Food, Serious Eats, and more)

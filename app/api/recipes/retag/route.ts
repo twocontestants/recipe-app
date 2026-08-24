@@ -1,20 +1,15 @@
-import { NextResponse } from 'next/server';
-import { getAllRecipes, updateRecipe } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server';
+import { listRecipes, updateRecipe } from '@/lib/db';
 import { autoTag } from '@/lib/autotag';
+import { isAuthUser, requireUser } from '@/lib/session';
 
-// Hits the DB and mutates data — must run per-request, never at build/prerender.
 export const dynamic = 'force-dynamic';
 
-/**
- * One-shot backfill: runs the auto-tagger over every existing recipe, filling in
- * a primary protein where one is missing and enriching tags. Existing proteins
- * are never overwritten. Safe to run multiple times (idempotent once settled).
- *
- * Trigger by visiting /api/recipes/retag once after deploying.
- */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const recipes = await getAllRecipes();
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
+    const recipes = await listRecipes({ viewerId: user.id, ownedOnly: true });
     let updated = 0;
     const changes: Array<{ title: string; primary_protein?: string; tags: string[] }> = [];
 

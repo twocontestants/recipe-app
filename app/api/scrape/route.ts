@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scrapeRecipe } from '@/lib/scraper';
 import { autoTag } from '@/lib/autotag';
+import { isAuthUser, requireUser } from '@/lib/session';
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
     const { url } = await req.json();
     
     if (!url) {

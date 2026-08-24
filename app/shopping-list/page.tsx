@@ -1,5 +1,6 @@
 import { Sidebar } from '@/components/Sidebar';
 import { ToastProvider } from '@/components/Toast';
+import { AuthGate } from '@/components/AuthGate';
 import ShoppingListClient from './ShoppingClient';
 
 export default function ShoppingListPage() {
@@ -7,7 +8,9 @@ export default function ShoppingListPage() {
     <div className="app-shell">
       <Sidebar />
       <main className="main-content">
-        <ShoppingListClient />
+        <AuthGate>
+          <ShoppingListClient />
+        </AuthGate>
       </main>
       <ToastProvider />
     </div>

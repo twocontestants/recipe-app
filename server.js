@@ -63,11 +63,13 @@ app.prepare().then(() => {
 
     // Household planner: persist via HTTP, then tell the other clients to
     // re-read their month copy. socket.to excludes the sender.
-    socket.on('join-planner', () => {
-      socket.join('planner');
+    socket.on('join-planner', (userId) => {
+      if (!userId || typeof userId !== 'string') return;
+      socket.join(`planner:${userId}`);
     });
-    socket.on('planner-changed', () => {
-      socket.to('planner').emit('planner-changed');
+    socket.on('planner-changed', (userId) => {
+      if (!userId || typeof userId !== 'string') return;
+      socket.to(`planner:${userId}`).emit('planner-changed');
     });
 
     socket.on('disconnect', () => {

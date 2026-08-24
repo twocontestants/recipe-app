@@ -1,8 +1,11 @@
 import { Pool, types } from 'pg';
 import { autoTag } from './autotag';
+import { bootstrapOwnerPassword, hashPassword, SESSION_MAX_AGE_SEC } from './auth';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
+import { parseRole, type AuthUser, type Role } from './roles';
 import type { ShoppingOp } from './shoppingOps';
+import { parseVisibility, type Visibility } from './visibility';
 
 // Postgres DATE arrives as YYYY-MM-DD text. Keep it as that string — node-pg
 // otherwise wraps it in a JS Date, which stringifies as "Mon Aug 24".
@@ -44,6 +47,13 @@ export interface Recipe {
   primary_protein?: string;
   created_at: string;
   updated_at: string;
+  owner_id: string;
+  visibility: Visibility;
+  owner_display_name?: string;
+  can_edit?: boolean;
+  can_publish?: boolean;
+  my_rating?: number | null;
+  my_note?: string | null;
 }
 
 export interface MealPlan {
@@ -128,6 +138,7 @@ export async function setupDatabase() {
   await ensureIngredientCategoriesTable();
   await ensureAppSettingsTable();
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
 }
 
 let _appSettingsReady = false;
@@ -141,18 +152,23 @@ async function ensureAppSettingsTable(): Promise<void> {
   _appSettingsReady = true;
 }
 
-export async function getAppSetting(key: string): Promise<string | null> {
+export async function getAppSetting(ownerId: string, key: string): Promise<string | null> {
   if (!_appSettingsReady) await ensureAppSettingsTable();
-  const result = await pool().query('SELECT value FROM app_settings WHERE key = $1', [key]);
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    'SELECT value FROM app_settings WHERE owner_id = $1 AND key = $2',
+    [ownerId, key],
+  );
   return result.rows.length ? (result.rows[0].value as string) : null;
 }
 
-export async function setAppSetting(key: string, value: string): Promise<void> {
+export async function setAppSetting(ownerId: string, key: string, value: string): Promise<void> {
   if (!_appSettingsReady) await ensureAppSettingsTable();
+  await ensureAccountsSchema();
   await pool().query(
-    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
-     ON CONFLICT (key) DO UPDATE SET value = $2`,
-    [key, value]
+    `INSERT INTO app_settings (owner_id, key, value) VALUES ($1, $2, $3)
+     ON CONFLICT (owner_id, key) DO UPDATE SET value = $3`,
+    [ownerId, key, value]
   );
 }
 
@@ -169,54 +185,353 @@ async function ensureIngredientCategoriesTable(): Promise<void> {
 }
 
 // Returns the dictionary as a plain { normalisedName: category } map.
-export async function getCategoryDictionary(): Promise<Record<string, string>> {
+export async function getCategoryDictionary(ownerId: string): Promise<Record<string, string>> {
   if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
-  const result = await pool().query('SELECT name, category FROM ingredient_categories');
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    'SELECT name, category FROM ingredient_categories WHERE owner_id = $1',
+    [ownerId],
+  );
   const map: Record<string, string> = {};
   for (const row of result.rows) map[row.name] = row.category;
   return map;
 }
 
-export async function setCategoryDictionaryEntry(name: string, category: string): Promise<void> {
+export async function setCategoryDictionaryEntry(ownerId: string, name: string, category: string): Promise<void> {
   if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
+  await ensureAccountsSchema();
   await pool().query(
-    `INSERT INTO ingredient_categories (name, category)
-     VALUES ($1, $2)
-     ON CONFLICT (name) DO UPDATE SET category = $2, updated_at = NOW()`,
-    [name, category]
+    `INSERT INTO ingredient_categories (owner_id, name, category)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (owner_id, name) DO UPDATE SET category = $3, updated_at = NOW()`,
+    [ownerId, name, category]
   );
 }
 
-export async function deleteCategoryDictionaryEntry(name: string): Promise<void> {
+export async function deleteCategoryDictionaryEntry(ownerId: string, name: string): Promise<void> {
   if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
-  await pool().query('DELETE FROM ingredient_categories WHERE name = $1', [name]);
+  await ensureAccountsSchema();
+  await pool().query(
+    'DELETE FROM ingredient_categories WHERE owner_id = $1 AND name = $2',
+    [ownerId, name],
+  );
+}
+
+export const JESSICA_LOGIN = 'Jessica';
+
+let _accountsReady = false;
+
+async function pkColumns(table: string): Promise<string[]> {
+  const result = await pool().query(
+    `SELECT a.attname
+       FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+      WHERE i.indrelid = $1::regclass AND i.indisprimary
+      ORDER BY a.attnum`,
+    [table],
+  );
+  return result.rows.map(r => r.attname as string);
+}
+
+export async function ensureAccountsSchema(): Promise<void> {
+  if (_accountsReady) return;
+
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      login_name TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'cook'
+        CHECK (role IN ('cook', 'publisher', 'moderator')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`);
+
+  const jessica = await seedJessicaAccount();
+
+  await addOwnerId('recipes', jessica.id);
+  await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'`);
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS schema_flags (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  const flagged = await pool().query(`SELECT value FROM schema_flags WHERE key = 'jessica_recipes_public_backfill'`);
+  if (!flagged.rows.length) {
+    await pool().query(`UPDATE recipes SET visibility = 'public' WHERE owner_id = $1`, [jessica.id]);
+    await pool().query(
+      `INSERT INTO schema_flags (key, value) VALUES ('jessica_recipes_public_backfill', 'done')`,
+    );
+  }
+
+  await addOwnerId('meal_plans', jessica.id);
+  await addOwnerId('planner_notes', jessica.id);
+  await addOwnerId('shopping_lists', jessica.id);
+  await addOwnerId('app_settings', jessica.id);
+  await addOwnerId('ingredient_categories', jessica.id);
+
+  await migrateCompositePk('app_settings', ['owner_id', 'key']);
+  await migrateCompositePk('ingredient_categories', ['owner_id', 'name']);
+  await migrateCompositePk('planner_notes', ['owner_id', 'week_start', 'day_of_week']);
+
+  await pool().query(`DROP INDEX IF EXISTS idx_planner_notes_note_on`);
+  await pool().query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_notes_owner_note_on ON planner_notes(owner_id, note_on)`,
+  );
+
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS recipe_ratings (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+      stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (user_id, recipe_id)
+    )
+  `);
+  await pool().query(`
+    CREATE TABLE IF NOT EXISTS recipe_notes (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (user_id, recipe_id)
+    )
+  `);
+
+  _accountsReady = true;
+}
+
+async function addOwnerId(table: string, jessicaId: string): Promise<void> {
+  await pool().query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id)`);
+  await pool().query(`UPDATE ${table} SET owner_id = $1 WHERE owner_id IS NULL`, [jessicaId]);
+  await pool().query(`ALTER TABLE ${table} ALTER COLUMN owner_id SET NOT NULL`);
+}
+
+async function migrateCompositePk(table: string, columns: string[]): Promise<void> {
+  const current = await pkColumns(table);
+  if (current.length === columns.length && current.every((c, i) => c === columns[i])) return;
+  const pkey = `${table}_pkey`;
+  await pool().query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${pkey}`);
+  await pool().query(`ALTER TABLE ${table} ADD PRIMARY KEY (${columns.join(', ')})`);
+}
+
+async function seedJessicaAccount(): Promise<AuthUser> {
+  const existing = await pool().query(
+    `SELECT id, login_name, display_name, role FROM users WHERE lower(login_name) = lower($1)`,
+    [JESSICA_LOGIN],
+  );
+  if (existing.rows.length) return mapAuthUser(existing.rows[0]);
+
+  const password = bootstrapOwnerPassword();
+  const passwordHash = await hashPassword(password);
+  const result = await pool().query(
+    `INSERT INTO users (login_name, display_name, password_hash, role)
+     VALUES ($1, $1, $2, 'moderator')
+     RETURNING id, login_name, display_name, role`,
+    [JESSICA_LOGIN, passwordHash],
+  );
+  return mapAuthUser(result.rows[0]);
+}
+
+function mapAuthUser(row: Record<string, unknown>): AuthUser {
+  return {
+    id: row.id as string,
+    login_name: row.login_name as string,
+    display_name: row.display_name as string,
+    role: parseRole(row.role),
+  };
+}
+
+export async function getUserByLogin(login: string): Promise<(AuthUser & { password_hash: string }) | null> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `SELECT id, login_name, display_name, role, password_hash
+       FROM users WHERE lower(login_name) = lower($1)`,
+    [login.trim()],
+  );
+  if (!result.rows.length) return null;
+  const row = result.rows[0];
+  return { ...mapAuthUser(row), password_hash: row.password_hash as string };
+}
+
+export async function getUserById(id: string): Promise<AuthUser | null> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `SELECT id, login_name, display_name, role FROM users WHERE id = $1`,
+    [id],
+  );
+  if (!result.rows.length) return null;
+  return mapAuthUser(result.rows[0]);
+}
+
+export async function createUser(data: {
+  login_name: string;
+  display_name: string;
+  password_hash: string;
+  role?: Role;
+}): Promise<AuthUser> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `INSERT INTO users (login_name, display_name, password_hash, role)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, login_name, display_name, role`,
+    [data.login_name.trim(), data.display_name.trim(), data.password_hash, data.role ?? 'cook'],
+  );
+  return mapAuthUser(result.rows[0]);
+}
+
+export async function listUsers(): Promise<AuthUser[]> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `SELECT id, login_name, display_name, role FROM users ORDER BY created_at`,
+  );
+  return result.rows.map(mapAuthUser);
+}
+
+export async function countModerators(): Promise<number> {
+  await ensureAccountsSchema();
+  const result = await pool().query(`SELECT COUNT(*)::int AS n FROM users WHERE role = 'moderator'`);
+  return result.rows[0].n as number;
+}
+
+export async function updateUserRole(id: string, role: Role): Promise<AuthUser | null> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `UPDATE users SET role = $2 WHERE id = $1 RETURNING id, login_name, display_name, role`,
+    [id, role],
+  );
+  if (!result.rows.length) return null;
+  return mapAuthUser(result.rows[0]);
+}
+
+export async function createSession(userId: string, sessionId: string): Promise<void> {
+  await ensureAccountsSchema();
+  const expires = new Date(Date.now() + SESSION_MAX_AGE_SEC * 1000);
+  await pool().query(
+    `INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
+    [sessionId, userId, expires.toISOString()],
+  );
+}
+
+export async function getSessionUser(sessionId: string): Promise<AuthUser | null> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `SELECT u.id, u.login_name, u.display_name, u.role
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.id = $1 AND s.expires_at > NOW()`,
+    [sessionId],
+  );
+  if (!result.rows.length) return null;
+  return mapAuthUser(result.rows[0]);
+}
+
+export async function touchSession(sessionId: string): Promise<void> {
+  const expires = new Date(Date.now() + SESSION_MAX_AGE_SEC * 1000);
+  await pool().query(`UPDATE sessions SET expires_at = $2 WHERE id = $1`, [sessionId, expires.toISOString()]);
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await pool().query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
+}
+
+export async function listRecipes(opts: {
+  viewerId: string | null;
+  includePublic?: boolean;
+  ownedOnly?: boolean;
+}): Promise<Recipe[]> {
+  await ensureAccountsSchema();
+  const viewerId = opts.viewerId;
+  let where: string;
+  const params: unknown[] = [];
+  if (!viewerId) {
+    where = `r.visibility = 'public'`;
+  } else if (opts.ownedOnly || !opts.includePublic) {
+    where = `r.owner_id = $1`;
+    params.push(viewerId);
+  } else {
+    where = `(r.owner_id = $1 OR r.visibility = 'public')`;
+    params.push(viewerId);
+  }
+
+  const ratingJoin = viewerId
+    ? `LEFT JOIN recipe_ratings rr ON rr.recipe_id = r.id AND rr.user_id = $${params.length + 1}
+       LEFT JOIN recipe_notes rn ON rn.recipe_id = r.id AND rn.user_id = $${params.length + 1}`
+    : '';
+  if (viewerId) params.push(viewerId);
+
+  const result = await pool().query(
+    `SELECT r.*, u.display_name AS owner_display_name
+            ${viewerId ? ', rr.stars AS my_rating, rn.note AS my_note' : ''}
+       FROM recipes r
+       JOIN users u ON u.id = r.owner_id
+       ${ratingJoin}
+      WHERE ${where}
+      ORDER BY r.created_at DESC`,
+    params,
+  );
+  return result.rows.map(row => normalizeRecipe(row, viewerId));
 }
 
 export async function getAllRecipes(): Promise<Recipe[]> {
-  const result = await pool().query('SELECT * FROM recipes ORDER BY created_at DESC');
-  return result.rows.map(normalizeRecipe);
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `SELECT r.*, u.display_name AS owner_display_name
+       FROM recipes r JOIN users u ON u.id = r.owner_id
+      ORDER BY r.created_at DESC`,
+  );
+  return result.rows.map(row => normalizeRecipe(row, null));
 }
 
-export async function getRecipeById(id: string): Promise<Recipe | null> {
-  const result = await pool().query('SELECT * FROM recipes WHERE id = $1', [id]);
+export async function getRecipeById(id: string, viewerId?: string | null): Promise<Recipe | null> {
+  await ensureAccountsSchema();
+  const params: unknown[] = [id];
+  const ratingJoin = viewerId
+    ? `LEFT JOIN recipe_ratings rr ON rr.recipe_id = r.id AND rr.user_id = $2
+       LEFT JOIN recipe_notes rn ON rn.recipe_id = r.id AND rn.user_id = $2`
+    : '';
+  if (viewerId) params.push(viewerId);
+  const result = await pool().query(
+    `SELECT r.*, u.display_name AS owner_display_name
+            ${viewerId ? ', rr.stars AS my_rating, rn.note AS my_note' : ''}
+       FROM recipes r
+       JOIN users u ON u.id = r.owner_id
+       ${ratingJoin}
+      WHERE r.id = $1`,
+    params,
+  );
   if (result.rows.length === 0) return null;
-  return normalizeRecipe(result.rows[0]);
+  return normalizeRecipe(result.rows[0], viewerId ?? null);
 }
 
 export async function createRecipe(
-  data: Omit<Recipe, 'id' | 'created_at' | 'updated_at'>
+  data: Omit<Recipe, 'id' | 'created_at' | 'updated_at' | 'owner_display_name' | 'can_edit' | 'can_publish' | 'my_rating' | 'my_note'>,
 ): Promise<Recipe> {
+  await ensureAccountsSchema();
   // Auto-tag on save: infer the primary protein when the caller didn't set one,
   // and enrich tags. This is the universal chokepoint, so every recipe — scraped,
   // pasted, or hand-entered — gets tagged even if the client sent nothing.
   const auto = autoTag(data.title, data.ingredients || [], data.tags || []);
   const primaryProtein = data.primary_protein || auto.primary_protein || null;
   const tags = auto.tags;
+  const visibility = parseVisibility(data.visibility);
 
   const result = await pool().query(
-    `INSERT INTO recipes (title, description, source_url, image_url, servings, prep_time, cook_time, ingredients, steps, tags, primary_protein)
+    `INSERT INTO recipes (title, description, source_url, image_url, servings, prep_time, cook_time, ingredients, steps, tags, primary_protein, owner_id, visibility)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,
-             ARRAY(SELECT jsonb_array_elements_text($10::jsonb)),$11)
+             ARRAY(SELECT jsonb_array_elements_text($10::jsonb)),$11,$12,$13)
      RETURNING *`,
     [
       data.title,
@@ -230,9 +545,11 @@ export async function createRecipe(
       JSON.stringify(data.steps),
       JSON.stringify(tags),
       primaryProtein,
+      data.owner_id,
+      visibility,
     ]
   );
-  return normalizeRecipe(result.rows[0]);
+  return (await getRecipeById(result.rows[0].id, data.owner_id))!;
 }
 
 export async function updateRecipe(
@@ -275,12 +592,71 @@ export async function updateRecipe(
     ]
   );
   if (result.rows.length === 0) return null;
-  return normalizeRecipe(result.rows[0]);
+  return getRecipeById(id);
 }
 
-export async function deleteRecipe(id: string): Promise<boolean> {
-  const result = await pool().query('DELETE FROM recipes WHERE id = $1', [id]);
+export async function deleteRecipe(id: string, ownerId: string): Promise<boolean> {
+  const result = await pool().query('DELETE FROM recipes WHERE id = $1 AND owner_id = $2', [id, ownerId]);
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function setRecipeVisibility(id: string, visibility: Visibility): Promise<Recipe | null> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    `UPDATE recipes SET visibility = $2, updated_at = NOW() WHERE id = $1 RETURNING id`,
+    [id, visibility],
+  );
+  if (!result.rows.length) return null;
+  return getRecipeById(id);
+}
+
+export async function duplicateRecipe(id: string, ownerId: string): Promise<Recipe | null> {
+  await ensureAccountsSchema();
+  const source = await getRecipeById(id);
+  if (!source) return null;
+  return createRecipe({
+    title: source.title,
+    description: source.description,
+    source_url: source.source_url,
+    image_url: source.image_url,
+    servings: source.servings,
+    prep_time: source.prep_time,
+    cook_time: source.cook_time,
+    ingredients: source.ingredients,
+    steps: source.steps,
+    tags: source.tags,
+    primary_protein: source.primary_protein,
+    owner_id: ownerId,
+    visibility: 'private',
+  });
+}
+
+export async function setRecipeRating(userId: string, recipeId: string, stars: number | null): Promise<void> {
+  await ensureAccountsSchema();
+  if (stars == null) {
+    await pool().query(`DELETE FROM recipe_ratings WHERE user_id = $1 AND recipe_id = $2`, [userId, recipeId]);
+    return;
+  }
+  await pool().query(
+    `INSERT INTO recipe_ratings (user_id, recipe_id, stars)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, recipe_id) DO UPDATE SET stars = $3, updated_at = NOW()`,
+    [userId, recipeId, stars],
+  );
+}
+
+export async function setRecipeNote(userId: string, recipeId: string, note: string): Promise<void> {
+  await ensureAccountsSchema();
+  if (!note.trim()) {
+    await pool().query(`DELETE FROM recipe_notes WHERE user_id = $1 AND recipe_id = $2`, [userId, recipeId]);
+    return;
+  }
+  await pool().query(
+    `INSERT INTO recipe_notes (user_id, recipe_id, note)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, recipe_id) DO UPDATE SET note = $3, updated_at = NOW()`,
+    [userId, recipeId, note.trim()],
+  );
 }
 
 let _plannedOnReady = false;
@@ -318,7 +694,7 @@ export async function ensurePlannedOnColumns(): Promise<void> {
   _plannedOnReady = true;
 }
 
-function mapMealPlanRow(row: Record<string, unknown>): MealPlan {
+function mapMealPlanRow(row: Record<string, unknown>, viewerId: string): MealPlan {
   return {
     id: row.id as string,
     planned_on: toDayIso(row.planned_on as string | Date),
@@ -342,6 +718,9 @@ function mapMealPlanRow(row: Record<string, unknown>): MealPlan {
       source_url: row.recipe_source_url as string,
       created_at: row.recipe_created_at as string,
       updated_at: row.recipe_updated_at as string,
+      owner_id: row.recipe_owner_id as string,
+      visibility: parseVisibility(row.recipe_visibility),
+      can_edit: viewerId === (row.recipe_owner_id as string),
     },
   };
 }
@@ -359,40 +738,45 @@ const MEAL_PLAN_SELECT = `SELECT mp.*,
             r.primary_protein AS recipe_primary_protein,
             r.source_url  AS recipe_source_url,
             r.created_at  AS recipe_created_at,
-            r.updated_at  AS recipe_updated_at
+            r.updated_at  AS recipe_updated_at,
+            r.owner_id    AS recipe_owner_id,
+            r.visibility  AS recipe_visibility
      FROM meal_plans mp
      JOIN recipes r ON mp.recipe_id = r.id`;
 
-export async function getMealPlansForWeeks(weekStarts: string[]): Promise<MealPlan[]> {
+export async function getMealPlansForWeeks(weekStarts: string[], ownerId: string): Promise<MealPlan[]> {
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
   if (!weekStarts.length) return [];
   const spans = weekStarts.map(weekSpanForStoredKey);
   const clauses = spans.map((_, i) => `(mp.planned_on >= $${i * 2 + 1}::date AND mp.planned_on <= $${i * 2 + 2}::date)`);
   const params = spans.flatMap(span => [span.from, span.to]);
   const result = await pool().query(
     `${MEAL_PLAN_SELECT}
-     WHERE ${clauses.join(' OR ')}
-        OR mp.week_start = ANY($${params.length + 1}::date[])
+     WHERE mp.owner_id = $${params.length + 2}
+       AND (${clauses.join(' OR ')}
+        OR mp.week_start = ANY($${params.length + 1}::date[]))
      ORDER BY mp.planned_on, mp.meal_type`,
-    [...params, weekStarts],
+    [...params, weekStarts, ownerId],
   );
-  return result.rows.map(mapMealPlanRow);
+  return result.rows.map(row => mapMealPlanRow(row, ownerId));
 }
 
 /** Inclusive planned_on window. Name kept so existing callers keep working. */
-export async function getMealPlansInDateWindow(from: string, to: string): Promise<MealPlan[]> {
+export async function getMealPlansInDateWindow(from: string, to: string, ownerId: string): Promise<MealPlan[]> {
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
   const result = await pool().query(
     `${MEAL_PLAN_SELECT}
-     WHERE mp.planned_on >= $1::date AND mp.planned_on <= $2::date
+     WHERE mp.owner_id = $3 AND mp.planned_on >= $1::date AND mp.planned_on <= $2::date
      ORDER BY mp.planned_on, mp.meal_type`,
-    [from, to],
+    [from, to, ownerId],
   );
-  return result.rows.map(mapMealPlanRow);
+  return result.rows.map(row => mapMealPlanRow(row, ownerId));
 }
 
-export async function getMealPlanForWeek(weekStart: string): Promise<MealPlan[]> {
-  return getMealPlansForWeeks([weekStart]);
+export async function getMealPlanForWeek(weekStart: string, ownerId: string): Promise<MealPlan[]> {
+  return getMealPlansForWeeks([weekStart], ownerId);
 }
 
 export async function addToMealPlan(data: {
@@ -402,62 +786,80 @@ export async function addToMealPlan(data: {
   day_of_week: unknown;
   meal_type: string;
   servings: number;
+  owner_id: string;
 }): Promise<MealPlan> {
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
   const plannedOn = data.planned_on
     ? String(data.planned_on).slice(0, 10)
     : inferPlannedOn(String(data.week_start).slice(0, 10), data.day_of_week);
   const coords = coordsFromPlannedOn(plannedOn);
   const result = await pool().query(
-    `INSERT INTO meal_plans (planned_on, week_start, recipe_id, day_of_week, meal_type, servings)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [plannedOn, coords.weekStart, data.recipe_id, coords.dayOfWeek, data.meal_type, data.servings]
+    `INSERT INTO meal_plans (planned_on, week_start, recipe_id, day_of_week, meal_type, servings, owner_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [plannedOn, coords.weekStart, data.recipe_id, coords.dayOfWeek, data.meal_type, data.servings, data.owner_id]
   );
-  return result.rows[0] as MealPlan;
+  const plans = await pool().query(
+    `${MEAL_PLAN_SELECT} WHERE mp.id = $1`,
+    [result.rows[0].id],
+  );
+  return mapMealPlanRow(plans.rows[0], data.owner_id);
 }
 
-export async function removeFromMealPlan(id: string): Promise<boolean> {
-  const result = await pool().query('DELETE FROM meal_plans WHERE id = $1', [id]);
+export async function removeFromMealPlan(id: string, ownerId: string): Promise<boolean> {
+  const result = await pool().query(
+    'DELETE FROM meal_plans WHERE id = $1 AND owner_id = $2',
+    [id, ownerId],
+  );
   return (result.rowCount ?? 0) > 0;
 }
 
-function normalizeRecipe(row: Record<string, unknown>): Recipe {
+function normalizeRecipe(row: Record<string, unknown>, viewerId: string | null = null): Recipe {
+  const ownerId = row.owner_id as string;
   return {
     ...row,
     ingredients: Array.isArray(row.ingredients) ? row.ingredients : [],
     steps: Array.isArray(row.steps) ? row.steps : [],
     tags: Array.isArray(row.tags) ? row.tags : [],
+    owner_id: ownerId,
+    visibility: parseVisibility(row.visibility),
+    owner_display_name: (row.owner_display_name as string) || undefined,
+    can_edit: !!viewerId && viewerId === ownerId,
+    my_rating: row.my_rating == null ? null : Number(row.my_rating),
+    my_note: (row.my_note as string) || null,
   } as Recipe;
 }
 
-export async function getPlannerNotes(weekStart: string): Promise<Record<number, string>> {
+export async function getPlannerNotes(weekStart: string, ownerId: string): Promise<Record<number, string>> {
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
   const span = weekSpanForStoredKey(weekStart);
   const result = await pool().query(
     `SELECT day_of_week, note FROM planner_notes
-     WHERE (note_on >= $1::date AND note_on <= $2::date) OR week_start = $3::date`,
-    [span.from, span.to, weekStart],
+     WHERE owner_id = $4 AND ((note_on >= $1::date AND note_on <= $2::date) OR week_start = $3::date)`,
+    [span.from, span.to, weekStart, ownerId],
   );
   const map: Record<number, string> = {};
   for (const row of result.rows) map[row.day_of_week] = row.note;
   return map;
 }
 
-export async function setPlannerNote(weekStart: string, dayOfWeek: number, note: string): Promise<void> {
+export async function setPlannerNote(weekStart: string, dayOfWeek: number, note: string, ownerId: string): Promise<void> {
   await ensurePlannedOnColumns();
+  await ensureAccountsSchema();
   const plannedOn = inferPlannedOn(weekStart, dayOfWeek);
   const coords = coordsFromPlannedOn(plannedOn);
   if (!note.trim()) {
     await pool().query(
-      'DELETE FROM planner_notes WHERE note_on = $1 OR (week_start = $2 AND day_of_week = $3)',
-      [plannedOn, coords.weekStart, coords.dayOfWeek],
+      'DELETE FROM planner_notes WHERE owner_id = $4 AND (note_on = $1 OR (week_start = $2 AND day_of_week = $3))',
+      [plannedOn, coords.weekStart, coords.dayOfWeek, ownerId],
     );
   } else {
     await pool().query(
-      `INSERT INTO planner_notes (note_on, week_start, day_of_week, note)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (week_start, day_of_week) DO UPDATE SET note = $4, note_on = $1, updated_at = NOW()`,
-      [plannedOn, coords.weekStart, coords.dayOfWeek, note.trim()],
+      `INSERT INTO planner_notes (note_on, week_start, day_of_week, note, owner_id)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (owner_id, week_start, day_of_week) DO UPDATE SET note = $4, note_on = $1, updated_at = NOW()`,
+      [plannedOn, coords.weekStart, coords.dayOfWeek, note.trim(), ownerId],
     );
   }
 }
@@ -493,23 +895,28 @@ function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
   };
 }
 
-export async function getAllShoppingLists(): Promise<ShoppingList[]> {
-  const result = await pool().query('SELECT * FROM shopping_lists ORDER BY generated_at DESC');
+export async function getAllShoppingLists(ownerId: string): Promise<ShoppingList[]> {
+  await ensureAccountsSchema();
+  const result = await pool().query(
+    'SELECT * FROM shopping_lists WHERE owner_id = $1 ORDER BY generated_at DESC',
+    [ownerId],
+  );
   return result.rows.map(rowToShoppingList);
 }
 
 export async function createShoppingList(data: {
-  name: string; subtitle: string; week_starts: string[]; recipe_ids: string[]; items: unknown[];
+  name: string; subtitle: string; week_starts: string[]; recipe_ids: string[]; items: unknown[]; owner_id: string;
 }): Promise<ShoppingList> {
+  await ensureAccountsSchema();
   const result = await pool().query(
-    `INSERT INTO shopping_lists (name, subtitle, week_starts, recipe_ids, items)
-     VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING *`,
-    [data.name, data.subtitle, data.week_starts, data.recipe_ids, JSON.stringify(data.items)]
+    `INSERT INTO shopping_lists (name, subtitle, week_starts, recipe_ids, items, owner_id)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING *`,
+    [data.name, data.subtitle, data.week_starts, data.recipe_ids, JSON.stringify(data.items), data.owner_id]
   );
   return rowToShoppingList(result.rows[0]);
 }
 
-export async function updateShoppingListEdits(id: string, edits: {
+export async function updateShoppingListEdits(id: string, ownerId: string, edits: {
   items?: unknown[];
   item_overrides?: Record<string, unknown>;
   custom_items?: unknown[];
@@ -531,13 +938,16 @@ export async function updateShoppingListEdits(id: string, edits: {
   if (edits.checked_state !== undefined) { sets.push(`checked_state=$${i++}::jsonb`); vals.push(JSON.stringify(edits.checked_state)); }
   if (edits.subtitle !== undefined) { sets.push(`subtitle=$${i++}`); vals.push(edits.subtitle); }
   if (!sets.length) return;
-  await pool().query(`UPDATE shopping_lists SET ${sets.join(',')} WHERE id=$1`, vals);
+  vals.push(ownerId);
+  await pool().query(`UPDATE shopping_lists SET ${sets.join(',')} WHERE id=$1 AND owner_id=$${i}`, vals);
 }
 
 // Apply a sequence of targeted operations to a shopping list. Each op is a
 // single atomic JSONB UPDATE, so concurrent edits to different keys/items
 // compose instead of clobbering each other (the whole point of op-based sync).
-export async function applyShoppingListOps(id: string, ops: ShoppingOp[]): Promise<void> {
+export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerId: string): Promise<void> {
+  const owned = await pool().query('SELECT 1 FROM shopping_lists WHERE id = $1 AND owner_id = $2', [id, ownerId]);
+  if (!owned.rows.length) return;
   for (const op of ops) {
     switch (op.t) {
       case 'override':
@@ -645,12 +1055,12 @@ export async function applyShoppingListOps(id: string, ops: ShoppingOp[]): Promi
   }
 }
 
-export async function deleteShoppingList(id: string): Promise<void> {
-  await pool().query('DELETE FROM shopping_lists WHERE id = $1', [id]);
+export async function deleteShoppingList(id: string, ownerId: string): Promise<void> {
+  await pool().query('DELETE FROM shopping_lists WHERE id = $1 AND owner_id = $2', [id, ownerId]);
 }
 
-export async function getShoppingListById(id: string): Promise<ShoppingList | null> {
-  const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1', [id]);
+export async function getShoppingListById(id: string, ownerId: string): Promise<ShoppingList | null> {
+  const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1 AND owner_id=$2', [id, ownerId]);
   if (!result.rows.length) return null;
   const list = rowToShoppingList(result.rows[0]);
   const { list: migrated, changed } = migrateListShape(list);
@@ -658,7 +1068,7 @@ export async function getShoppingListById(id: string): Promise<ShoppingList | nu
   // every later edit keys off the new id rather than the name.
   if (changed) {
     try {
-      await updateShoppingListEdits(id, {
+      await updateShoppingListEdits(id, ownerId, {
         items: migrated.items,
         item_overrides: migrated.item_overrides,
         checked_state: migrated.checked_state,

@@ -9,6 +9,7 @@ import PickerRecipeRow from '@/components/PickerRecipeRow';
 import PlannerCardMenu from '@/components/PlannerCardMenu';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
 import { usePlannerLive } from '@/components/usePlannerLive';
+import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, fetchMealsForWeeks, mergePlannerMeals } from '@/lib/loadPlannerMonth';
@@ -107,6 +108,7 @@ interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; pref
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlannerClient() {
+  const { user } = useAuth();
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   const [weekStart, setWeekStart] = useState<Date>(() => startOfDisplayWeek(new Date(), 'monday'));
   const dayKeys = displayDays(weekStartsOn);
@@ -120,6 +122,7 @@ export default function PlannerClient() {
   // Picker
   const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerOwnOnly, setPickerOwnOnly] = useState(false);
   const pickerOverlayRef = useRef<HTMLDivElement>(null);
   const pickerSearchRef = useRef<HTMLInputElement>(null);
 
@@ -229,7 +232,7 @@ export default function PlannerClient() {
     } catch { /* keep the copy already on screen */ }
   };
 
-  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadFromServer(); });
+  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadFromServer(); }, user?.id);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
 
@@ -263,7 +266,7 @@ export default function PlannerClient() {
       const storageWeeks = storageWeeksForDisplayWeek(displayIso, weekStartsOn);
       const recipesPromise = recipesRef.current.length
         ? Promise.resolve(recipesRef.current)
-        : fetch('/api/recipes').then(res => res.json());
+        : fetch('/api/recipes?includePublic=1').then(res => res.json());
       const notesPromise = Promise.all(storageWeeks.map(wk => fetch(`/api/planner-notes?weekStart=${wk}`)));
       const [recs, , weekPlans, notesResults] = await Promise.all([
         recipesPromise,
@@ -887,9 +890,10 @@ export default function PlannerClient() {
 
   // ── Derived ─────────────────────────────────────────────────────────────────
 
-  const filteredRecipes = recipes.filter(r =>
-    !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()))
-  );
+  const filteredRecipes = recipes.filter(r => {
+    if (pickerOwnOnly && user && r.owner_id && r.owner_id !== user.id) return false;
+    return !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()));
+  });
 
   const totalMeals = mealPlans.length;
 
@@ -1177,6 +1181,10 @@ export default function PlannerClient() {
                 <div>
                   <h2 className="pl-picker-title">{picker.replacingId ? 'Replace recipe' : 'Add dinner'}</h2>
                   <p className="pl-picker-day">{DAYS[picker.dayIndex]}</p>
+                  <label className="pl-picker-filter">
+                    <input type="checkbox" checked={pickerOwnOnly} onChange={e => setPickerOwnOnly(e.target.checked)} />
+                    Only my recipes
+                  </label>
                 </div>
                 <button className="modal-close" onClick={() => setPicker(null)}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1247,9 +1255,10 @@ export default function PlannerClient() {
               goToRecipe(recipeId, 'view');
             }}
             onEditRecipe={() => {
-              const { recipeId } = cardMenu;
+              const { recipeId, mealId } = cardMenu;
               setCardMenu(null);
-              goToRecipe(recipeId, 'edit');
+              const meal = mealPlans.find(m => m.id === mealId);
+              goToRecipe(recipeId, meal?.recipe?.can_edit ? 'edit' : 'view');
             }}
             onReplace={() => {
               const { mealId, dayIndex } = cardMenu;

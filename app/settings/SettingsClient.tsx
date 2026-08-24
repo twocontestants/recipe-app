@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
 import { DAY_KEYS, DAY_LABELS, parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
+import { useAuth } from '@/components/AuthProvider';
+import type { AuthUser } from '@/lib/roles';
+import { isModerator } from '@/lib/roles';
 
 interface DictionaryEntry {
   name: string;
@@ -15,6 +18,7 @@ interface DictionaryEntry {
 }
 
 export default function SettingsClient() {
+  const { user } = useAuth();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -131,6 +135,8 @@ export default function SettingsClient() {
           <h1 className="page-title">Ingredient <em>Categories</em></h1>
         </div>
       </div>
+
+      {user && isModerator(user.role) && <ModeratorPanel />}
 
       <p className="settings-intro">
         Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
@@ -332,5 +338,70 @@ export default function SettingsClient() {
         }
       `}</style>
     </>
+  );
+}
+
+function ModeratorPanel() {
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    try {
+      const res = await fetch('/api/auth/users');
+      if (!res.ok) throw new Error();
+      setUsers(await res.json());
+    } catch {
+      showToast('Could not load accounts', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const changeRole = async (id: string, role: AuthUser['role']) => {
+    try {
+      const res = await fetch(`/api/auth/users/${id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not update role');
+      setUsers(list => list.map(u => u.id === id ? { ...u, role } : u));
+      showToast('Role updated', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not update role', 'error');
+    }
+  };
+
+  return (
+    <section className="moderator-panel">
+      <h2 className="section-title">Moderators</h2>
+      <p className="settings-intro">Grant Publisher so a cook can share recipes publicly. Moderators can also unpublish anyone’s public recipe from that recipe’s page.</p>
+      {loading ? (
+        <div className="loading-dots"><span /><span /><span /></div>
+      ) : (
+        <ul className="moderator-user-list">
+          {users.map(u => (
+            <li key={u.id} className="moderator-user-row">
+              <span>
+                <strong>{u.display_name}</strong>
+                <span className="moderator-login">{u.login_name}</span>
+              </span>
+              <select
+                className="settings-select"
+                value={u.role}
+                onChange={e => changeRole(u.id, e.target.value as AuthUser['role'])}
+              >
+                <option value="cook">Cook</option>
+                <option value="publisher">Publisher</option>
+                <option value="moderator">Moderator</option>
+              </select>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

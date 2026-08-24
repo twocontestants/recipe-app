@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { Sidebar } from '@/components/Sidebar';
 import { ToastProvider } from '@/components/Toast';
+import { AuthGate } from '@/components/AuthGate';
 import SettingsClient from './SettingsClient';
 
 export default function SettingsPage() {
@@ -9,7 +10,9 @@ export default function SettingsPage() {
       <Sidebar />
       <main className="main-content">
         <Suspense>
-          <SettingsClient />
+          <AuthGate>
+            <SettingsClient />
+          </AuthGate>
         </Suspense>
       </main>
       <ToastProvider />
