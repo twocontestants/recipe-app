@@ -1,3 +1,5 @@
+import type { ShoppingItem } from './shopping';
+
 export const SHOPPING_LIST_META_COLUMNS = [
   'id',
   'name',
@@ -88,18 +90,26 @@ export function mergeRecipeSourceMaps(
 
 export type ShoppingCheckedState = Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
 
-/** A detail GET has an items array. Meta index (array or dropdown object) does not. */
-export function isShoppingListDetail(payload: unknown): payload is {
-  items: unknown[];
+export type ShoppingListDetail = {
+  items: ShoppingItem[];
   checked_state?: ShoppingCheckedState | null;
   recipe_sources?: Record<string, string>;
-  item_overrides?: Record<string, unknown>;
+  item_overrides?: Record<string, {
+    displayName?: string;
+    displayAmount?: string;
+    category?: string;
+    hidden?: boolean;
+    detached?: boolean;
+  }>;
   custom_items?: unknown[];
   category_labels?: Record<string, string>;
   category_order?: string[];
   item_order?: Record<string, string[]>;
   subtitle?: string;
-} {
+};
+
+/** A detail GET has an items array. Meta index (array or dropdown object) does not. */
+export function isShoppingListDetail(payload: unknown): payload is ShoppingListDetail {
   return !!payload
     && typeof payload === 'object'
     && !Array.isArray(payload)

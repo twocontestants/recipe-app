@@ -451,7 +451,7 @@ export default function ShoppingListClient() {
       // the list-changed that our ops trigger) adopts the merged truth.
       const busy = pendingOps.current > 0;
 
-      const order = data.category_order?.length > 0
+      const order = data.category_order && data.category_order.length > 0
         ? data.category_order
         : CATEGORY_ORDER.filter((c: string) => (data.items ?? []).some((i: ShoppingItem) => i.category === c));
       if (!busy) {
