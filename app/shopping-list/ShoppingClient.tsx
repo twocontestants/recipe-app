@@ -4,8 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
 import { CATEGORY_ORDER, CATEGORY_EMOJI, aggregateContributions, normalizeIngredientName } from '@/lib/shopping';
 import {
+  adoptCheckedState,
+  isShoppingListDetail,
   mergeRecipeSourceMaps,
   recipeSourceMapFromItems,
+  shouldAdoptCheckedState,
   type ShoppingListMeta,
 } from '@/lib/shoppingList';
 import { showToast } from '@/components/Toast';
@@ -400,7 +403,7 @@ export default function ShoppingListClient() {
   const fetchLists = useCallback(async () => {
     setLoadingLists(true);
     try {
-      const res = await fetch('/api/shopping-lists');
+      const res = await fetch('/api/shopping-lists', { cache: 'no-store' });
       const data: ShoppingListMeta[] = await res.json();
       setLists(data);
       if (data.length > 0 && !activeId) setActiveId(data[0].id); // most recent
@@ -433,8 +436,10 @@ export default function ShoppingListClient() {
     if (!refresh && !silent) { setLoadingItems(true); }
     if (!refresh) { isFirstLoad.current = true; }
     try {
-      const res = await fetch(`/api/shopping-lists?id=${id}`);
+      const res = await fetch(`/api/shopping-lists?id=${id}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error('load failed');
       const data = await res.json();
+      if (!isShoppingListDetail(data)) throw new Error('load failed');
       setServerItems(data.items ?? []); // snapshot — constant for the list's life
       setRecipeSources(mergeRecipeSourceMaps(
         recipeSourceMapFromItems(data.items ?? []),
@@ -462,10 +467,11 @@ export default function ShoppingListClient() {
       const subUnsaved = JSON.stringify(subtitleRef.current) !== lastSubtitleSig.current;
       if (!subUnsaved) { setSubtitle(dbSub); lastSubtitleSig.current = JSON.stringify(dbSub); }
 
-      // checked: skip on remote refresh (live deltas own it); otherwise adopt
-      // unless we have ops in flight
-      if (!refresh && !busy) {
-        setChecked((data.checked_state && Object.keys(data.checked_state).length > 0) ? data.checked_state : {});
+      // checked: the DB row is source of truth, including after a structural
+      // refetch (live deltas can miss). Skip only while local ops are in flight.
+      const nextChecked = adoptCheckedState(data);
+      if (nextChecked !== undefined && shouldAdoptCheckedState({ busy })) {
+        setChecked(nextChecked);
       }
 
       isFirstLoad.current = false;

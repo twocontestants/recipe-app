@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adoptCheckedState,
+  isShoppingListDetail,
   mergeRecipeSourceMaps,
   recipeSourceMapFromItems,
   recipeSourceMapFromRecipes,
+  shouldAdoptCheckedState,
   shoppingListMetaOmitsItemBodies,
   shoppingListMetaSelectSql,
   toShoppingListMeta,
@@ -64,5 +67,24 @@ describe('recipe source maps', () => {
       Pie: 'https://example.com/pie',
       Stew: 'https://example.com/stew',
     });
+  });
+});
+
+describe('shopping list checked state', () => {
+  const checks = { a1: { checked: true, checkedBy: 'Sam', checkedAt: 1 } };
+
+  it('treats a detail body as the source of checks, including a structural refetch', () => {
+    expect(isShoppingListDetail({ items: [], checked_state: checks })).toBe(true);
+    expect(adoptCheckedState({ items: [{ id: 'a1' }], checked_state: checks })).toEqual(checks);
+    expect(adoptCheckedState({ items: [] })).toEqual({});
+    expect(shouldAdoptCheckedState({ busy: false })).toBe(true);
+    expect(shouldAdoptCheckedState({ busy: true })).toBe(false);
+  });
+
+  it('does not adopt checks from a meta index or an error payload', () => {
+    expect(isShoppingListDetail([{ id: '1', name: 'This week' }])).toBe(false);
+    expect(adoptCheckedState([{ id: '1' }])).toBeUndefined();
+    expect(adoptCheckedState({ id: '1', name: 'This week', recipe_ids: [] })).toBeUndefined();
+    expect(adoptCheckedState({ error: 'Not found' })).toBeUndefined();
   });
 });
