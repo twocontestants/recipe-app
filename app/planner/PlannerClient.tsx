@@ -6,8 +6,10 @@ import { showToast } from '@/components/Toast';
 import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
+import PlannerCardMenu from '@/components/PlannerCardMenu';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
 import { usePlannerLive } from '@/components/usePlannerLive';
+import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, fetchMealsForWeeks, mergePlannerMeals } from '@/lib/loadPlannerMonth';
 import {
@@ -128,9 +130,10 @@ export default function PlannerClient() {
 
   const [suggestions, setSuggestions] = useState<Record<number, Recipe[]>>({});
 
-  // Card action menu (delete / replace / move to)
+  // Card action menu (view / edit / replace / move / delete)
   const [cardMenu, setCardMenu] = useState<{
     mealId: string;
+    recipeId: string;
     dayIndex: number;
     right: number;
     y: number;
@@ -791,19 +794,25 @@ export default function PlannerClient() {
 
   // ── Card action menu ────────────────────────────────────────────────────────
 
-  const openCardMenu = (e: React.MouseEvent, mealId: string, dayIndex: number) => {
+  const openCardMenu = (e: React.MouseEvent, mealId: string, dayIndex: number, recipeId: string) => {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const up = rect.bottom > window.innerHeight * 0.55;
     setCardMenu({
       mealId,
+      recipeId,
       dayIndex,
       right: window.innerWidth - rect.right,
       y: up ? rect.top - 4 : rect.bottom + 4,
       up,
       view: 'root',
     });
+  };
+
+  const goToRecipe = (recipeId: string, mode: 'view' | 'edit') => {
+    if (!recipeId) return;
+    window.location.href = mode === 'edit' ? recipeEditPath(recipeId) : recipeViewPath(recipeId);
   };
 
   useEffect(() => {
@@ -943,7 +952,6 @@ export default function PlannerClient() {
                 {/* Day header */}
                 <div className="pl-day-header">
                   <div className="pl-day-label">
-                    {isToday && <span className="pl-today-pip">Today</span>}
                     <span className="pl-day-name">{dayName}</span>
                     <span className="pl-day-date">{date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>
                   </div>
@@ -972,7 +980,7 @@ export default function PlannerClient() {
                               suppressCardClick.current = false;
                               return;
                             }
-                            if (meal.recipe_id) window.location.href = `/recipes?open=${meal.recipe_id}`;
+                            if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view');
                           }}
                           title="View recipe"
                         >
@@ -1018,7 +1026,7 @@ export default function PlannerClient() {
                               title="Meal options"
                               aria-haspopup="menu"
                               aria-expanded={menuOpen}
-                              onClick={e => openCardMenu(e, meal.id, dayIndex)}
+                              onClick={e => openCardMenu(e, meal.id, dayIndex, meal.recipe_id)}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                                 <line x1="4" y1="6" x2="20" y2="6"/>
@@ -1220,95 +1228,48 @@ export default function PlannerClient() {
       {cardMenu && (
         <>
           <div className="pl-menu-backdrop" onClick={() => setCardMenu(null)} />
-          <div
-            ref={cardMenuRef}
-            className={`pl-card-menu ${cardMenu.up ? 'is-up' : ''}`}
-            style={{ right: cardMenu.right, top: cardMenu.y }}
-            role="menu"
-          >
-            {cardMenu.view === 'root' ? (
-              <>
-                <button
-                  className="pl-card-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    const { mealId, dayIndex } = cardMenu;
-                    setCardMenu(null);
-                    setPicker({ dayIndex, replacingId: mealId });
-                    setPickerSearch('');
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="1 4 1 10 7 10"/>
-                    <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
-                  </svg>
-                  Replace
-                </button>
-                <button
-                  className="pl-card-menu-item"
-                  role="menuitem"
-                  onClick={() => setCardMenu(m => m ? { ...m, view: 'move' } : m)}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                  </svg>
-                  Move to
-                  <svg className="pl-card-menu-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
-                <div className="pl-card-menu-sep" />
-                <button
-                  className="pl-card-menu-item is-danger"
-                  role="menuitem"
-                  onClick={() => {
-                    const { mealId } = cardMenu;
-                    setCardMenu(null);
-                    removeMeal(mealId);
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                    <path d="M10 11v6M14 11v6"/>
-                  </svg>
-                  Delete
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="pl-card-menu-item pl-card-menu-back"
-                  onClick={() => setCardMenu(m => m ? { ...m, view: 'root' } : m)}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-                  Move to…
-                </button>
-                <div className="pl-card-menu-sep" />
-                {DAYS.map((name, i) => {
-                  const date = getDayDate(weekStart, i);
-                  const isCurrent = i === cardMenu.dayIndex;
-                  return (
-                    <button
-                      key={i}
-                      className={`pl-card-menu-item ${isCurrent ? 'is-current' : ''}`}
-                      role="menuitem"
-                      disabled={isCurrent}
-                      onClick={() => {
-                        const { mealId, dayIndex } = cardMenu;
-                        setCardMenu(null);
-                        moveMeal(mealId, dayIndex, i);
-                      }}
-                    >
-                      <span className="pl-card-menu-day">
-                        <span>{name}</span>
-                        <span className="pl-card-menu-date">{date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}</span>
-                      </span>
-                      {isCurrent && <span className="pl-card-menu-check">✓</span>}
-                    </button>
-                  );
-                })}
-              </>
-            )}
-          </div>
+          <PlannerCardMenu
+            menuRef={cardMenuRef}
+            view={cardMenu.view}
+            right={cardMenu.right}
+            y={cardMenu.y}
+            up={cardMenu.up}
+            currentDayIndex={cardMenu.dayIndex}
+            canOpenRecipe={Boolean(cardMenu.recipeId)}
+            days={DAYS.map((name, i) => ({
+              index: i,
+              name,
+              dateLabel: getDayDate(weekStart, i).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+            }))}
+            onViewRecipe={() => {
+              const { recipeId } = cardMenu;
+              setCardMenu(null);
+              goToRecipe(recipeId, 'view');
+            }}
+            onEditRecipe={() => {
+              const { recipeId } = cardMenu;
+              setCardMenu(null);
+              goToRecipe(recipeId, 'edit');
+            }}
+            onReplace={() => {
+              const { mealId, dayIndex } = cardMenu;
+              setCardMenu(null);
+              setPicker({ dayIndex, replacingId: mealId });
+              setPickerSearch('');
+            }}
+            onOpenMove={() => setCardMenu(m => m ? { ...m, view: 'move' } : m)}
+            onBack={() => setCardMenu(m => m ? { ...m, view: 'root' } : m)}
+            onMoveTo={i => {
+              const { mealId, dayIndex } = cardMenu;
+              setCardMenu(null);
+              moveMeal(mealId, dayIndex, i);
+            }}
+            onDelete={() => {
+              const { mealId } = cardMenu;
+              setCardMenu(null);
+              removeMeal(mealId);
+            }}
+          />
         </>
       )}
 
@@ -1409,22 +1370,31 @@ export default function PlannerClient() {
 
         /* Day list */
         .pl-days { display: flex; flex-direction: column; }
-        .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
+        .pl-day { padding-block: 1.25rem; border-bottom: 1px solid var(--border); }
         .pl-day:first-child { border-top: 1px solid var(--border); }
         .pl-day.is-past { opacity: 0.42; }
+        .pl-day.is-today {
+          background: rgba(181, 69, 27, 0.07);
+          border-radius: 12px;
+          margin-left: -0.85rem;
+          margin-right: -0.85rem;
+          padding-left: 0.85rem;
+          padding-right: 0.85rem;
+          border-bottom-color: transparent;
+        }
         .pl-day.is-drop-target {
           outline: 2px solid var(--rust);
           outline-offset: 2px;
-          background: rgba(181, 69, 27, 0.06);
+          background: rgba(181, 69, 27, 0.12);
         }
         .pl-days.is-dragging { user-select: none; cursor: grabbing; }
 
         /* Day header */
         .pl-day-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
         .pl-day-label { display: flex; align-items: center; gap: 0.6rem; }
-        .pl-today-pip { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: white; background: var(--rust); border-radius: 99px; padding: 2px 7px; line-height: 1.4; }
         .pl-day-name { font-family: var(--font-display); font-size: 1.35rem; font-weight: 300; color: var(--ink); line-height: 1; }
         .pl-day.is-today .pl-day-name { color: var(--rust); }
+        .pl-day.is-today .pl-day-date { color: var(--rust); opacity: 0.72; }
         .pl-day-date { font-size: 0.8rem; color: var(--ink-muted); }
         .pl-add-inline-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0.28rem 0.65rem; background: none; border: 1px solid var(--border); border-radius: 99px; font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
         .pl-add-inline-btn:hover { border-color: var(--rust); color: var(--rust); }
@@ -1663,7 +1633,7 @@ export default function PlannerClient() {
           .pl-title { font-size: 2rem; }
           .pl-topbar { gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
           .pl-btn-magic, .pl-btn-gen { font-size: 0.75rem; padding: 0.42rem 0.7rem; }
-          .pl-day { padding: 1rem 0; }
+          .pl-day { padding-block: 1rem; }
           .pl-day-name { font-size: 1.1rem; }
           .pl-recipe-img { width: 64px; min-height: 56px; height: auto; }
           .pl-recipe-name { font-size: 0.85rem; }

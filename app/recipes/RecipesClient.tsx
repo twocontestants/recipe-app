@@ -20,6 +20,7 @@ import {
   type DayKey,
 } from '@/lib/plannerDays';
 import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
+import { recipeDeepLinkFromSearch } from '@/lib/recipeLinks';
 
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
@@ -176,16 +177,6 @@ export default function RecipesPage() {
     })();
   }, []);
 
-  // Auto-open recipe from ?open=<id> query param (linked from planner)
-  const searchParams = useSearchParams();
-  useEffect(() => {
-    const openId = searchParams.get('open');
-    if (openId && recipes.length > 0) {
-      const recipe = recipes.find(r => r.id === openId);
-      if (recipe) setViewRecipe(recipe);
-    }
-  }, [searchParams, recipes]);
-
   const openAddModal = () => {
     setEditingRecipe(null);
     setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] });
@@ -211,6 +202,17 @@ export default function RecipesPage() {
     setShowModal(true);
     setViewRecipe(null);
   };
+
+  // Auto-open or edit a recipe from ?open= / ?edit= (linked from planner)
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const link = recipeDeepLinkFromSearch(searchParams);
+    if (!link || recipes.length === 0) return;
+    const recipe = recipes.find(r => r.id === link.id);
+    if (!recipe) return;
+    if (link.mode === 'edit') openEditModal(recipe);
+    else setViewRecipe(recipe);
+  }, [searchParams, recipes]);
 
   const handlePasteImport = async () => {
     if (!pasteText.trim()) return;
