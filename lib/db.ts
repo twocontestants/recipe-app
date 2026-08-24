@@ -1,8 +1,12 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { autoTag } from './autotag';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
 import type { ShoppingOp } from './shoppingOps';
+
+// Postgres DATE arrives as YYYY-MM-DD text. Keep it as that string — node-pg
+// otherwise wraps it in a JS Date, which stringifies as "Mon Aug 24".
+types.setTypeParser(types.builtins.DATE, (value: string) => value);
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
 // We use the raw `pg` driver to avoid @vercel/postgres wrapper confusion.

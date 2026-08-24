@@ -10,9 +10,9 @@ import {
 const DAY_ISO = /^(\d{4}-\d{2}-\d{2})/;
 
 /**
- * Calendar day from a Postgres DATE (JS Date at UTC midnight), an ISO
- * timestamp, or a YYYY-MM-DD string. Do not use String(date).slice(0, 10) —
- * that yields "Mon Aug 24" on the server and the planner cannot match days.
+ * Normalize a kitchen calendar day to YYYY-MM-DD.
+ * Already-correct strings pass through. Also accepts an ISO timestamp or a
+ * JS Date from older pg DATE parsing — it does not compute a new date.
  */
 export function toDayIso(value: string | Date | null | undefined): string {
   if (value == null || value === '') return '';
