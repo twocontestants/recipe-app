@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   adoptCheckedState,
+  alignCheckedStateToItems,
   isShoppingListDetail,
   mergeRecipeSourceMaps,
+  migrateShoppingListShape,
+  normalizeCheckedState,
   recipeSourceMapFromItems,
   recipeSourceMapFromRecipes,
   shouldAdoptCheckedState,
+  shoppingListCheckClearKeySql,
+  shoppingListCheckSetSql,
   shoppingListMetaOmitsItemBodies,
   shoppingListMetaSelectSql,
+  stableShoppingItemId,
   toShoppingListMeta,
 } from './shoppingList';
 
@@ -86,5 +92,100 @@ describe('shopping list checked state', () => {
     expect(adoptCheckedState([{ id: '1' }])).toBeUndefined();
     expect(adoptCheckedState({ id: '1', name: 'This week', recipe_ids: [] })).toBeUndefined();
     expect(adoptCheckedState({ error: 'Not found' })).toBeUndefined();
+  });
+
+  it('maps leftover name-keyed ticks onto item ids so the row can show them', () => {
+    const entry = { checked: true, checkedBy: 'Sam', checkedAt: 1 };
+    expect(adoptCheckedState({
+      items: [{ id: 'a1', name: 'onion', displayName: 'Onion' }],
+      checked_state: { onion: entry },
+    })).toEqual({ a1: entry });
+    expect(alignCheckedStateToItems(
+      { Onion: entry },
+      [{ id: 'a1', name: 'onion', displayName: 'Onion' }],
+    )).toEqual({ a1: entry });
+  });
+
+  it('parses string JSON and double-encoded entries instead of dropping them', () => {
+    const entry = { checked: true, checkedBy: 'Sam', checkedAt: 1 };
+    expect(normalizeCheckedState(JSON.stringify({ a1: entry }))).toEqual({ a1: entry });
+    expect(normalizeCheckedState({ a1: JSON.stringify(entry) })).toEqual({ a1: entry });
+    expect(adoptCheckedState({
+      items: [{ id: 'a1', name: 'onion' }],
+      checked_state: JSON.stringify({ onion: entry }),
+    })).toEqual({ a1: entry });
+  });
+
+  it('keeps custom-item and detached-subline keys', () => {
+    const entry = { checked: true, checkedBy: 'Sam', checkedAt: 1 };
+    expect(adoptCheckedState({
+      items: [{ id: 'a1', name: 'onion' }],
+      custom_items: [{ id: 'c9', displayName: 'Tape' }],
+      checked_state: { c9: entry, 'a1#0': entry },
+    })).toEqual({ c9: entry, 'a1#0': entry });
+  });
+});
+
+describe('shopping list check SQL', () => {
+  it('merges checks as object keys instead of jsonb_set array paths', () => {
+    expect(shoppingListCheckSetSql()).toMatch(/jsonb_build_object\(\$2::text, \$3::jsonb\)/);
+    expect(shoppingListCheckSetSql()).not.toMatch(/jsonb_set/);
+    expect(shoppingListCheckSetSql()).not.toMatch(/ARRAY\[\$2\]/);
+    expect(shoppingListCheckClearKeySql()).toMatch(/- \$2::text/);
+  });
+});
+
+describe('migrateShoppingListShape', () => {
+  const entry = { checked: true, checkedBy: 'Sam', checkedAt: 1 };
+
+  it('remaps name-keyed ticks when every item already has an id', () => {
+    const { list, changed } = migrateShoppingListShape({
+      items: [{ id: 'a1', name: 'onion', displayName: 'Onion' }],
+      item_overrides: { onion: { hidden: true } },
+      item_order: { Pantry: ['onion'] },
+      checked_state: { onion: entry },
+    });
+    expect(changed).toBe(true);
+    expect((list.items[0] as { id: string }).id).toBe('a1');
+    expect(list.checked_state).toEqual({ a1: entry });
+    expect(list.item_overrides).toEqual({ a1: { hidden: true } });
+    expect(list.item_order).toEqual({ Pantry: ['a1'] });
+  });
+
+  it('keeps existing ids and only fills ids on rows that lack them', () => {
+    const { list, changed } = migrateShoppingListShape({
+      items: [
+        { id: 'keep-me', name: 'onion', displayName: 'Onion' },
+        { name: 'garlic', displayName: 'Garlic', totalAmount: '2', unit: '', recipes: [], category: 'Fruit & Veg' },
+      ],
+      item_overrides: {},
+      item_order: {},
+      checked_state: { onion: entry, garlic: entry },
+    });
+    expect(changed).toBe(true);
+    expect((list.items[0] as { id: string }).id).toBe('keep-me');
+    expect((list.items[1] as { id: string }).id).toBe(stableShoppingItemId('garlic', 1));
+    expect(list.checked_state).toEqual({
+      'keep-me': entry,
+      [stableShoppingItemId('garlic', 1)]: entry,
+    });
+  });
+
+  it('is stable across remigration when write-back did not land', () => {
+    const first = migrateShoppingListShape({
+      items: [{ name: 'onion', displayName: 'Onion' }],
+      item_overrides: {},
+      item_order: {},
+      checked_state: { onion: entry },
+    });
+    const second = migrateShoppingListShape({
+      items: first.list.items,
+      item_overrides: first.list.item_overrides,
+      item_order: first.list.item_order,
+      checked_state: first.list.checked_state,
+    });
+    expect(first.list.items[0]).toEqual(second.list.items[0]);
+    expect(second.changed).toBe(false);
+    expect(first.list.checked_state).toEqual({ [stableShoppingItemId('onion', 0)]: entry });
   });
 });

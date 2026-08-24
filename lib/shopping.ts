@@ -33,7 +33,7 @@ export interface ShoppingItem {
 
 // Short random id for shopping items (recipe-derived and custom alike).
 function genItemId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return 'i' + Math.random().toString(36).slice(2, 10);
 }
 
 export interface ShoppingCategory {

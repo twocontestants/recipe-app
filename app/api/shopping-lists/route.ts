@@ -76,7 +76,10 @@ export async function PATCH(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
     const body = await req.json();
     const ops: ShoppingOp[] = Array.isArray(body?.ops) ? body.ops : [];
-    if (ops.length) await applyShoppingListOps(id, ops, user.id);
+    if (ops.length) {
+      const { applied } = await applyShoppingListOps(id, ops, user.id);
+      if (!applied) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
