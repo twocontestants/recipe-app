@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { autoTag } from './autotag';
 import { parseDayOfWeek } from './plannerDays';
-import { coordsFromPlannedOn, inferPlannedOn, weekSpanForStoredKey } from './plannerDate';
+import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
 import type { ShoppingOp } from './shoppingOps';
 
 // Vercel Postgres gives us POSTGRES_URL as the pooled connection string.
@@ -317,8 +317,8 @@ export async function ensurePlannedOnColumns(): Promise<void> {
 function mapMealPlanRow(row: Record<string, unknown>): MealPlan {
   return {
     id: row.id as string,
-    planned_on: String(row.planned_on).slice(0, 10),
-    week_start: row.week_start as string,
+    planned_on: toDayIso(row.planned_on as string | Date),
+    week_start: toDayIso(row.week_start as string | Date),
     recipe_id: row.recipe_id as string,
     day_of_week: row.day_of_week as number,
     meal_type: row.meal_type as string,

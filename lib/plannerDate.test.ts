@@ -4,6 +4,7 @@ import {
   inferPlannedOn,
   mealOnDate,
   plannedOnOf,
+  toDayIso,
   weekSpanForStoredKey,
 } from './plannerDate';
 
@@ -34,12 +35,24 @@ describe('weekSpanForStoredKey', () => {
   });
 });
 
+describe('toDayIso', () => {
+  it('keeps a YYYY-MM-DD calendar day', () => {
+    expect(toDayIso('2026-08-24')).toBe('2026-08-24');
+    expect(toDayIso('2026-08-24T00:00:00.000Z')).toBe('2026-08-24');
+  });
+
+  it('uses UTC from a Postgres DATE (JS Date at midnight UTC)', () => {
+    expect(toDayIso(new Date(Date.UTC(2026, 7, 24)))).toBe('2026-08-24');
+  });
+});
+
 describe('mealOnDate / plannedOnOf', () => {
   it('prefers planned_on and infers from a Sunday-keyed pair', () => {
     expect(plannedOnOf({ planned_on: '2026-08-19' })).toBe('2026-08-19');
     expect(plannedOnOf({ week_start: '2026-08-16', day_of_week: 2 })).toBe('2026-08-19');
     expect(mealOnDate({ planned_on: '2026-08-19' }, '2026-08-19')).toBe(true);
     expect(mealOnDate({ week_start: '2026-08-16', day_of_week: 2 }, '2026-08-19')).toBe(true);
-    expect(mealOnDate({ planned_on: '2026-08-19' }, '2026-08-18')).toBe(false);
+    expect(plannedOnOf({ planned_on: '2026-08-24T00:00:00.000Z' })).toBe('2026-08-24');
+    expect(mealOnDate({ planned_on: '2026-08-24T00:00:00.000Z' }, '2026-08-24')).toBe(true);
   });
 });

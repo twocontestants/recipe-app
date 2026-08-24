@@ -7,9 +7,31 @@ import {
   parseLocalIso,
 } from './plannerDays';
 
+const DAY_ISO = /^(\d{4}-\d{2}-\d{2})/;
+
+/**
+ * Calendar day from a Postgres DATE (JS Date at UTC midnight), an ISO
+ * timestamp, or a YYYY-MM-DD string. Do not use String(date).slice(0, 10) —
+ * that yields "Mon Aug 24" on the server and the planner cannot match days.
+ */
+export function toDayIso(value: string | Date | null | undefined): string {
+  if (value == null || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    return value.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim();
+  const iso = DAY_ISO.exec(s);
+  if (iso) return iso[1];
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) return new Date(parsed).toISOString().slice(0, 10);
+  return '';
+}
+
 export function dateIso(value: string | Date): string {
   if (value instanceof Date) return localDateIso(value);
-  return String(value).slice(0, 10);
+  const iso = toDayIso(value);
+  return iso || String(value).slice(0, 10);
 }
 
 /** Kitchen date from a stored week key + Monday-canonical weekday. */
