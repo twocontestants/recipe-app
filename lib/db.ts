@@ -1,6 +1,6 @@
 import { Pool, types } from 'pg';
 import { autoTag } from './autotag';
-import { hashPassword, bootstrapOwnerLogin, bootstrapOwnerPassword, SESSION_MAX_AGE_SEC } from './auth';
+import { SESSION_MAX_AGE_SEC } from './auth';
 import { primaryKeyMatches } from './primaryKey';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
@@ -268,26 +268,13 @@ async function firstUser(): Promise<AuthUser | null> {
   return mapAuthUser(result.rows[0]);
 }
 
-/** First kitchen owner when the users table is empty. Not a special account afterwards. */
-async function createBootstrapOwner(): Promise<AuthUser> {
-  const login = bootstrapOwnerLogin();
-  const passwordHash = await hashPassword(bootstrapOwnerPassword());
-  const result = await pool().query(
-    `INSERT INTO users (login_name, display_name, password_hash, role)
-     VALUES ($1, $1, $2, 'moderator')
-     RETURNING id, login_name, display_name, role`,
-    [login, passwordHash],
-  );
-  return mapAuthUser(result.rows[0]);
-}
-
 export async function ensureAccountsSchema(): Promise<void> {
   if (_accountsReady) return;
 
   await ensureAuthTables();
-  const owner = (await firstUser()) ?? (await createBootstrapOwner());
+  const owner = await firstUser();
 
-  await addOwnerId('recipes', owner.id);
+  await addOwnerId('recipes', owner?.id ?? null);
   await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'`);
   await pool().query(`
     CREATE TABLE IF NOT EXISTS schema_flags (
@@ -297,18 +284,18 @@ export async function ensureAccountsSchema(): Promise<void> {
   `);
   // Historical one-time flag name; do not rename or the public-library backfill would run again.
   const flagged = await pool().query(`SELECT value FROM schema_flags WHERE key = 'jessica_recipes_public_backfill'`);
-  if (!flagged.rows.length) {
+  if (owner && !flagged.rows.length) {
     await pool().query(`UPDATE recipes SET visibility = 'public' WHERE owner_id = $1`, [owner.id]);
     await pool().query(
       `INSERT INTO schema_flags (key, value) VALUES ('jessica_recipes_public_backfill', 'done')`,
     );
   }
 
-  await addOwnerId('meal_plans', owner.id);
-  await addOwnerId('planner_notes', owner.id);
-  await addOwnerId('shopping_lists', owner.id);
-  await addOwnerId('app_settings', owner.id);
-  await addOwnerId('ingredient_categories', owner.id);
+  await addOwnerId('meal_plans', owner?.id ?? null);
+  await addOwnerId('planner_notes', owner?.id ?? null);
+  await addOwnerId('shopping_lists', owner?.id ?? null);
+  await addOwnerId('app_settings', owner?.id ?? null);
+  await addOwnerId('ingredient_categories', owner?.id ?? null);
 
   await migrateCompositePk('app_settings', ['owner_id', 'key']);
   await migrateCompositePk('ingredient_categories', ['owner_id', 'name']);
@@ -341,8 +328,9 @@ export async function ensureAccountsSchema(): Promise<void> {
   _accountsReady = true;
 }
 
-async function addOwnerId(table: string, ownerId: string): Promise<void> {
+async function addOwnerId(table: string, ownerId: string | null): Promise<void> {
   await pool().query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id)`);
+  if (!ownerId) return;
   await pool().query(`UPDATE ${table} SET owner_id = $1 WHERE owner_id IS NULL`, [ownerId]);
   await pool().query(`ALTER TABLE ${table} ALTER COLUMN owner_id SET NOT NULL`);
 }
