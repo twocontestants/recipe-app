@@ -738,6 +738,8 @@ export async function ensurePlannedOnColumns(): Promise<void> {
   `);
   await pool().query(`ALTER TABLE meal_plans ALTER COLUMN planned_on SET NOT NULL`);
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_meal_plans_planned_on ON meal_plans(planned_on)`);
+  await pool().query(`ALTER TABLE meal_plans ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_meal_plans_owner_planned_on ON meal_plans(owner_id, planned_on)`);
 
   await pool().query(`ALTER TABLE planner_notes ADD COLUMN IF NOT EXISTS note_on DATE`);
   await pool().query(
@@ -753,7 +755,33 @@ export async function ensurePlannedOnColumns(): Promise<void> {
   _plannedOnReady = true;
 }
 
-function mapMealPlanRow(row: Record<string, unknown>, viewerId: string): MealPlan {
+function mapMealPlanRow(
+  row: Record<string, unknown>,
+  viewerId: string,
+  opts: { includeMethod?: boolean } = {},
+): MealPlan {
+  const includeMethod = opts.includeMethod === true;
+  const recipe: Recipe = {
+    id: row.recipe_id as string,
+    title: row.recipe_title as string,
+    description: row.recipe_description as string,
+    image_url: row.recipe_image_url as string,
+    servings: row.recipe_servings as number,
+    prep_time: row.recipe_prep_time as number,
+    cook_time: row.recipe_cook_time as number,
+    tags: (row.recipe_tags as string[]) ?? [],
+    primary_protein: row.recipe_primary_protein as string,
+    source_url: row.recipe_source_url as string,
+    created_at: row.recipe_created_at as string,
+    updated_at: row.recipe_updated_at as string,
+    owner_id: row.recipe_owner_id as string,
+    visibility: parseVisibility(row.recipe_visibility),
+    can_edit: viewerId === (row.recipe_owner_id as string),
+  };
+  if (includeMethod) {
+    recipe.ingredients = (row.recipe_ingredients as Recipe['ingredients']) ?? [];
+    recipe.steps = (row.recipe_steps as string[]) ?? [];
+  }
   return {
     id: row.id as string,
     planned_on: toDayIso(row.planned_on as string | Date),
@@ -762,34 +790,14 @@ function mapMealPlanRow(row: Record<string, unknown>, viewerId: string): MealPla
     day_of_week: row.day_of_week as number,
     meal_type: row.meal_type as string,
     servings: row.servings as number,
-    recipe: {
-      id: row.recipe_id as string,
-      title: row.recipe_title as string,
-      description: row.recipe_description as string,
-      image_url: row.recipe_image_url as string,
-      ingredients: (row.recipe_ingredients as Recipe['ingredients']) ?? [],
-      steps: (row.recipe_steps as string[]) ?? [],
-      servings: row.recipe_servings as number,
-      prep_time: row.recipe_prep_time as number,
-      cook_time: row.recipe_cook_time as number,
-      tags: (row.recipe_tags as string[]) ?? [],
-      primary_protein: row.recipe_primary_protein as string,
-      source_url: row.recipe_source_url as string,
-      created_at: row.recipe_created_at as string,
-      updated_at: row.recipe_updated_at as string,
-      owner_id: row.recipe_owner_id as string,
-      visibility: parseVisibility(row.recipe_visibility),
-      can_edit: viewerId === (row.recipe_owner_id as string),
-    },
+    recipe,
   };
 }
 
-const MEAL_PLAN_SELECT = `SELECT mp.*,
+const MEAL_PLAN_RECIPE_CARD = `
             r.title       AS recipe_title,
             r.description AS recipe_description,
             r.image_url   AS recipe_image_url,
-            r.ingredients AS recipe_ingredients,
-            r.steps       AS recipe_steps,
             r.servings    AS recipe_servings,
             r.prep_time   AS recipe_prep_time,
             r.cook_time   AS recipe_cook_time,
@@ -799,43 +807,63 @@ const MEAL_PLAN_SELECT = `SELECT mp.*,
             r.created_at  AS recipe_created_at,
             r.updated_at  AS recipe_updated_at,
             r.owner_id    AS recipe_owner_id,
-            r.visibility  AS recipe_visibility
+            r.visibility  AS recipe_visibility`;
+
+function mealPlanSelectSql(includeMethod: boolean): string {
+  const methodCols = includeMethod
+    ? `,
+            r.ingredients AS recipe_ingredients,
+            r.steps       AS recipe_steps`
+    : '';
+  return `SELECT mp.*${MEAL_PLAN_RECIPE_CARD}${methodCols}
      FROM meal_plans mp
      JOIN recipes r ON mp.recipe_id = r.id`;
+}
 
-export async function getMealPlansForWeeks(weekStarts: string[], ownerId: string): Promise<MealPlan[]> {
-  await ensurePlannedOnColumns();
-  await ensureAccountsSchema();
+export async function getMealPlansForWeeks(
+  weekStarts: string[],
+  ownerId: string,
+  opts: { includeMethod?: boolean } = {},
+): Promise<MealPlan[]> {
   if (!weekStarts.length) return [];
+  const includeMethod = opts.includeMethod === true;
   const spans = weekStarts.map(weekSpanForStoredKey);
   const clauses = spans.map((_, i) => `(mp.planned_on >= $${i * 2 + 1}::date AND mp.planned_on <= $${i * 2 + 2}::date)`);
   const params = spans.flatMap(span => [span.from, span.to]);
   const result = await pool().query(
-    `${MEAL_PLAN_SELECT}
+    `${mealPlanSelectSql(includeMethod)}
      WHERE mp.owner_id = $${params.length + 2}
        AND (${clauses.join(' OR ')}
         OR mp.week_start = ANY($${params.length + 1}::date[]))
      ORDER BY mp.planned_on, mp.meal_type`,
     [...params, weekStarts, ownerId],
   );
-  return result.rows.map(row => mapMealPlanRow(row, ownerId));
+  return result.rows.map(row => mapMealPlanRow(row, ownerId, { includeMethod }));
 }
 
 /** Inclusive planned_on window. Name kept so existing callers keep working. */
-export async function getMealPlansInDateWindow(from: string, to: string, ownerId: string): Promise<MealPlan[]> {
-  await ensurePlannedOnColumns();
-  await ensureAccountsSchema();
+export async function getMealPlansInDateWindow(
+  from: string,
+  to: string,
+  ownerId: string,
+  opts: { includeMethod?: boolean } = {},
+): Promise<MealPlan[]> {
+  const includeMethod = opts.includeMethod === true;
   const result = await pool().query(
-    `${MEAL_PLAN_SELECT}
+    `${mealPlanSelectSql(includeMethod)}
      WHERE mp.owner_id = $3 AND mp.planned_on >= $1::date AND mp.planned_on <= $2::date
      ORDER BY mp.planned_on, mp.meal_type`,
     [from, to, ownerId],
   );
-  return result.rows.map(row => mapMealPlanRow(row, ownerId));
+  return result.rows.map(row => mapMealPlanRow(row, ownerId, { includeMethod }));
 }
 
-export async function getMealPlanForWeek(weekStart: string, ownerId: string): Promise<MealPlan[]> {
-  return getMealPlansForWeeks([weekStart], ownerId);
+export async function getMealPlanForWeek(
+  weekStart: string,
+  ownerId: string,
+  opts: { includeMethod?: boolean } = {},
+): Promise<MealPlan[]> {
+  return getMealPlansForWeeks([weekStart], ownerId, opts);
 }
 
 export async function addToMealPlan(data: {
@@ -859,7 +887,7 @@ export async function addToMealPlan(data: {
     [plannedOn, coords.weekStart, data.recipe_id, coords.dayOfWeek, data.meal_type, data.servings, data.owner_id]
   );
   const plans = await pool().query(
-    `${MEAL_PLAN_SELECT} WHERE mp.id = $1`,
+    `${mealPlanSelectSql(false)} WHERE mp.id = $1`,
     [result.rows[0].id],
   );
   return mapMealPlanRow(plans.rows[0], data.owner_id);
@@ -902,8 +930,6 @@ function normalizeRecipe(
 }
 
 export async function getPlannerNotes(weekStart: string, ownerId: string): Promise<Record<number, string>> {
-  await ensurePlannedOnColumns();
-  await ensureAccountsSchema();
   const span = weekSpanForStoredKey(weekStart);
   const result = await pool().query(
     `SELECT day_of_week, note FROM planner_notes
@@ -912,6 +938,30 @@ export async function getPlannerNotes(weekStart: string, ownerId: string): Promi
   );
   const map: Record<number, string> = {};
   for (const row of result.rows) map[row.day_of_week] = row.note;
+  return map;
+}
+
+export async function getPlannerNotesInRange(
+  from: string,
+  to: string,
+  ownerId: string,
+): Promise<Record<string, string>> {
+  const result = await pool().query(
+    `SELECT note_on, week_start, day_of_week, note FROM planner_notes
+     WHERE owner_id = $3
+       AND (
+         (note_on >= $1::date AND note_on <= $2::date)
+         OR (week_start >= $1::date AND week_start <= $2::date)
+       )`,
+    [from, to, ownerId],
+  );
+  const map: Record<string, string> = {};
+  for (const row of result.rows) {
+    const on = row.note_on
+      ? toDayIso(row.note_on as string | Date)
+      : inferPlannedOn(toDayIso(row.week_start as string | Date), row.day_of_week);
+    if (on >= from && on <= to) map[on] = row.note as string;
+  }
   return map;
 }
 

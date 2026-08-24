@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     let allPlans: Awaited<ReturnType<typeof getMealPlanForWeek>> = [];
     for (const weekStart of (week_starts ?? [])) {
-      const plans = await getMealPlanForWeek(weekStart, user.id);
+      const plans = await getMealPlanForWeek(weekStart, user.id, { includeMethod: true });
       allPlans = allPlans.concat(plans);
     }
     const filtered = allPlans.filter(p => recipe_ids.includes(p.recipe_id));
