@@ -141,13 +141,6 @@ export default function SettingsClient() {
 
       {user && isModerator(user.role) && <ModeratorPanel />}
 
-      <h2 className="section-title">Ingredient categories</h2>
-
-      <p className="settings-intro">
-        Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
-        Change any category here and it sticks — new shopping lists will use your choice instead of the automatic guess.
-      </p>
-
       <div className="settings-pref">
         <div className="settings-pref-label">
           <span className="settings-pref-title">Week starts on</span>
@@ -171,6 +164,13 @@ export default function SettingsClient() {
           <option value="never">Never save</option>
         </select>
       </div>
+
+      <h2 className="section-title">Ingredient categories</h2>
+
+      <p className="settings-intro">
+        Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
+        Change any category here and it sticks — new shopping lists will use your choice instead of the automatic guess.
+      </p>
 
       {loading ? (
         <div className="empty-state"><div className="loading-dots"><span/><span/><span/></div></div>

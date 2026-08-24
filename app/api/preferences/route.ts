@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAppSetting, setAppSetting } from '@/lib/db';
+import { getAppSettings, setAppSetting } from '@/lib/db';
 import { indexToDayKey, parseDayOfWeek, parseWeekStartDay } from '@/lib/plannerDays';
+import { PREFERENCE_KEYS } from '@/lib/settingsLoad';
 import { isAuthUser, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -13,13 +14,11 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireUser(req);
     if (!isAuthUser(user)) return user;
-    const [mode, weekRaw] = await Promise.all([
-      getAppSetting(user.id, CATEGORY_PREF_KEY),
-      getAppSetting(user.id, WEEK_START_KEY),
-    ]);
+    const settings = await getAppSettings(user.id, PREFERENCE_KEYS);
+    const mode = settings[CATEGORY_PREF_KEY];
     return NextResponse.json({
       categoryPrefMode: mode && VALID_PREF.includes(mode) ? mode : 'ask',
-      weekStartDay: parseWeekStartDay(weekRaw),
+      weekStartDay: parseWeekStartDay(settings[WEEK_START_KEY]),
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

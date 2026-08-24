@@ -12,6 +12,7 @@ import {
   toShoppingListMeta,
   type ShoppingListMeta,
 } from './shoppingList';
+import { ownedIngredientsSelectSql, preferenceSettingsSelectSql } from './settingsLoad';
 import { parseVisibility, type Visibility } from './visibility';
 
 // Postgres DATE arrives as YYYY-MM-DD text. Keep it as that string — node-pg
@@ -163,14 +164,17 @@ async function ensureAppSettingsTable(): Promise<void> {
   _appSettingsReady = true;
 }
 
+export async function getAppSettings(ownerId: string, keys: readonly string[]): Promise<Record<string, string>> {
+  if (!keys.length) return {};
+  const result = await pool().query(preferenceSettingsSelectSql(), [ownerId, keys]);
+  const map: Record<string, string> = {};
+  for (const row of result.rows) map[row.key as string] = row.value as string;
+  return map;
+}
+
 export async function getAppSetting(ownerId: string, key: string): Promise<string | null> {
-  if (!_appSettingsReady) await ensureAppSettingsTable();
-  await ensureAccountsSchema();
-  const result = await pool().query(
-    'SELECT value FROM app_settings WHERE owner_id = $1 AND key = $2',
-    [ownerId, key],
-  );
-  return result.rows.length ? (result.rows[0].value as string) : null;
+  const map = await getAppSettings(ownerId, [key]);
+  return map[key] ?? null;
 }
 
 export async function setAppSetting(ownerId: string, key: string, value: string): Promise<void> {
@@ -197,8 +201,6 @@ async function ensureIngredientCategoriesTable(): Promise<void> {
 
 // Returns the dictionary as a plain { normalisedName: category } map.
 export async function getCategoryDictionary(ownerId: string): Promise<Record<string, string>> {
-  if (!_ingredientCategoriesReady) await ensureIngredientCategoriesTable();
-  await ensureAccountsSchema();
   const result = await pool().query(
     'SELECT name, category FROM ingredient_categories WHERE owner_id = $1',
     [ownerId],
@@ -206,6 +208,18 @@ export async function getCategoryDictionary(ownerId: string): Promise<Record<str
   const map: Record<string, string> = {};
   for (const row of result.rows) map[row.name] = row.category;
   return map;
+}
+
+/** Ingredient JSON for Settings. No steps, ratings, notes, or schema ensure. */
+export async function listOwnedIngredientLines(ownerId: string): Promise<Array<{ id: string; ingredients: Ingredient[] }>> {
+  const result = await pool().query(
+    `${ownedIngredientsSelectSql()} WHERE r.owner_id = $1`,
+    [ownerId],
+  );
+  return result.rows.map(row => ({
+    id: row.id as string,
+    ingredients: Array.isArray(row.ingredients) ? (row.ingredients as Ingredient[]) : [],
+  }));
 }
 
 export async function setCategoryDictionaryEntry(ownerId: string, name: string, category: string): Promise<void> {
