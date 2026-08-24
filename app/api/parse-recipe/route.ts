@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseRecipeText } from '@/lib/recipeTextParser';
 import { autoTag } from '@/lib/autotag';
+import { isAuthUser, requireUser } from '@/lib/session';
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
     const { text } = await req.json();
 
     if (!text?.trim()) {

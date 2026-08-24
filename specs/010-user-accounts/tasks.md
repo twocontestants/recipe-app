@@ -12,8 +12,8 @@
 
 **Purpose**: Env placeholders and module files the rest of the feature will fill
 
-- [ ] T001 Add `BOOTSTRAP_OWNER_PASSWORD` placeholder (empty, no real secret) to `.env.local.example`
-- [ ] T002 [P] Create empty helper modules `lib/auth.ts`, `lib/roles.ts`, `lib/visibility.ts`
+- [x] T001 Add `BOOTSTRAP_OWNER_PASSWORD` placeholder (empty, no real secret) to `.env.local.example`
+- [x] T002 [P] Create empty helper modules `lib/auth.ts`, `lib/roles.ts`, `lib/visibility.ts`
 
 ---
 
@@ -23,15 +23,15 @@
 
 **⚠️ CRITICAL**: No user story work until this phase is complete
 
-- [ ] T003 [P] Write failing tests for scrypt hash/verify and session id format in `lib/auth.test.ts`
-- [ ] T004 [P] Write failing tests for Cook/Publisher/Moderator rules in `lib/roles.test.ts`
-- [ ] T005 Implement password hash, session id, and cookie helpers in `lib/auth.ts`
-- [ ] T006 Implement role helpers in `lib/roles.ts`
-- [ ] T007 Extend `setupDatabase` in `lib/db.ts` to create `users` and `sessions` tables
-- [ ] T008 Seed Jessica from `BOOTSTRAP_OWNER_PASSWORD` (fail closed if missing) in `lib/db.ts`
-- [ ] T009 Add `getUserByLogin`, `createUser`, `createSession`, `getSessionUser`, `deleteSession` in `lib/db.ts`
-- [ ] T010 Add `requireUser` / `optionalUser` request helpers in `lib/session.ts`
-- [ ] T011 Implement `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` under `app/api/auth/`
+- [x] T003 [P] Write failing tests for scrypt hash/verify and session id format in `lib/auth.test.ts`
+- [x] T004 [P] Write failing tests for Cook/Publisher/Moderator rules in `lib/roles.test.ts`
+- [x] T005 Implement password hash, session id, and cookie helpers in `lib/auth.ts`
+- [x] T006 Implement role helpers in `lib/roles.ts`
+- [x] T007 Extend `setupDatabase` in `lib/db.ts` to create `users` and `sessions` tables
+- [x] T008 Seed Jessica from `BOOTSTRAP_OWNER_PASSWORD` (fail closed if missing) in `lib/db.ts`
+- [x] T009 Add `getUserByLogin`, `createUser`, `createSession`, `getSessionUser`, `deleteSession` in `lib/db.ts`
+- [x] T010 Add `requireUser` / `optionalUser` request helpers in `lib/session.ts`
+- [x] T011 Implement `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` under `app/api/auth/`
 
 **Checkpoint**: Register, login, logout, me work; sessions survive process restart
 
@@ -43,12 +43,12 @@
 
 **Independent Test**: Two accounts; A’s private kitchen never appears for B; guest has no Planner/Shopping/Settings.
 
-- [ ] T012 [P] [US1] Write failing tests for owner scoping helpers in `lib/visibility.test.ts`
-- [ ] T013 [US1] Add `owner_id` to recipes, meal_plans, planner_notes, shopping_lists, app_settings, ingredient_categories in `lib/db.ts` and backfill Jessica
-- [ ] T014 [US1] Scope all kitchen queries in `lib/db.ts` by `owner_id`
-- [ ] T015 [US1] Require session on planner, shopping, settings, preferences, categories, scrape, parse, retag routes under `app/api/`
-- [ ] T016 [US1] Add login/register UI in `app/login/page.tsx` and hide Planner/Shopping/Settings in `components/Sidebar.tsx` until signed in
-- [ ] T017 [US1] Join Socket.IO planner rooms per user in `server.js`
+- [x] T012 [P] [US1] Write failing tests for owner scoping helpers in `lib/visibility.test.ts`
+- [x] T013 [US1] Add `owner_id` to recipes, meal_plans, planner_notes, shopping_lists, app_settings, ingredient_categories in `lib/db.ts` and backfill Jessica
+- [x] T014 [US1] Scope all kitchen queries in `lib/db.ts` by `owner_id`
+- [x] T015 [US1] Require session on planner, shopping, settings, preferences, categories, scrape, parse, retag routes under `app/api/`
+- [x] T016 [US1] Add login/register UI in `app/login/page.tsx` and hide Planner/Shopping/Settings in `components/Sidebar.tsx` until signed in
+- [x] T017 [US1] Join Socket.IO planner rooms per user in `server.js`
 
 **Checkpoint**: Signed-in cook sees only their kitchen; guests cannot open personal APIs
 
@@ -60,11 +60,11 @@
 
 **Independent Test**: Cook cannot publish; Publisher can; guest sees only public; non-owner cannot PUT.
 
-- [ ] T018 [P] [US2] Write failing tests for publish/edit rules in `lib/visibility.test.ts`
-- [ ] T019 [US2] Add `visibility` on recipes and `canEditRecipe` / `canPublish` in `lib/visibility.ts`
-- [ ] T020 [US2] Enforce GET/PUT/DELETE visibility in `app/api/recipes/route.ts` and `app/api/recipes/[id]/route.ts`
-- [ ] T021 [US2] Add publish/unpublish endpoints in `app/api/recipes/[id]/publish/route.ts` and `unpublish/route.ts`
-- [ ] T022 [US2] Show owner name and hide edit for non-owners in `app/recipes/RecipesClient.tsx`
+- [x] T018 [P] [US2] Write failing tests for publish/edit rules in `lib/visibility.test.ts`
+- [x] T019 [US2] Add `visibility` on recipes and `canEditRecipe` / `canPublish` in `lib/visibility.ts`
+- [x] T020 [US2] Enforce GET/PUT/DELETE visibility in `app/api/recipes/route.ts` and `app/api/recipes/[id]/route.ts`
+- [x] T021 [US2] Add publish/unpublish endpoints in `app/api/recipes/[id]/publish/route.ts` and `unpublish/route.ts`
+- [x] T022 [US2] Show owner name and hide edit for non-owners in `app/recipes/RecipesClient.tsx`
 
 **Checkpoint**: Private recipes leak to nobody; publish is a privilege
 
@@ -76,9 +76,9 @@
 
 **Independent Test**: Toggle off = own only; on = own + public; guest = public.
 
-- [ ] T023 [P] [US3] Write failing tests for list filter (`owned`, `includePublic`, guest) in `lib/visibility.test.ts`
-- [ ] T024 [US3] Implement list filters on `GET /api/recipes` in `app/api/recipes/route.ts`
-- [ ] T025 [US3] Add “Include public library” toggle (default off) in `app/recipes/RecipesClient.tsx`
+- [x] T023 [P] [US3] Write failing tests for list filter (`owned`, `includePublic`, guest) in `lib/visibility.test.ts`
+- [x] T024 [US3] Implement list filters on `GET /api/recipes` in `app/api/recipes/route.ts`
+- [x] T025 [US3] Add “Include public library” toggle (default off) in `app/recipes/RecipesClient.tsx`
 
 **Checkpoint**: Library toggle matches spec SC-007
 
@@ -90,11 +90,11 @@
 
 **Independent Test**: Add public recipe to a day; cannot edit; duplicate is a private owned copy.
 
-- [ ] T026 [P] [US4] Write failing tests for duplicate field copy (no owner/visibility leak) in `lib/visibility.test.ts`
-- [ ] T027 [US4] Implement `duplicateRecipe` in `lib/db.ts` and `POST /api/recipes/[id]/duplicate/route.ts`
-- [ ] T028 [US4] Allow planner POST to reference any viewable recipe in `app/api/planner/route.ts`
-- [ ] T029 [US4] Planner picker includes public recipes with owned-only filter in `components/AddToPlannerModal.tsx`
-- [ ] T030 [US4] Block edit of non-owned recipes and offer Duplicate in `app/recipes/RecipesClient.tsx` and planner menus
+- [x] T026 [P] [US4] Write failing tests for duplicate field copy (no owner/visibility leak) in `lib/visibility.test.ts`
+- [x] T027 [US4] Implement `duplicateRecipe` in `lib/db.ts` and `POST /api/recipes/[id]/duplicate/route.ts`
+- [x] T028 [US4] Allow planner POST to reference any viewable recipe in `app/api/planner/route.ts`
+- [x] T029 [US4] Planner picker includes public recipes with owned-only filter in `components/AddToPlannerModal.tsx`
+- [x] T030 [US4] Block edit of non-owned recipes and offer Duplicate in `app/recipes/RecipesClient.tsx` and planner menus
 
 **Checkpoint**: Live reference + explicit duplicate
 
@@ -106,9 +106,9 @@
 
 **Independent Test**: A’s rating/note absent for B on the same public recipe.
 
-- [ ] T031 [P] [US5] Add `recipe_ratings` and `recipe_notes` tables plus getters/setters in `lib/db.ts`
-- [ ] T032 [US5] Implement `PUT /api/recipes/[id]/rating/route.ts` and `PUT /api/recipes/[id]/notes/route.ts`
-- [ ] T033 [US5] Rating stars and notes UI on the recipe view in `app/recipes/RecipesClient.tsx`
+- [x] T031 [P] [US5] Add `recipe_ratings` and `recipe_notes` tables plus getters/setters in `lib/db.ts`
+- [x] T032 [US5] Implement `PUT /api/recipes/[id]/rating/route.ts` and `PUT /api/recipes/[id]/notes/route.ts`
+- [x] T033 [US5] Rating stars and notes UI on the recipe view in `app/recipes/RecipesClient.tsx`
 
 **Checkpoint**: Ratings/notes persist per account
 
@@ -120,8 +120,8 @@
 
 **Independent Test**: Signed-out browser can read a public recipe; add-to-planner goes to login.
 
-- [ ] T034 [US6] Guest-safe recipe browse and sign-in prompts on kitchen actions in `app/recipes/RecipesClient.tsx` and `app/login/page.tsx`
-- [ ] T035 [US6] Redirect unsigned visits to `/planner`, `/shopping-list`, `/settings` toward login in those `page.tsx` files
+- [x] T034 [US6] Guest-safe recipe browse and sign-in prompts on kitchen actions in `app/recipes/RecipesClient.tsx` and `app/login/page.tsx`
+- [x] T035 [US6] Redirect unsigned visits to `/planner`, `/shopping-list`, `/settings` toward login in those `page.tsx` files
 
 **Checkpoint**: SC-005 — kitchen actions while signed out prompt sign-in
 
@@ -133,9 +133,9 @@
 
 **Independent Test**: New account cannot publish until Jessica grants Publisher; moderator unpublish works; last moderator cannot be demoted.
 
-- [ ] T036 [P] [US7] Write failing tests for last-moderator protection in `lib/roles.test.ts`
-- [ ] T037 [US7] Implement `PATCH /api/auth/users/[id]/role/route.ts` and list users for moderators
-- [ ] T038 [US7] Moderator role + unpublish UI in `app/settings/SettingsClient.tsx`
+- [x] T036 [P] [US7] Write failing tests for last-moderator protection in `lib/roles.test.ts`
+- [x] T037 [US7] Implement `PATCH /api/auth/users/[id]/role/route.ts` and list users for moderators
+- [x] T038 [US7] Moderator role + unpublish UI in `app/settings/SettingsClient.tsx`
 
 **Checkpoint**: Role model matches FR-020–FR-022
 
@@ -143,9 +143,9 @@
 
 ## Phase 10: Polish
 
-- [ ] T039 [P] Update README.md setup with Jessica bootstrap env (no real password)
-- [ ] T040 Run `npm test` and gitleaks; confirm no password or session secret in source
-- [ ] T041 Walk guest / Jessica / second-account flows against `specs/010-user-accounts/quickstart.md`
+- [x] T039 [P] Update README.md setup with Jessica bootstrap env (no real password)
+- [x] T040 Run `npm test` and gitleaks; confirm no password or session secret in source
+- [x] T041 Walk guest / Jessica / second-account flows against `specs/010-user-accounts/quickstart.md`
 
 ---
 

@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
 import { usePlannerLive } from '@/components/usePlannerLive';
+import { useAuth } from '@/components/AuthProvider';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
 import { fetchMealsForMonths, fetchMealsForWeeks } from '@/lib/loadPlannerMonth';
 import {
@@ -83,7 +84,10 @@ const EMPTY_RECIPE = {
 };
 
 export default function RecipesPage() {
+  const { user } = useAuth();
+  const router = useRouter();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [includePublic, setIncludePublic] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -147,11 +151,12 @@ export default function RecipesPage() {
     } catch { /* keep current sheet copy */ }
   };
 
-  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadPlannerCopy(); });
+  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadPlannerCopy(); }, user?.id);
 
   const fetchRecipes = useCallback(async () => {
     try {
-      const res = await fetch('/api/recipes');
+      const qs = user && includePublic ? '?includePublic=1' : '';
+      const res = await fetch(`/api/recipes${qs}`);
       if (!res.ok) throw new Error('Failed to load');
       setRecipes(await res.json());
     } catch {
@@ -159,7 +164,7 @@ export default function RecipesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user, includePublic]);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 
@@ -178,6 +183,7 @@ export default function RecipesPage() {
   }, []);
 
   const openAddModal = () => {
+    if (!user) { router.push('/login?next=/recipes'); return; }
     setEditingRecipe(null);
     setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] });
     setScrapeUrl('');
@@ -370,6 +376,67 @@ export default function RecipesPage() {
     }
   };
 
+  const handleDuplicate = async (recipe: Recipe) => {
+    if (!user) { router.push('/login?next=/recipes'); return; }
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/duplicate`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const copy = await res.json();
+      await fetchRecipes();
+      setViewRecipe(copy);
+      showToast('Copied to your kitchen — you can edit this one', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not duplicate', 'error');
+    }
+  };
+
+  const handlePublish = async (recipe: Recipe, makePublic: boolean) => {
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/${makePublic ? 'publish' : 'unpublish'}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const updated = await res.json();
+      await fetchRecipes();
+      setViewRecipe(updated);
+      showToast(makePublic ? 'Recipe is public' : 'Recipe is private', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not change visibility', 'error');
+    }
+  };
+
+  const handleRating = async (recipe: Recipe, stars: number | null) => {
+    if (!user) { router.push('/login?next=/recipes'); return; }
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/rating`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stars }),
+      });
+      if (!res.ok) throw new Error();
+      const next = { ...recipe, my_rating: stars };
+      setViewRecipe(next);
+      setRecipes(rs => rs.map(r => r.id === recipe.id ? next : r));
+    } catch {
+      showToast('Could not save rating', 'error');
+    }
+  };
+
+  const handleNote = async (recipe: Recipe, note: string) => {
+    if (!user) { router.push('/login?next=/recipes'); return; }
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/notes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      });
+      if (!res.ok) throw new Error();
+      const next = { ...recipe, my_note: note };
+      setViewRecipe(next);
+      setRecipes(rs => rs.map(r => r.id === recipe.id ? next : r));
+    } catch {
+      showToast('Could not save note', 'error');
+    }
+  };
+
   const updateIngredient = (i: number, field: keyof Ingredient, val: string) => {
     setForm(prev => {
       const ingredients = [...prev.ingredients];
@@ -403,6 +470,7 @@ export default function RecipesPage() {
   );
 
   const openPlannerModal = (recipe: Recipe) => {
+    if (!user) { router.push('/login?next=/recipes'); return; }
     setPlannerWeek(getThisDisplayWeek(weekStartsOn));
     setPlannerDay(displayDayIndex(new Date(), weekStartsOn));
     setPlannerModal({ recipe });
@@ -425,7 +493,18 @@ export default function RecipesPage() {
 
   if (viewRecipe) {
     return <>
-      <RecipeDetail recipe={viewRecipe} onEdit={() => openEditModal(viewRecipe)} onDelete={() => handleDelete(viewRecipe.id)} onBack={() => setViewRecipe(null)} onAddToPlanner={() => openPlannerModal(viewRecipe)} />
+      <RecipeDetail
+        recipe={viewRecipe}
+        signedIn={!!user}
+        onEdit={viewRecipe.can_edit ? () => openEditModal(viewRecipe) : undefined}
+        onDelete={viewRecipe.can_edit ? () => handleDelete(viewRecipe.id) : undefined}
+        onDuplicate={() => handleDuplicate(viewRecipe)}
+        onPublish={viewRecipe.can_publish ? (pub) => handlePublish(viewRecipe, pub) : undefined}
+        onRate={(stars) => handleRating(viewRecipe, stars)}
+        onNote={(note) => handleNote(viewRecipe, note)}
+        onBack={() => setViewRecipe(null)}
+        onAddToPlanner={() => openPlannerModal(viewRecipe)}
+      />
       {plannerModalJsx}
     </>;
   }
@@ -434,10 +513,16 @@ export default function RecipesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">My <em>Recipes</em></h1>
-          <p className="page-subtitle">{recipes.length} saved recipes</p>
+          <h1 className="page-title">{user ? 'My' : 'Public'} <em>Recipes</em></h1>
+          <p className="page-subtitle">{recipes.length} recipes</p>
         </div>
         <div className="page-header-actions">
+          {user && (
+            <label className="public-library-toggle">
+              <input type="checkbox" checked={includePublic} onChange={e => setIncludePublic(e.target.checked)} />
+              Include public library
+            </label>
+          )}
           <input
             type="search"
             className="page-header-search"
@@ -445,6 +530,8 @@ export default function RecipesPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+          {user && (
+            <>
           <button className="btn btn-secondary" onClick={() => { setEditingRecipe(null); setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] }); setShowPasteModal(true); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -457,6 +544,8 @@ export default function RecipesPage() {
             </svg>
             Add Recipe
           </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -491,6 +580,9 @@ export default function RecipesPage() {
               </div>
               <div className="recipe-card-body">
                 <h3 className="recipe-card-title">{recipe.title}</h3>
+                {recipe.owner_display_name && recipe.owner_id !== user?.id && (
+                  <p className="recipe-card-owner">from {recipe.owner_display_name}</p>
+                )}
                 <div className="recipe-card-meta">
                   {recipe.prep_time && <span>⏱ {recipe.prep_time}m prep</span>}
                   {recipe.cook_time && <span>🔥 {recipe.cook_time}m cook</span>}
@@ -508,8 +600,14 @@ export default function RecipesPage() {
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
                   Plan
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => openEditModal(recipe)}>Edit</button>
-                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
+                {recipe.can_edit ? (
+                  <>
+                    <button className="btn btn-ghost btn-sm" onClick={() => openEditModal(recipe)}>Edit</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
+                  </>
+                ) : (
+                  <button className="btn btn-ghost btn-sm" onClick={() => handleDuplicate(recipe)}>Duplicate</button>
+                )}
               </div>
             </div>
           ))}
@@ -725,13 +823,20 @@ export default function RecipesPage() {
   );
 }
 
-function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
+function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onRate, onNote, onBack, onAddToPlanner }: {
   recipe: Recipe;
-  onEdit: () => void;
-  onDelete: () => void;
+  signedIn: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onDuplicate: () => void;
+  onPublish?: (makePublic: boolean) => void;
+  onRate: (stars: number | null) => void;
+  onNote: (note: string) => void;
   onBack: () => void;
   onAddToPlanner: () => void;
 }) {
+  const [noteDraft, setNoteDraft] = useState(recipe.my_note ?? '');
+  useEffect(() => { setNoteDraft(recipe.my_note ?? ''); }, [recipe.id, recipe.my_note]);
   return (
     <>
       <div className="page-header">
@@ -761,8 +866,15 @@ function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px' }}><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
             Add to Planner
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>
-          <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>
+          {onEdit && <button className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>}
+          {onDelete && <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>}
+          {!onEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>Duplicate to edit</button>}
+          {onPublish && recipe.visibility !== 'public' && (
+            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(true)}>Make public</button>
+          )}
+          {onPublish && recipe.visibility === 'public' && (
+            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(false)}>Make private</button>
+          )}
         </div>
       </div>
 
@@ -780,6 +892,37 @@ function RecipeDetail({ recipe, onEdit, onDelete, onBack, onAddToPlanner }: {
 
       {recipe.primary_protein && (
         <div style={{ marginBottom: '1rem' }}><ProteinBadge protein={recipe.primary_protein} /></div>
+      )}
+      {recipe.owner_display_name && (
+        <p className="recipe-owner-line">
+          {recipe.visibility === 'public' ? 'Public recipe' : 'Private'} · {recipe.owner_display_name}
+        </p>
+      )}
+      {signedIn && (
+        <div className="recipe-personal">
+          <div className="recipe-stars" role="group" aria-label="Your rating">
+            {[1, 2, 3, 4, 5].map(n => (
+              <button
+                key={n}
+                type="button"
+                className={`star-btn ${(recipe.my_rating ?? 0) >= n ? 'is-on' : ''}`}
+                onClick={() => onRate(recipe.my_rating === n ? null : n)}
+                aria-label={`${n} star${n === 1 ? '' : 's'}`}
+              >★</button>
+            ))}
+          </div>
+          <label className="recipe-note-label">
+            Your notes
+            <textarea
+              className="recipe-note"
+              rows={3}
+              value={noteDraft}
+              onChange={e => setNoteDraft(e.target.value)}
+              onBlur={() => { if (noteDraft !== (recipe.my_note ?? '')) onNote(noteDraft); }}
+              placeholder="Tweaks, reminders, who liked it…"
+            />
+          </label>
+        </div>
       )}
       <div className="recipe-meta-bar">
         {recipe.prep_time && (

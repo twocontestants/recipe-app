@@ -1,5 +1,6 @@
 import { Sidebar } from '@/components/Sidebar';
 import { ToastProvider } from '@/components/Toast';
+import { AuthGate } from '@/components/AuthGate';
 import PlannerClient from './PlannerClient';
 
 export default function PlannerPage() {
@@ -7,7 +8,9 @@ export default function PlannerPage() {
     <div className="app-shell">
       <Sidebar />
       <main className="main-content">
-        <PlannerClient />
+        <AuthGate>
+          <PlannerClient />
+        </AuthGate>
       </main>
       <ToastProvider />
     </div>

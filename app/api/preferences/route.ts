@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAppSetting, setAppSetting } from '@/lib/db';
 import { indexToDayKey, parseDayOfWeek, parseWeekStartDay } from '@/lib/plannerDays';
+import { isAuthUser, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,11 +9,13 @@ const CATEGORY_PREF_KEY = 'categoryPrefMode';
 const WEEK_START_KEY = 'weekStartDay';
 const VALID_PREF = ['ask', 'always', 'never'];
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
     const [mode, weekRaw] = await Promise.all([
-      getAppSetting(CATEGORY_PREF_KEY),
-      getAppSetting(WEEK_START_KEY),
+      getAppSetting(user.id, CATEGORY_PREF_KEY),
+      getAppSetting(user.id, WEEK_START_KEY),
     ]);
     return NextResponse.json({
       categoryPrefMode: mode && VALID_PREF.includes(mode) ? mode : 'ask',
@@ -25,6 +28,8 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
     const body = await req.json();
     let updated = false;
 
@@ -32,7 +37,7 @@ export async function PUT(req: NextRequest) {
       if (!VALID_PREF.includes(body.categoryPrefMode)) {
         return NextResponse.json({ error: 'invalid categoryPrefMode' }, { status: 400 });
       }
-      await setAppSetting(CATEGORY_PREF_KEY, body.categoryPrefMode);
+      await setAppSetting(user.id, CATEGORY_PREF_KEY, body.categoryPrefMode);
       updated = true;
     }
 
@@ -41,7 +46,7 @@ export async function PUT(req: NextRequest) {
       if (day === null) {
         return NextResponse.json({ error: 'invalid weekStartDay' }, { status: 400 });
       }
-      await setAppSetting(WEEK_START_KEY, indexToDayKey(day));
+      await setAppSetting(user.id, WEEK_START_KEY, indexToDayKey(day));
       updated = true;
     }
 

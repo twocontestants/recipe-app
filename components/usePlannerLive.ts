@@ -8,7 +8,7 @@ export function shouldResyncPlanner(wasHidden: boolean, visibilityState: string)
   return wasHidden && visibilityState === 'visible';
 }
 
-export function usePlannerLive(onRemoteChange: () => void) {
+export function usePlannerLive(onRemoteChange: () => void, userId?: string | null) {
   const onRemoteChangeRef = useRef(onRemoteChange);
   onRemoteChangeRef.current = onRemoteChange;
   const socketRef = useRef<Socket | null>(null);
@@ -17,7 +17,9 @@ export function usePlannerLive(onRemoteChange: () => void) {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
     const socket = io(socketUrl, { path: '/api/socketio', transports: ['websocket', 'polling'] });
     socketRef.current = socket;
-    socket.on('connect', () => socket.emit('join-planner'));
+    socket.on('connect', () => {
+      if (userId) socket.emit('join-planner', userId);
+    });
     socket.on('planner-changed', () => onRemoteChangeRef.current());
 
     let wasHidden = typeof document !== 'undefined' && document.hidden;
@@ -39,11 +41,11 @@ export function usePlannerLive(onRemoteChange: () => void) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, []);
+  }, [userId]);
 
   return {
     broadcastPlannerChanged: () => {
-      socketRef.current?.emit('planner-changed');
+      if (userId) socketRef.current?.emit('planner-changed', userId);
     },
   };
 }

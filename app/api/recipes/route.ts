@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createRecipe, listRecipes, setupDatabase } from '@/lib/db';
+import { canPublishRecipe } from '@/lib/visibility';
+import { isAuthUser, optionalUser, requireUser } from '@/lib/session';
 
-// Reads from the DB — render per request, don't prerender at build.
 export const dynamic = 'force-dynamic';
-import { getAllRecipes, createRecipe } from '@/lib/db';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const recipes = await getAllRecipes();
-    return NextResponse.json(recipes);
+    await setupDatabase();
+    const user = await optionalUser(req);
+    const { searchParams } = new URL(req.url);
+    const includePublic = searchParams.get('includePublic') === '1';
+    const ownedOnly = searchParams.get('ownedOnly') === '1';
+    const recipes = await listRecipes({
+      viewerId: user?.id ?? null,
+      includePublic,
+      ownedOnly,
+    });
+    return NextResponse.json(recipes.map(r => ({
+      ...r,
+      can_publish: canPublishRecipe(user, r),
+    })));
   } catch (error) {
     console.error('GET /api/recipes error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -16,8 +29,10 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
     const body = await req.json();
-    
+
     if (!body.title) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 });
     }
@@ -34,9 +49,11 @@ export async function POST(req: NextRequest) {
       steps: body.steps || [],
       tags: body.tags || [],
       primary_protein: body.primary_protein || null,
+      owner_id: user.id,
+      visibility: 'private',
     });
 
-    return NextResponse.json(recipe, { status: 201 });
+    return NextResponse.json({ ...recipe, can_publish: canPublishRecipe(user, recipe) }, { status: 201 });
   } catch (error) {
     console.error('POST /api/recipes error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
