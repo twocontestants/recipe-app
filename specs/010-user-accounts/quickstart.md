@@ -13,7 +13,9 @@ npm run db:setup
 # or visit /api/setup once
 ```
 
-Setup fails if `BOOTSTRAP_OWNER_PASSWORD` is missing. After success, sign in as **Jessica** with that password. Existing recipes appear as Jessica’s public library; planner and settings are hers alone.
+Setup fails if `BOOTSTRAP_OWNER_PASSWORD` is missing **and** Jessica does not exist yet. If Jessica already exists, a set env var resets her password to the current host value. After success, sign in as **Jessica** with that password. Existing recipes appear as Jessica’s public library; planner and settings are hers alone.
+
+`BOOTSTRAP_OWNER_PASSWORD` must be set on the host that runs the Next.js app (for example Vercel), not only on a separate realtime host. `npm run db:setup` only creates legacy kitchen tables — use `/api/setup` so Jessica is seeded.
 
 ## Checks
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { hashPassword, newSessionId, SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth';
-import { createSession, createUser, getUserByLogin, setupDatabase } from '@/lib/db';
+import { attachSessionCookie } from '@/lib/session';
+import { hashPassword, newSessionId } from '@/lib/auth';
+import { createSession, createUser, getUserByLogin } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +11,6 @@ function looksLikeEmail(value: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    await setupDatabase();
     const body = await req.json();
     const email = String(body.email ?? '').trim();
     const password = String(body.password ?? '');
@@ -38,8 +38,7 @@ export async function POST(req: NextRequest) {
       { id: user.id, login_name: user.login_name, display_name: user.display_name, role: user.role },
       { status: 201 },
     );
-    res.cookies.set(SESSION_COOKIE, sessionId, sessionCookieOptions());
-    return res;
+    return attachSessionCookie(res, sessionId);
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

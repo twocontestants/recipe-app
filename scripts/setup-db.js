@@ -1,5 +1,6 @@
 // Run with: node scripts/setup-db.js
-// Or use the /api/setup endpoint on first deploy
+// This script only creates the older recipes/meal_plans tables.
+// It does NOT seed Jessica or owner columns — visit /api/setup for that.
 
 const { sql } = require('@vercel/postgres');
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { showToast } from '@/components/Toast';
@@ -16,29 +16,46 @@ export default function LoginForm() {
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  if (!loading && user) {
-    router.replace(next.startsWith('/') ? next : '/recipes');
-  }
+  useEffect(() => {
+    if (!loading && user) {
+      router.replace(next.startsWith('/') ? next : '/recipes');
+    }
+  }, [loading, user, next, router]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setError('');
     try {
       const res = await fetch(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mode === 'login'
           ? { login, password }
           : { email, password, display_name: displayName }),
+        ...(typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? { signal: AbortSignal.timeout(20000) }
+          : {}),
       });
-      const data = await res.json();
+      let data: { error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(res.ok ? 'Could not read the response' : `Sign-in failed (${res.status})`);
+      }
       if (!res.ok) throw new Error(data.error || 'Could not sign in');
       await refresh();
       showToast(mode === 'login' ? 'Signed in' : 'Account created', 'success');
       router.replace(next.startsWith('/') ? next : '/recipes');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Could not sign in', 'error');
+      const message = err instanceof DOMException && err.name === 'TimeoutError'
+        ? 'Sign-in timed out. Re-run /api/setup if tables are missing, then try again.'
+        : err instanceof Error ? err.message : 'Could not sign in';
+      setError(message);
+      showToast(message, 'error');
     } finally {
       setSaving(false);
     }
@@ -55,6 +72,7 @@ export default function LoginForm() {
             : 'New accounts start as Cook — private recipes only.'}
         </p>
         <form onSubmit={onSubmit} className="login-form">
+          {error ? <p className="login-error" role="alert">{error}</p> : null}
           {mode === 'login' ? (
             <label className="form-group">
               Email or name
@@ -80,7 +98,7 @@ export default function LoginForm() {
             {saving ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
-        <button className="link-btn" type="button" onClick={() => setMode(m => m === 'login' ? 'register' : 'login')}>
+        <button className="link-btn" type="button" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setError(''); }}>
           {mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
         </button>
       </div>
