@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getAllShoppingLists, createShoppingList, updateShoppingListEdits,
-  deleteShoppingList, getShoppingListById, getMealPlanForWeek, applyShoppingListOps,
+  deleteShoppingList, getShoppingListById, getMealPlansForWeeks, applyShoppingListOps,
   getCategoryDictionary
 } from '@/lib/db';
 import { generateShoppingList } from '@/lib/shopping';
@@ -36,11 +36,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'name and recipe_ids required' }, { status: 400 });
     }
 
-    let allPlans: Awaited<ReturnType<typeof getMealPlanForWeek>> = [];
-    for (const weekStart of (week_starts ?? [])) {
-      const plans = await getMealPlanForWeek(weekStart, user.id, { includeMethod: true });
-      allPlans = allPlans.concat(plans);
-    }
+    const allPlans = await getMealPlansForWeeks(week_starts ?? [], user.id, { includeMethod: true });
     const filtered = allPlans.filter(p => recipe_ids.includes(p.recipe_id));
     const categoryDict = await getCategoryDictionary(user.id);
     const items = generateShoppingList(filtered, categoryDict);

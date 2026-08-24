@@ -8,6 +8,7 @@ export interface ShoppingContribution {
   amount: string;   // formatted amount for this one line, e.g. "1"
   unit: string;
   recipe: string;   // recipe title this line came from
+  source_url?: string; // original recipe URL when known at generate time
 }
 
 export interface ShoppingItem {
@@ -240,6 +241,7 @@ export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: 
         amount: formatDecimal(amount),
         unit,
         recipe: recipeName,
+        ...(plan.recipe.source_url ? { source_url: plan.recipe.source_url } : {}),
       });
 
       grouped.set(key, existing);
