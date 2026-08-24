@@ -3,7 +3,6 @@
 ## Prerequisites
 
 - Postgres (`POSTGRES_URL`)
-- If no users exist yet: host env `BOOTSTRAP_OWNER_LOGIN` and `BOOTSTRAP_OWNER_PASSWORD` (not in git)
 - `npm install`
 
 ## Setup
@@ -12,9 +11,9 @@
 # visit /api/setup once
 ```
 
-If the users table is empty, setup creates one moderator from those env vars. If accounts already exist, setup leaves them alone and only migrates kitchen tables. Sign in with your account; change password from Settings.
+Setup migrates kitchen tables. It does not create accounts. Sign in with an existing account, or register from the login page. Change password from Settings.
 
-`npm run db:setup` only creates legacy kitchen tables — use `/api/setup` for owner columns and users.
+`npm run db:setup` only creates legacy kitchen tables — use `/api/setup` for owner columns.
 
 ## Checks
 

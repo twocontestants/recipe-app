@@ -2,9 +2,7 @@
 
 A full-stack recipe management app built with Next.js 14 and Vercel Postgres.
 
-Accounts are per cook. Guests can browse public recipes. Planner, shopping lists, settings, ratings, and notes require sign-in. Sessions are stored in Postgres (they survive a process restart).
-
-If `/api/setup` runs against an empty users table, it creates one moderator from `BOOTSTRAP_OWNER_LOGIN` and `BOOTSTRAP_OWNER_PASSWORD`. After that, that account is a normal user — password changes happen in Settings. Do not commit those values.
+Accounts are per cook. Guests can browse public recipes. Planner, shopping lists, settings, ratings, and notes require sign-in. Sessions are stored in Postgres (they survive a process restart). New accounts sign up from the login page. Existing accounts change their password in Settings.
 
 ## Features
 
@@ -50,14 +48,14 @@ cp .env.local.example .env.local
 
 ### 4. Initialise the database
 
-Visit this URL once. If no users exist yet, set `BOOTSTRAP_OWNER_LOGIN` and `BOOTSTRAP_OWNER_PASSWORD` on this same host first:
+Visit this URL once after setting up:
 ```
 http://localhost:3000/api/setup
 ```
 
-That creates kitchen tables and, when needed, the first moderator. Sign in with that login. Existing accounts are left as they are.
+That creates kitchen tables. Sign in with an existing account, or create one from the login page.
 
-`npm run db:setup` only creates the older recipe/planner tables and does **not** create users. Prefer `/api/setup`.
+`npm run db:setup` only creates the older recipe/planner tables. Prefer `/api/setup`.
 
 ### 5. Run locally
 
@@ -82,7 +80,7 @@ vercel
 # under Project → Storage → Connect Database
 ```
 
-After deploying, visit `https://your-app.vercel.app/api/setup` once to create the database tables. Only set `BOOTSTRAP_OWNER_LOGIN` and `BOOTSTRAP_OWNER_PASSWORD` if no users exist yet.
+After deploying, visit `https://your-app.vercel.app/api/setup` once to create the database tables.
 
 ---
 

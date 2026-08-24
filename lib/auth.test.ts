@@ -1,12 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  bootstrapOwnerLogin,
-  bootstrapOwnerPassword,
   hashPassword,
   isSessionId,
   newSessionId,
-  optionalBootstrapOwnerLogin,
-  optionalBootstrapOwnerPassword,
   SESSION_COOKIE,
   sessionCookieOptions,
   verifyPassword,
@@ -32,56 +28,5 @@ describe('session ids', () => {
     expect(opts.httpOnly).toBe(true);
     expect(opts.path).toBe('/');
     expect(opts.maxAge).toBeGreaterThan(7 * 24 * 60 * 60);
-  });
-});
-
-describe('bootstrap password', () => {
-  const previous = process.env.BOOTSTRAP_OWNER_PASSWORD;
-
-  afterEach(() => {
-    if (previous === undefined) delete process.env.BOOTSTRAP_OWNER_PASSWORD;
-    else process.env.BOOTSTRAP_OWNER_PASSWORD = previous;
-  });
-
-  it('fails closed when the host env is missing', () => {
-    delete process.env.BOOTSTRAP_OWNER_PASSWORD;
-    expect(() => bootstrapOwnerPassword()).toThrow(/BOOTSTRAP_OWNER_PASSWORD/);
-  });
-
-  it('returns the host value when set', () => {
-    process.env.BOOTSTRAP_OWNER_PASSWORD = 'from-env';
-    expect(bootstrapOwnerPassword()).toBe('from-env');
-    expect(optionalBootstrapOwnerPassword()).toBe('from-env');
-  });
-
-  it('trims surrounding whitespace from the host value', () => {
-    process.env.BOOTSTRAP_OWNER_PASSWORD = '  from-env  ';
-    expect(bootstrapOwnerPassword()).toBe('from-env');
-  });
-
-  it('treats a whitespace-only value as missing', () => {
-    process.env.BOOTSTRAP_OWNER_PASSWORD = '   ';
-    expect(optionalBootstrapOwnerPassword()).toBeNull();
-    expect(() => bootstrapOwnerPassword()).toThrow(/BOOTSTRAP_OWNER_PASSWORD/);
-  });
-});
-
-describe('bootstrap login', () => {
-  const previous = process.env.BOOTSTRAP_OWNER_LOGIN;
-
-  afterEach(() => {
-    if (previous === undefined) delete process.env.BOOTSTRAP_OWNER_LOGIN;
-    else process.env.BOOTSTRAP_OWNER_LOGIN = previous;
-  });
-
-  it('fails closed when the host env is missing', () => {
-    delete process.env.BOOTSTRAP_OWNER_LOGIN;
-    expect(() => bootstrapOwnerLogin()).toThrow(/BOOTSTRAP_OWNER_LOGIN/);
-    expect(optionalBootstrapOwnerLogin()).toBeNull();
-  });
-
-  it('returns a trimmed host value', () => {
-    process.env.BOOTSTRAP_OWNER_LOGIN = '  kitchen.owner@example.com  ';
-    expect(bootstrapOwnerLogin()).toBe('kitchen.owner@example.com');
   });
 });

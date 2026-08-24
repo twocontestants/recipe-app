@@ -12,11 +12,11 @@
 - **Rationale**: No new dependency. Adequate for a household app.
 - **Alternatives considered**: bcrypt/argon2 libraries (extra dep). Plain text (unacceptable).
 
-## Bootstrap owner
+## Kitchen owner for leftover rows
 
-- **Decision**: If setup runs with zero users, create one moderator from `BOOTSTRAP_OWNER_LOGIN` + `BOOTSTRAP_OWNER_PASSWORD`. If any user already exists, use the oldest account as the owner for leftover unowned kitchen rows. Do not hardcode a display name or login. Do not reset an existing account’s password from env.
-- **Rationale**: The first kitchen owner is a normal account. A hardcoded login made that person a special case in every setup path. Password changes belong in Settings.
-- **Alternatives considered**: Hardcoded seed login (rejected). Reset a named account on every `/api/setup` (overwrites Settings). First signup claims leftover data (still fine if someone registers before setup).
+- **Decision**: Setup never creates an account. If users already exist, leftover unowned kitchen rows are attached to the oldest user. If nobody has registered yet, owner columns stay nullable until a real account exists. Password changes happen in Settings.
+- **Rationale**: The first kitchen already has a normal account. Seed/bootstrap creation was leftover special-case code.
+- **Alternatives considered**: Env-created moderator on empty users table (rejected). Hardcoded seed login (rejected).
 
 ## Sign-in must not migrate the kitchen
 
@@ -27,7 +27,7 @@
 ## Session secret
 
 - **Decision**: Cookie value is a high-entropy random id stored hashed or as the id in Postgres. Optional `SESSION_SECRET` only if we HMAC the cookie; simplest is an unguessable id in the cookie and the same id (or hash of it) in the table. Prefer storing the raw random id in Postgres and in the cookie — id space is 32 bytes hex. No secret required beyond the id entropy. Still document `SESSION_SECRET` unused unless we add signing later.
-- **Rationale**: Fail closed on missing bootstrap password; session ids do not need a second secret if they are long random values.
+- **Rationale**: Session ids do not need a second secret if they are long random values.
 - **Alternatives considered**: Signed cookies (needs secret in env).
 
 ## Who can publish
