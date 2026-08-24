@@ -22,7 +22,7 @@
 ## Phase 4: User Stories 2–3 — Card tones (P1/P2)
 
 - [x] T005 [US2] [US3] Accent today’s cards and grey this week’s past cards; stop fading the whole past day in `app/planner/PlannerClient.tsx`
-- [ ] T006 `npm test`
+- [x] T006 `npm test`
 
 ## MVP
 
