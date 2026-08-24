@@ -140,6 +140,7 @@ export async function setupDatabase() {
   await ensureAppSettingsTable();
   await ensurePlannedOnColumns();
   await ensureAccountsSchema();
+  await seedJessicaAccount({ resetPassword: true });
 }
 
 let _appSettingsReady = false;
@@ -337,7 +338,7 @@ async function migrateCompositePk(table: string, columns: string[]): Promise<voi
   await pool().query(`ALTER TABLE ${table} ADD PRIMARY KEY (${columns.join(', ')})`);
 }
 
-async function seedJessicaAccount(): Promise<AuthUser> {
+async function seedJessicaAccount(opts?: { resetPassword?: boolean }): Promise<AuthUser> {
   const existing = await pool().query(
     `SELECT id, login_name, display_name, role FROM users WHERE lower(login_name) = lower($1)`,
     [JESSICA_LOGIN],
@@ -345,7 +346,7 @@ async function seedJessicaAccount(): Promise<AuthUser> {
   const password = optionalBootstrapOwnerPassword();
 
   if (existing.rows.length) {
-    if (password && !_jessicaPasswordSynced) {
+    if (opts?.resetPassword && password && !_jessicaPasswordSynced) {
       const passwordHash = await hashPassword(password);
       await pool().query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [
         existing.rows[0].id,
@@ -399,6 +400,22 @@ export async function getUserById(id: string): Promise<AuthUser | null> {
   );
   if (!result.rows.length) return null;
   return mapAuthUser(result.rows[0]);
+}
+
+export async function getUserWithPassword(id: string): Promise<(AuthUser & { password_hash: string }) | null> {
+  await ensureAuthTables();
+  const result = await pool().query(
+    `SELECT id, login_name, display_name, role, password_hash FROM users WHERE id = $1`,
+    [id],
+  );
+  if (!result.rows.length) return null;
+  const row = result.rows[0];
+  return { ...mapAuthUser(row), password_hash: row.password_hash as string };
+}
+
+export async function updateUserPassword(id: string, passwordHash: string): Promise<void> {
+  await ensureAuthTables();
+  await pool().query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [id, passwordHash]);
 }
 
 export async function createUser(data: {

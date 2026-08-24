@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.9.0';
 
 const kitchenItems = [
   {
@@ -50,8 +50,7 @@ const recipesItem = {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
-  const { user, loading, logout } = useAuth();
+  const { user, loading } = useAuth();
   const items = user ? [recipesItem, ...kitchenItems] : [recipesItem];
 
   return (
@@ -79,16 +78,6 @@ export function Sidebar() {
           <>
             <span className="sidebar-account-name">{user.display_name}</span>
             <span className="sidebar-account-role">{user.role}</span>
-            <button
-              type="button"
-              className="nav-link sidebar-signout"
-              onClick={async () => {
-                await logout();
-                router.push('/recipes');
-              }}
-            >
-              Sign out
-            </button>
           </>
         ) : (
           <Link href="/login" className="nav-link">

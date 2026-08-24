@@ -415,6 +415,8 @@ input[type="text"],
 input[type="url"],
 input[type="number"],
 input[type="search"],
+input[type="email"],
+input[type="password"],
 textarea,
 select {
   width: 100%;
@@ -1316,14 +1318,6 @@ select.settings-select {
   text-transform: capitalize;
   padding: 0 0.75rem 0.35rem;
 }
-.sidebar-signout {
-  background: none;
-  border: none;
-  width: 100%;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
 .sidebar-version { margin-top: 0.5rem; }
 
 .login-page {
@@ -1424,3 +1418,76 @@ select.settings-select {
   border-bottom: 1px solid var(--parchment);
 }
 .moderator-login { display: block; font-size: 0.75rem; color: var(--ink-muted); font-weight: 400; }
+
+.account-settings {
+  max-width: 720px;
+  margin: 0 0 2rem;
+}
+.account-who {
+  margin: 0 0 1.1rem;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.account-who strong { color: var(--ink); font-weight: 500; }
+.account-meta {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+.account-role {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  text-transform: capitalize;
+}
+.account-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0 0 1.1rem;
+  padding: 0.95rem 1rem 1.1rem;
+  background: var(--sage-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.account-form-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+.account-error {
+  margin: 0 0 0.65rem;
+  padding: 0.65rem 0.75rem;
+  background: #f8e8e8;
+  color: #8B2020;
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+.account-password-form .form-group {
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+.account-password-form input {
+  width: 100%;
+  max-width: 22rem;
+}
+.account-password-form .btn {
+  align-self: flex-start;
+}
+@media (max-width: 600px) {
+  .account-password-form input {
+    max-width: none;
+    font-size: 16px;
+  }
+  .account-password-form .btn,
+  .account-settings .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+}

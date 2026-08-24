@@ -44,9 +44,9 @@
 
 ## Email password reset
 
-- **Decision**: Out of the first implementation slice. No mail transport in the stack. Signed-in password change can follow later. Jessica’s password is rotated by changing host `BOOTSTRAP_OWNER_PASSWORD` and visiting `/api/setup` (or signing in once so seed can reset the hash). A Moderator UI reset is not required for v1.
-- **Rationale**: Spec assumed email reset; shipping it without a mailer would be fake. Call this out as a follow-up.
-- **Alternatives considered**: Console-print reset tokens (not household-safe).
+- **Decision**: Email reset stays out of this slice (no mailer). Signed-in cooks change their password from Settings (current password required). Jessica can use that form like anyone else. Setup-time recovery still works: if `BOOTSTRAP_OWNER_PASSWORD` is set, visiting `/api/setup` resets Jessica’s hash. Login does not overwrite a password she set in Settings.
+- **Rationale**: Spec assumed email reset; shipping it without a mailer would be fake. A Settings form is enough for a household app. Resetting Jessica on every process start would undo that form.
+- **Alternatives considered**: Console-print reset tokens (not household-safe). Moderator-forced reset (not needed if each cook can change their own). Reset Jessica’s hash on every sign-in (blocked Settings changes).
 
 ## Socket.IO planner rooms
 
