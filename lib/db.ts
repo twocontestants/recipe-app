@@ -6,6 +6,12 @@ import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
 import { parseRole, type AuthUser, type Role } from './roles';
 import type { ShoppingOp } from './shoppingOps';
+import {
+  recipeSourceMapFromRecipes,
+  shoppingListMetaSelectSql,
+  toShoppingListMeta,
+  type ShoppingListMeta,
+} from './shoppingList';
 import { parseVisibility, type Visibility } from './visibility';
 
 // Postgres DATE arrives as YYYY-MM-DD text. Keep it as that string — node-pg
@@ -143,6 +149,7 @@ export async function setupDatabase() {
   await ensureAccountsSchema();
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_owner_created ON recipes(owner_id, created_at DESC)`);
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_visibility_created ON recipes(visibility, created_at DESC)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_shopping_lists_owner_generated ON shopping_lists (owner_id, generated_at DESC)`);
 }
 
 let _appSettingsReady = false;
@@ -297,6 +304,7 @@ export async function ensureAccountsSchema(): Promise<void> {
   await addOwnerId('meal_plans', owner?.id ?? null);
   await addOwnerId('planner_notes', owner?.id ?? null);
   await addOwnerId('shopping_lists', owner?.id ?? null);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_shopping_lists_owner_generated ON shopping_lists (owner_id, generated_at DESC)`);
   await addOwnerId('app_settings', owner?.id ?? null);
   await addOwnerId('ingredient_categories', owner?.id ?? null);
 
@@ -999,6 +1007,7 @@ export interface ShoppingList {
   category_order:  string[];
   item_order:      Record<string, string[]>;
   checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
+  recipe_sources?: Record<string, string>;
 }
 
 function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
@@ -1016,13 +1025,12 @@ function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
   };
 }
 
-export async function getAllShoppingLists(ownerId: string): Promise<ShoppingList[]> {
-  await ensureAccountsSchema();
+export async function getAllShoppingLists(ownerId: string): Promise<ShoppingListMeta[]> {
   const result = await pool().query(
-    'SELECT * FROM shopping_lists WHERE owner_id = $1 ORDER BY generated_at DESC',
+    `${shoppingListMetaSelectSql()} WHERE owner_id = $1 ORDER BY generated_at DESC`,
     [ownerId],
   );
-  return result.rows.map(rowToShoppingList);
+  return result.rows.map(toShoppingListMeta);
 }
 
 export async function createShoppingList(data: {
@@ -1197,7 +1205,17 @@ export async function getShoppingListById(id: string, ownerId: string): Promise<
       });
     } catch { /* best-effort: still serve the migrated shape even if write-back fails */ }
   }
-  return migrated;
+  return { ...migrated, recipe_sources: await recipeSourcesForIds(migrated.recipe_ids) };
+}
+
+async function recipeSourcesForIds(ids: string[]): Promise<Record<string, string>> {
+  const valid = ids.filter(Boolean);
+  if (!valid.length) return {};
+  const result = await pool().query(
+    `SELECT title, source_url FROM recipes WHERE id::text = ANY($1::text[])`,
+    [valid],
+  );
+  return recipeSourceMapFromRecipes(result.rows);
 }
 
 function migrateListId(): string {

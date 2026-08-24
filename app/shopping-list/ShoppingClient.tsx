@@ -3,16 +3,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
 import { CATEGORY_ORDER, CATEGORY_EMOJI, aggregateContributions, normalizeIngredientName } from '@/lib/shopping';
-
-// A contribution with a stable id, so a single sub-line can be detached into its
-// own item and then tracked like any other item (category, check, order).
-type ResolvedContribution = ShoppingContribution & { id: string };
+import {
+  mergeRecipeSourceMaps,
+  recipeSourceMapFromItems,
+  type ShoppingListMeta,
+} from '@/lib/shoppingList';
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
 import type { ShoppingOp } from '@/lib/shoppingOps';
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
+
+// A contribution with a stable id, so a single sub-line can be detached into its
+// own item and then tracked like any other item (category, check, order).
+type ResolvedContribution = ShoppingContribution & { id: string };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,10 +32,6 @@ interface ResolvedItem {
   originalServerName?: string; recipes?: string[];
   contributions?: ResolvedContribution[];
   isDetached?: boolean;
-}
-interface ShoppingListMeta {
-  id: string; name: string; subtitle: string;
-  generated_at: string; recipe_ids: string[];
 }
 
 // ── Shopper name ──────────────────────────────────────────────────────────────
@@ -409,22 +410,6 @@ export default function ShoppingListClient() {
 
   useEffect(() => { fetchLists(); }, []);
 
-  // Build a title → original-source-URL map so shopping-list recipe pills can
-  // link straight to the real recipe (not our parsed copy).
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/recipes');
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          const map: Record<string, string> = {};
-          for (const r of data) if (r?.title && r?.source_url) map[r.title] = r.source_url;
-          setRecipeSources(map);
-        }
-      } catch { /* links just won't render; pills still show */ }
-    })();
-  }, []);
-
   // Load the app-wide "save dragged category changes" preference.
   useEffect(() => {
     (async () => {
@@ -451,6 +436,10 @@ export default function ShoppingListClient() {
       const res = await fetch(`/api/shopping-lists?id=${id}`);
       const data = await res.json();
       setServerItems(data.items ?? []); // snapshot — constant for the list's life
+      setRecipeSources(mergeRecipeSourceMaps(
+        recipeSourceMapFromItems(data.items ?? []),
+        data.recipe_sources,
+      ));
 
       // Don't clobber local state while we have unconfirmed ops in flight — the
       // DB may not reflect them yet. Once the queue drains, a later resync (or
