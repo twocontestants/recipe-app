@@ -1,8 +1,8 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 → 1.2.0 (new principle + repo-wide governance)
+- Version change: 1.2.0 → 1.3.0 (new principle)
 - Modified principles: none renamed
-- Added sections: VI. No secrets in source
+- Added sections: VII. Kitchen dates are day strings
 - Removed sections: none
 - Follow-up TODOs: none
 -->
@@ -29,6 +29,9 @@ Prefer a flex row over absolute overlays when an icon sits beside an input. Pref
 ### VI. No secrets in source
 Credentials, API keys, and database connection strings MUST live in the host environment (`POSTGRES_URL`, `ANTHROPIC_API_KEY`, and the like). Source, specs, fixtures, committed examples, and agent environment files MUST NOT contain a live secret or a hardcoded fallback that embeds one. A missing env var MUST fail closed. Pull requests MUST fail a secret scan. Agents MUST leave existing leaks uncopied and MUST NOT reintroduce a convenience fallback.
 
+### VII. Kitchen dates are day strings
+A planned dinner day is the calendar label `YYYY-MM-DD`. It MUST stay that string from storage through the planner. It MUST NOT become a weekday name, a clock instant, or a timezone-shifted timestamp. Matching a dinner to a planner cell MUST compare those day strings. Timezone MAY only decide which calendar day is “today.”
+
 ## Development Workflow
 
 - Spec Kit artifacts (`specs/<feature>/spec.md`, `plan.md`, `tasks.md`) are the source of intent for the feature.
@@ -40,4 +43,4 @@ Credentials, API keys, and database connection strings MUST live in the host env
 
 This constitution applies to the whole repository — planner UI, APIs, database access, and deployment config — not only picker overlays. Amendments are recorded in this file with a version bump. A pull request that adds a secret or a secret-bearing fallback is non-compliant even if the feature spec did not mention security.
 
-**Version**: 1.2.0 | **Ratified**: 2026-08-16 | **Last Amended**: 2026-08-23
+**Version**: 1.3.0 | **Ratified**: 2026-08-16 | **Last Amended**: 2026-08-24

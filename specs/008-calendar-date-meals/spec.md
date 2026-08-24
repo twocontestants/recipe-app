@@ -98,4 +98,4 @@ The only time the clock’s timezone matters is deciding which calendar day is �
 - The household is one kitchen, mostly in Australia. Existing non-Monday week keys were written as local Monday midnight via UTC date strings.
 - Shopping-list rows already generated are historical snapshots; their stored week labels do not need rewriting.
 - Household “week starts on” remains a display setting only.
-- No new product surfaces (no per-user timezones, no travel mode).
+- 009-planner-day-strings requires that kitchen day to stay a `YYYY-MM-DD` string when loaded (not a weekday label or timestamp).
