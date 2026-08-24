@@ -14,9 +14,9 @@ import {
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
-import type { ShoppingOp } from '@/lib/shoppingOps';
+import { opsNeedListChanged, type ShoppingOp } from '@/lib/shoppingOps';
 
-function genId() { return Math.random().toString(36).slice(2, 10); }
+function genId() { return 'i' + Math.random().toString(36).slice(2, 10); }
 
 // A contribution with a stable id, so a single sub-line can be detached into its
 // own item and then tracked like any other item (category, check, order).
@@ -285,7 +285,7 @@ export default function ShoppingListClient() {
           body: JSON.stringify({ ops }), keepalive: true,
         });
         if (!res.ok) throw new Error('save failed');
-        socketRef.current?.emit('list-changed', { listId: id });
+        if (opsNeedListChanged(ops)) socketRef.current?.emit('list-changed', { listId: id });
       } catch {
         showToast('Couldn\u2019t save a change \u2014 it\u2019ll reconcile on refresh', 'error');
       } finally {

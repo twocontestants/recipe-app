@@ -7,7 +7,11 @@ import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } f
 import { parseRole, type AuthUser, type Role } from './roles';
 import type { ShoppingOp } from './shoppingOps';
 import {
+  migrateShoppingListShape,
+  normalizeCheckedState,
   recipeSourceMapFromRecipes,
+  shoppingListCheckClearKeySql,
+  shoppingListCheckSetSql,
   shoppingListMetaSelectSql,
   toShoppingListMeta,
   type ShoppingListMeta,
@@ -1035,7 +1039,7 @@ function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
     category_labels: (r.category_labels as Record<string, string>) ?? {},
     category_order: (r.category_order as string[]) ?? [],
     item_order: (r.item_order as Record<string, string[]>) ?? {},
-    checked_state: (r.checked_state as Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>) ?? {},
+    checked_state: normalizeCheckedState(r.checked_state),
   };
 }
 
@@ -1088,9 +1092,9 @@ export async function updateShoppingListEdits(id: string, ownerId: string, edits
 // Apply a sequence of targeted operations to a shopping list. Each op is a
 // single atomic JSONB UPDATE, so concurrent edits to different keys/items
 // compose instead of clobbering each other (the whole point of op-based sync).
-export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerId: string): Promise<void> {
+export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerId: string): Promise<{ applied: boolean }> {
   const owned = await pool().query('SELECT 1 FROM shopping_lists WHERE id = $1 AND owner_id = $2', [id, ownerId]);
-  if (!owned.rows.length) return;
+  if (!owned.rows.length) return { applied: false };
   for (const op of ops) {
     switch (op.t) {
       case 'override':
@@ -1175,17 +1179,9 @@ export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerI
         break;
       case 'check':
         if (op.value === null) {
-          await pool().query(
-            `UPDATE shopping_lists SET checked_state = COALESCE(checked_state, '{}'::jsonb) - $2 WHERE id = $1`,
-            [id, op.key]
-          );
+          await pool().query(shoppingListCheckClearKeySql(), [id, op.key]);
         } else {
-          await pool().query(
-            `UPDATE shopping_lists
-               SET checked_state = jsonb_set(COALESCE(checked_state, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-             WHERE id = $1`,
-            [id, op.key, JSON.stringify(op.value)]
-          );
+          await pool().query(shoppingListCheckSetSql(), [id, op.key, JSON.stringify(op.value)]);
         }
         break;
       case 'clearChecked':
@@ -1196,6 +1192,7 @@ export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerI
         break;
     }
   }
+  return { applied: true };
 }
 
 export async function deleteShoppingList(id: string, ownerId: string): Promise<void> {
@@ -1206,7 +1203,7 @@ export async function getShoppingListById(id: string, ownerId: string): Promise<
   const result = await pool().query('SELECT * FROM shopping_lists WHERE id=$1 AND owner_id=$2', [id, ownerId]);
   if (!result.rows.length) return null;
   const list = rowToShoppingList(result.rows[0]);
-  const { list: migrated, changed } = migrateListShape(list);
+  const { list: migrated, changed } = migrateShoppingListShape(list);
   // Lists created before items had ids are upgraded in place on first read, so
   // every later edit keys off the new id rather than the name.
   if (changed) {
@@ -1234,57 +1231,4 @@ async function recipeSourcesForIds(ids: string[]): Promise<Record<string, string
     [valid],
   );
   return recipeSourceMapFromRecipes(result.rows);
-}
-
-function migrateListId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-// Upgrade a pre-id shopping list: give each snapshot item a stable id and carry
-// the old name-keyed overrides / checked state / ordering across to those ids.
-// Returns the list unchanged (changed=false) when items already have ids.
-function migrateListShape(list: ShoppingList): { list: ShoppingList; changed: boolean } {
-  const items = (list.items as Array<Record<string, unknown>>) ?? [];
-  const needsIds = items.some(it => it && typeof it === 'object' && !it.id);
-  if (!needsIds) return { list, changed: false };
-
-  const nameToId = new Map<string, string>();
-  const migratedItems = items.map(it => {
-    const obj = (it && typeof it === 'object') ? it : {};
-    const name = (obj.name as string) ?? '';
-    const id = migrateListId();
-    if (name) nameToId.set(name, id);
-    const displayName = (obj.displayName as string) ?? name;
-    const recipes = Array.isArray(obj.recipes) ? (obj.recipes as string[]) : [];
-    const contributions = Array.isArray(obj.contributions) && obj.contributions.length
-      ? obj.contributions
-      : (name ? [{ name: displayName, amount: (obj.totalAmount as string) ?? '', unit: (obj.unit as string) ?? '', recipe: recipes[0] ?? '' }] : []);
-    return {
-      id, name, displayName,
-      totalAmount: (obj.totalAmount as string) ?? '',
-      unit: (obj.unit as string) ?? '',
-      recipes, contributions,
-      category: (obj.category as string) ?? 'Pantry',
-    };
-  });
-
-  // Recipe-item keys were names; remap them. Custom-item ids and anything we
-  // don't recognise pass through untouched.
-  const remap = (k: string) => nameToId.get(k) ?? k;
-
-  const item_overrides: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(list.item_overrides ?? {})) item_overrides[remap(k)] = v;
-
-  const checked_state: ShoppingList['checked_state'] = {};
-  for (const [k, v] of Object.entries(list.checked_state ?? {})) checked_state[remap(k)] = v;
-
-  const item_order: Record<string, string[]> = {};
-  for (const [cat, keys] of Object.entries(list.item_order ?? {})) {
-    item_order[cat] = (keys as string[]).map(remap);
-  }
-
-  return {
-    list: { ...list, items: migratedItems, item_overrides, checked_state, item_order },
-    changed: true,
-  };
 }

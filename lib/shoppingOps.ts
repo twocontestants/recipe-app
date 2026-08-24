@@ -28,3 +28,8 @@ export type ShoppingOp =
   | { t: 'clearChecked' }
   // Set the list subtitle.
   | { t: 'setSubtitle'; subtitle: string };
+
+/** Check ops already have live socket deltas — they must not trigger a full reread. */
+export function opsNeedListChanged(ops: ShoppingOp[]): boolean {
+  return ops.some(op => op.t !== 'check' && op.t !== 'clearChecked');
+}
