@@ -5,6 +5,7 @@ import { CATEGORY_EMOJI } from '@/lib/shopping';
 import { showToast } from '@/components/Toast';
 import { DAY_KEYS, DAY_LABELS, parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
 import { useAuth } from '@/components/AuthProvider';
+import { AccountSettings } from '@/components/AccountSettings';
 import type { AuthUser } from '@/lib/roles';
 import { isModerator } from '@/lib/roles';
 
@@ -132,11 +133,15 @@ export default function SettingsClient() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Ingredient <em>Categories</em></h1>
+          <h1 className="page-title">Settings</h1>
         </div>
       </div>
 
+      <AccountSettings />
+
       {user && isModerator(user.role) && <ModeratorPanel />}
+
+      <h2 className="section-title">Ingredient categories</h2>
 
       <p className="settings-intro">
         Every ingredient across your recipes is grouped under a standardised name and sorted into an aisle.
