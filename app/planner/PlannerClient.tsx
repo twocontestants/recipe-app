@@ -12,7 +12,8 @@ import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
-import { fetchMealsForMonths, fetchMealsForWeeks, mergePlannerMeals } from '@/lib/loadPlannerMonth';
+import { fetchMealsForMonths, mergePlannerMeals } from '@/lib/loadPlannerMonth';
+import { displayWeekDateRange, notesByDisplayIndex, sameDisplayWeek } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -31,7 +32,6 @@ import {
   shiftWeek,
   startOfDisplayWeek,
   storageCoords,
-  storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
@@ -188,8 +188,6 @@ export default function PlannerClient() {
   weekStartRef.current = weekStart;
   const weekStartsOnRef = useRef(weekStartsOn);
   weekStartsOnRef.current = weekStartsOn;
-  const recipesRef = useRef(recipes);
-  recipesRef.current = recipes;
 
   const snapshotMealPlans = () => [...mealStoreRef.current.values()];
 
@@ -218,13 +216,9 @@ export default function PlannerClient() {
   const reloadFromServer = async () => {
     const displayIso = formatDate(weekStartRef.current);
     const keys = monthsForDisplayWeek(displayIso);
-    const storageWeeks = storageWeeksForDisplayWeek(displayIso, weekStartsOnRef.current);
     try {
-      const [monthMeals, weekMeals] = await Promise.all([
-        fetchMealsForMonths(keys),
-        fetchMealsForWeeks(storageWeeks),
-      ]);
-      const meals = mergePlannerMeals(monthMeals, weekMeals);
+      const monthMeals = await fetchMealsForMonths(keys);
+      const meals = mergePlannerMeals(monthMeals);
       if (!meals.length && mealStoreRef.current.size > 0) return;
       mealStoreRef.current = new Map(meals.map(meal => [meal.id, meal]));
       if (meals.length) loadedMonthsRef.current = new Set(keys);
@@ -246,8 +240,10 @@ export default function PlannerClient() {
         if (!res.ok) return;
         const d = await res.json();
         const day = parseWeekStartDay(d.weekStartDay);
-        setWeekStartsOn(day);
-        setWeekStart(startOfDisplayWeek(new Date(), day));
+        const nextStart = startOfDisplayWeek(new Date(), day);
+        const nextIso = formatDate(nextStart);
+        setWeekStartsOn(prev => (prev === day ? prev : day));
+        setWeekStart(prev => (sameDisplayWeek(formatDate(prev), nextIso) ? prev : nextStart));
       } catch { /* keep Monday default */ }
     })();
   }, []);
@@ -257,59 +253,73 @@ export default function PlannerClient() {
     return mealOnDate(m, formatDate(date)) && m.meal_type === 'dinner';
   };
 
+  const weekStartIso = formatDate(weekStart);
+
   const fetchData = useCallback(async () => {
-    const displayIso = formatDate(weekStart);
+    const displayIso = weekStartIso;
     const monthKeys = monthsForDisplayWeek(displayIso);
     const firstPaint = mealStoreRef.current.size === 0;
     if (firstPaint) setLoading(true);
     try {
-      const storageWeeks = storageWeeksForDisplayWeek(displayIso, weekStartsOn);
-      const recipesPromise = recipesRef.current.length
-        ? Promise.resolve(recipesRef.current)
-        : fetch('/api/recipes?includePublic=1').then(res => res.json());
-      const notesPromise = Promise.all(storageWeeks.map(wk => fetch(`/api/planner-notes?weekStart=${wk}`)));
-      const [recs, , weekPlans, notesResults] = await Promise.all([
-        recipesPromise,
+      const { from, to } = displayWeekDateRange(displayIso);
+      const notesPromise = fetch(
+        `/api/planner-notes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      );
+      const [, notesRes] = await Promise.all([
         ensureMonths(monthKeys),
-        fetchMealsForWeeks(storageWeeks),
         notesPromise,
       ]);
-      mergeMealPlans(weekPlans);
       const plans = snapshotMealPlans();
-      const nts: Record<number, string> = {};
-      for (let i = 0; i < storageWeeks.length; i++) {
-        const wkNotes = await notesResults[i].json();
-        if (wkNotes && typeof wkNotes === 'object') {
-          for (const [day, note] of Object.entries(wkNotes as Record<string, string>)) {
-            const cal = getDayDate(new Date(`${storageWeeks[i]}T00:00:00`), Number(day));
-            if (formatDate(startOfDisplayWeek(cal, weekStartsOn)) !== displayIso) continue;
-            nts[displayDayIndex(cal, weekStartsOn)] = note;
-          }
-        }
+      let notesByIso: Record<string, string> = {};
+      if (notesRes.ok) {
+        const raw = await notesRes.json();
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) notesByIso = raw as Record<string, string>;
       }
       setMealPlans(plans);
-      setRecipes(recs);
-      setNotes(nts);
-      const newSuggestions: Record<number, Recipe[]> = {};
-      for (let d = 0; d < 7; d++) {
-        const date = getDayDate(weekStart, d);
-        const dayIso = formatDate(date);
-        const dayMeals = plans.filter((m: MealPlan) =>
-          mealOnDate(m, dayIso) && m.meal_type === 'dinner'
-        );
-        if (!dayMeals.length) {
-          const otherProteins = plans.filter((m: MealPlan) => !mealOnDate(m, dayIso)).map(m => m.recipe?.primary_protein);
-          newSuggestions[d] = suggestForDay(recs, otherProteins, 3);
-        }
-      }
-      setSuggestions(newSuggestions);
+      setNotes(notesByDisplayIndex(notesByIso, displayIso));
       const neighbours = monthKeys.flatMap(key => adjacentMonthKeys(key));
       void ensureMonths(neighbours).then(all => setMealPlans(all)).catch(() => { /* optional prefetch */ });
     } catch { showToast('Failed to load planner', 'error'); }
     finally { setLoading(false); }
-  }, [weekStart, weekStartsOn]);
+  }, [weekStartIso]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (!picker && !showMagic) return;
+    if (recipes.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/recipes?includePublic=1');
+        if (!res.ok) throw new Error('Failed to load');
+        const recs = await res.json();
+        if (!cancelled) setRecipes(Array.isArray(recs) ? recs : []);
+      } catch {
+        showToast('Failed to load recipes', 'error');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [picker, showMagic, recipes.length]);
+
+  useEffect(() => {
+    if (!recipes.length) {
+      setSuggestions({});
+      return;
+    }
+    const next: Record<number, Recipe[]> = {};
+    for (let d = 0; d < 7; d++) {
+      const dayIso = formatDate(getDayDate(weekStart, d));
+      const dayMeals = mealPlans.filter((m: MealPlan) =>
+        mealOnDate(m, dayIso) && m.meal_type === 'dinner',
+      );
+      if (!dayMeals.length) {
+        const otherProteins = mealPlans.filter((m: MealPlan) => !mealOnDate(m, dayIso)).map(m => m.recipe?.primary_protein);
+        next[d] = suggestForDay(recipes, otherProteins, 3);
+      }
+    }
+    setSuggestions(next);
+  }, [recipes, mealPlans, weekStart]);
 
   // Keep the recipe picker inside the visual viewport so the mobile keyboard
   // shrinks the sheet instead of pushing it off-screen.
