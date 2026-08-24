@@ -1,7 +1,22 @@
+import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-import { isSessionId, SESSION_COOKIE } from './auth';
+import { isSessionId, SESSION_COOKIE, sessionCookieOptions } from './auth';
 import { getSessionUser, touchSession } from './db';
 import type { AuthUser } from './roles';
+
+export function attachSessionCookie(res: NextResponse, sessionId: string): NextResponse {
+  const opts = sessionCookieOptions();
+  res.cookies.set(SESSION_COOKIE, sessionId, opts);
+  cookies().set(SESSION_COOKIE, sessionId, opts);
+  return res;
+}
+
+export function clearSessionCookie(res: NextResponse): NextResponse {
+  const opts = { ...sessionCookieOptions(), maxAge: 0 };
+  res.cookies.set(SESSION_COOKIE, '', opts);
+  cookies().set(SESSION_COOKIE, '', opts);
+  return res;
+}
 
 export async function optionalUser(req: NextRequest): Promise<AuthUser | null> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;

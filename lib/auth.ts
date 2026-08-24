@@ -49,9 +49,15 @@ export function sessionCookieOptions() {
   };
 }
 
-export function bootstrapOwnerPassword(): string {
+export function optionalBootstrapOwnerPassword(): string | null {
   const value = process.env.BOOTSTRAP_OWNER_PASSWORD;
-  if (!value || !value.trim()) {
+  if (!value || !value.trim()) return null;
+  return value.trim();
+}
+
+export function bootstrapOwnerPassword(): string {
+  const value = optionalBootstrapOwnerPassword();
+  if (!value) {
     throw new Error('BOOTSTRAP_OWNER_PASSWORD is not set');
   }
   return value;

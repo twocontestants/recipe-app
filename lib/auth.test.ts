@@ -4,6 +4,7 @@ import {
   hashPassword,
   isSessionId,
   newSessionId,
+  optionalBootstrapOwnerPassword,
   SESSION_COOKIE,
   sessionCookieOptions,
   verifyPassword,
@@ -48,5 +49,17 @@ describe('bootstrap password', () => {
   it('returns the host value when set', () => {
     process.env.BOOTSTRAP_OWNER_PASSWORD = 'from-env';
     expect(bootstrapOwnerPassword()).toBe('from-env');
+    expect(optionalBootstrapOwnerPassword()).toBe('from-env');
+  });
+
+  it('trims surrounding whitespace from the host value', () => {
+    process.env.BOOTSTRAP_OWNER_PASSWORD = '  from-env  ';
+    expect(bootstrapOwnerPassword()).toBe('from-env');
+  });
+
+  it('treats a whitespace-only value as missing', () => {
+    process.env.BOOTSTRAP_OWNER_PASSWORD = '   ';
+    expect(optionalBootstrapOwnerPassword()).toBeNull();
+    expect(() => bootstrapOwnerPassword()).toThrow(/BOOTSTRAP_OWNER_PASSWORD/);
   });
 });

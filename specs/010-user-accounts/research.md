@@ -14,9 +14,15 @@
 
 ## Jessica seed account
 
-- **Decision**: On setup, if no user named Jessica exists, create Moderator Jessica. Password from `BOOTSTRAP_OWNER_PASSWORD`. Attach every recipe/planner/shopping-list/settings row with a null owner to Jessica. Mark those recipes public. Fail setup if the env var is missing.
-- **Rationale**: Cook asked that the current kitchen belong to Jessica. Constitution VI: do not embed the password in source.
-- **Alternatives considered**: First signup claims the data (rejected). Hardcoded password in setup script (non-compliant).
+- **Decision**: On setup, if no user named Jessica exists, create Moderator Jessica. Password from `BOOTSTRAP_OWNER_PASSWORD`. If Jessica already exists and that env var is set, reset her password hash to the current value (recovery for a first seed that used a mistyped or untrimmed env). Attach every recipe/planner/shopping-list/settings row with a null owner to Jessica. Mark those recipes public. Fail closed if Jessica must be created and the env var is missing.
+- **Rationale**: Cook asked that the current kitchen belong to Jessica. Constitution VI: do not embed the password in source. Returning the existing row without updating the hash left Jessica un-sign-in-able after a bad first seed.
+- **Alternatives considered**: First signup claims the data (rejected). Hardcoded password in setup script (non-compliant). Leave an existing hash forever (blocked recovery).
+
+## Sign-in must not migrate the kitchen
+
+- **Decision**: Login, register, and session lookup only ensure `users` + `sessions` (and Jessica seed/reset). Kitchen owner columns, ratings tables, and composite primary-key rewrites run from `/api/setup` and from kitchen APIs, not from `/api/auth/login`.
+- **Rationale**: `ALTER TABLE` / drop-and-recreate primary keys on every sign-in can lock and hang, which looks like a stuck “Please wait…” button with no error.
+- **Alternatives considered**: Keep calling `setupDatabase()` from login (hung). A separate migrator process (extra ops).
 
 ## Session secret
 
@@ -38,7 +44,7 @@
 
 ## Email password reset
 
-- **Decision**: Out of the first implementation slice. No mail transport in the stack. Signed-in password change can follow later. Jessica’s password is rotated by changing the host env and a one-off reset by a Moderator is not required for v1.
+- **Decision**: Out of the first implementation slice. No mail transport in the stack. Signed-in password change can follow later. Jessica’s password is rotated by changing host `BOOTSTRAP_OWNER_PASSWORD` and visiting `/api/setup` (or signing in once so seed can reset the hash). A Moderator UI reset is not required for v1.
 - **Rationale**: Spec assumed email reset; shipping it without a mailer would be fake. Call this out as a follow-up.
 - **Alternatives considered**: Console-print reset tokens (not household-safe).
 

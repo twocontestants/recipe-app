@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { newSessionId, SESSION_COOKIE, sessionCookieOptions, verifyPassword } from '@/lib/auth';
-import { createSession, getUserByLogin, setupDatabase } from '@/lib/db';
+import { attachSessionCookie } from '@/lib/session';
+import { newSessionId, verifyPassword } from '@/lib/auth';
+import { createSession, getUserByLogin } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    await setupDatabase();
     const body = await req.json();
     const login = String(body.login ?? body.email ?? '').trim();
     const password = String(body.password ?? '');
@@ -25,8 +25,7 @@ export async function POST(req: NextRequest) {
       display_name: found.display_name,
       role: found.role,
     });
-    res.cookies.set(SESSION_COOKIE, sessionId, sessionCookieOptions());
-    return res;
+    return attachSessionCookie(res, sessionId);
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

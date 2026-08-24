@@ -1,6 +1,7 @@
 import { Pool, types } from 'pg';
 import { autoTag } from './autotag';
-import { bootstrapOwnerPassword, hashPassword, SESSION_MAX_AGE_SEC } from './auth';
+import { hashPassword, optionalBootstrapOwnerPassword, SESSION_MAX_AGE_SEC } from './auth';
+import { primaryKeyMatches } from './primaryKey';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
 import { parseRole, type AuthUser, type Role } from './roles';
@@ -219,7 +220,9 @@ export async function deleteCategoryDictionaryEntry(ownerId: string, name: strin
 
 export const JESSICA_LOGIN = 'Jessica';
 
+let _authTablesReady = false;
 let _accountsReady = false;
+let _jessicaPasswordSynced = false;
 
 async function pkColumns(table: string): Promise<string[]> {
   const result = await pool().query(
@@ -227,38 +230,45 @@ async function pkColumns(table: string): Promise<string[]> {
        FROM pg_index i
        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
       WHERE i.indrelid = $1::regclass AND i.indisprimary
-      ORDER BY a.attnum`,
+      ORDER BY array_position(i.indkey, a.attnum)`,
     [table],
   );
   return result.rows.map(r => r.attname as string);
 }
 
+/** Users + sessions only. Sign-in must not wait on kitchen ALTER/PK migrations. */
+export async function ensureAuthTables(): Promise<AuthUser> {
+  if (!_authTablesReady) {
+    await pool().query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        login_name TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'cook'
+          CHECK (role IN ('cook', 'publisher', 'moderator')),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool().query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
+    await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`);
+    _authTablesReady = true;
+  }
+  return seedJessicaAccount();
+}
+
 export async function ensureAccountsSchema(): Promise<void> {
   if (_accountsReady) return;
 
-  await pool().query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      login_name TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'cook'
-        CHECK (role IN ('cook', 'publisher', 'moderator')),
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  await pool().query(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      expires_at TIMESTAMPTZ NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
-  await pool().query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`);
-
-  const jessica = await seedJessicaAccount();
+  const jessica = await ensureAuthTables();
 
   await addOwnerId('recipes', jessica.id);
   await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'`);
@@ -321,7 +331,7 @@ async function addOwnerId(table: string, jessicaId: string): Promise<void> {
 
 async function migrateCompositePk(table: string, columns: string[]): Promise<void> {
   const current = await pkColumns(table);
-  if (current.length === columns.length && current.every((c, i) => c === columns[i])) return;
+  if (primaryKeyMatches(current, columns)) return;
   const pkey = `${table}_pkey`;
   await pool().query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${pkey}`);
   await pool().query(`ALTER TABLE ${table} ADD PRIMARY KEY (${columns.join(', ')})`);
@@ -332,9 +342,23 @@ async function seedJessicaAccount(): Promise<AuthUser> {
     `SELECT id, login_name, display_name, role FROM users WHERE lower(login_name) = lower($1)`,
     [JESSICA_LOGIN],
   );
-  if (existing.rows.length) return mapAuthUser(existing.rows[0]);
+  const password = optionalBootstrapOwnerPassword();
 
-  const password = bootstrapOwnerPassword();
+  if (existing.rows.length) {
+    if (password && !_jessicaPasswordSynced) {
+      const passwordHash = await hashPassword(password);
+      await pool().query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [
+        existing.rows[0].id,
+        passwordHash,
+      ]);
+      _jessicaPasswordSynced = true;
+    }
+    return mapAuthUser(existing.rows[0]);
+  }
+
+  if (!password) {
+    throw new Error('BOOTSTRAP_OWNER_PASSWORD is not set');
+  }
   const passwordHash = await hashPassword(password);
   const result = await pool().query(
     `INSERT INTO users (login_name, display_name, password_hash, role)
@@ -342,6 +366,7 @@ async function seedJessicaAccount(): Promise<AuthUser> {
      RETURNING id, login_name, display_name, role`,
     [JESSICA_LOGIN, passwordHash],
   );
+  _jessicaPasswordSynced = true;
   return mapAuthUser(result.rows[0]);
 }
 
@@ -355,7 +380,7 @@ function mapAuthUser(row: Record<string, unknown>): AuthUser {
 }
 
 export async function getUserByLogin(login: string): Promise<(AuthUser & { password_hash: string }) | null> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `SELECT id, login_name, display_name, role, password_hash
        FROM users WHERE lower(login_name) = lower($1)`,
@@ -367,7 +392,7 @@ export async function getUserByLogin(login: string): Promise<(AuthUser & { passw
 }
 
 export async function getUserById(id: string): Promise<AuthUser | null> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `SELECT id, login_name, display_name, role FROM users WHERE id = $1`,
     [id],
@@ -382,7 +407,7 @@ export async function createUser(data: {
   password_hash: string;
   role?: Role;
 }): Promise<AuthUser> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `INSERT INTO users (login_name, display_name, password_hash, role)
      VALUES ($1, $2, $3, $4)
@@ -393,7 +418,7 @@ export async function createUser(data: {
 }
 
 export async function listUsers(): Promise<AuthUser[]> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `SELECT id, login_name, display_name, role FROM users ORDER BY created_at`,
   );
@@ -401,13 +426,13 @@ export async function listUsers(): Promise<AuthUser[]> {
 }
 
 export async function countModerators(): Promise<number> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(`SELECT COUNT(*)::int AS n FROM users WHERE role = 'moderator'`);
   return result.rows[0].n as number;
 }
 
 export async function updateUserRole(id: string, role: Role): Promise<AuthUser | null> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `UPDATE users SET role = $2 WHERE id = $1 RETURNING id, login_name, display_name, role`,
     [id, role],
@@ -417,7 +442,7 @@ export async function updateUserRole(id: string, role: Role): Promise<AuthUser |
 }
 
 export async function createSession(userId: string, sessionId: string): Promise<void> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const expires = new Date(Date.now() + SESSION_MAX_AGE_SEC * 1000);
   await pool().query(
     `INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
@@ -426,7 +451,7 @@ export async function createSession(userId: string, sessionId: string): Promise<
 }
 
 export async function getSessionUser(sessionId: string): Promise<AuthUser | null> {
-  await ensureAccountsSchema();
+  await ensureAuthTables();
   const result = await pool().query(
     `SELECT u.id, u.login_name, u.display_name, u.role
        FROM sessions s

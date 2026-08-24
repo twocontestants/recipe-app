@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 
 interface Toast {
   id: number;
@@ -21,19 +21,26 @@ export function showToast(message: string, type: Toast['type'] = 'info') {
   }
 }
 
-export function ToastProvider() {
+export function ToastProvider({ children }: { children?: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  
-  // Register global setter
-  if (!globalSetToasts) globalSetToasts = setToasts;
-  
+
+  useEffect(() => {
+    globalSetToasts = setToasts;
+    return () => {
+      if (globalSetToasts === setToasts) globalSetToasts = null;
+    };
+  }, [setToasts]);
+
   return (
-    <div className="toast-stack">
-      {toasts.map(t => (
-        <div key={t.id} className={`toast ${t.type}`}>
-          {t.message}
-        </div>
-      ))}
-    </div>
+    <>
+      {children}
+      <div className="toast-stack">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.type}`}>
+            {t.message}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

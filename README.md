@@ -4,7 +4,7 @@ A full-stack recipe management app built with Next.js 14 and Vercel Postgres.
 
 Accounts are per cook. Guests can browse public recipes. Planner, shopping lists, settings, ratings, and notes require sign-in. Sessions are stored in Postgres (they survive a process restart).
 
-The first setup creates a **Jessica** moderator account that owns any existing kitchen data. Set `BOOTSTRAP_OWNER_PASSWORD` in the host environment before running setup — never commit that value.
+The first setup creates a **Jessica** moderator account that owns any existing kitchen data. Set `BOOTSTRAP_OWNER_PASSWORD` in the host environment that runs Next.js (for example Vercel) before visiting `/api/setup` — never commit that value. If Jessica already exists, that env var resets her sign-in password.
 
 ## Features
 
@@ -50,15 +50,14 @@ cp .env.local.example .env.local
 
 ### 4. Initialise the database
 
-Visit this URL once after setting up:
+Visit this URL once after setting `BOOTSTRAP_OWNER_PASSWORD` on this same host:
 ```
 http://localhost:3000/api/setup
 ```
 
-Or run the script:
-```bash
-npm run db:setup
-```
+That creates kitchen tables **and** the Jessica account. Then sign in as `Jessica` with the host password.
+
+`npm run db:setup` only creates the older recipe/planner tables and does **not** seed Jessica. Prefer `/api/setup`.
 
 ### 5. Run locally
 
@@ -83,7 +82,7 @@ vercel
 # under Project → Storage → Connect Database
 ```
 
-After deploying, visit `https://your-app.vercel.app/api/setup` once to create the database tables.
+After deploying, set `BOOTSTRAP_OWNER_PASSWORD` on Vercel, then visit `https://your-app.vercel.app/api/setup` once to create the database tables and seed Jessica.
 
 ---
 
