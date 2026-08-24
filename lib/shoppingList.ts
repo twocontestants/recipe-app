@@ -85,3 +85,39 @@ export function mergeRecipeSourceMaps(
   }
   return out;
 }
+
+export type ShoppingCheckedState = Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
+
+/** A detail GET has an items array. Meta index (array or dropdown object) does not. */
+export function isShoppingListDetail(payload: unknown): payload is {
+  items: unknown[];
+  checked_state?: ShoppingCheckedState | null;
+  recipe_sources?: Record<string, string>;
+  item_overrides?: Record<string, unknown>;
+  custom_items?: unknown[];
+  category_labels?: Record<string, string>;
+  category_order?: string[];
+  item_order?: Record<string, string[]>;
+  subtitle?: string;
+} {
+  return !!payload
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && Array.isArray((payload as { items?: unknown }).items);
+}
+
+/**
+ * Checked map to adopt from a detail GET. `undefined` means the payload is not
+ * a list body (do not clobber local checks). Missing/empty `checked_state` is `{}`.
+ */
+export function adoptCheckedState(payload: unknown): ShoppingCheckedState | undefined {
+  if (!isShoppingListDetail(payload)) return undefined;
+  const raw = payload.checked_state;
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return raw as ShoppingCheckedState;
+}
+
+/** Structural refetch still adopts DB checks — live deltas can miss; the row is source of truth. */
+export function shouldAdoptCheckedState(opts: { busy: boolean }): boolean {
+  return !opts.busy;
+}

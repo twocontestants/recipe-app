@@ -8,6 +8,10 @@ import { generateShoppingList } from '@/lib/shopping';
 import type { ShoppingOp } from '@/lib/shoppingOps';
 import { isAuthUser, requireUser } from '@/lib/session';
 
+export const dynamic = 'force-dynamic';
+
+const NO_STORE = { headers: { 'Cache-Control': 'no-store' } };
+
 // GET /api/shopping-lists — list all, or ?id=X for one with items
 export async function GET(req: NextRequest) {
   try {
@@ -16,13 +20,13 @@ export async function GET(req: NextRequest) {
     const id = new URL(req.url).searchParams.get('id');
     if (id) {
       const list = await getShoppingListById(id, user.id);
-      if (!list) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-      return NextResponse.json(list);
+      if (!list) return NextResponse.json({ error: 'Not found' }, { status: 404, ...NO_STORE });
+      return NextResponse.json(list, NO_STORE);
     }
     const lists = await getAllShoppingLists(user.id);
-    return NextResponse.json(lists);
+    return NextResponse.json(lists, NO_STORE);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: String(e) }, { status: 500, ...NO_STORE });
   }
 }
 

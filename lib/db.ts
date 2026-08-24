@@ -1219,7 +1219,11 @@ export async function getShoppingListById(id: string, ownerId: string): Promise<
       });
     } catch { /* best-effort: still serve the migrated shape even if write-back fails */ }
   }
-  return { ...migrated, recipe_sources: await recipeSourcesForIds(migrated.recipe_ids) };
+  let recipe_sources: Record<string, string> = {};
+  try {
+    recipe_sources = await recipeSourcesForIds(migrated.recipe_ids);
+  } catch { /* pills stay unlinked; still serve items and checks */ }
+  return { ...migrated, recipe_sources };
 }
 
 async function recipeSourcesForIds(ids: string[]): Promise<Record<string, string>> {
