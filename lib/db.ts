@@ -809,13 +809,13 @@ const MEAL_PLAN_RECIPE_CARD = `
             r.owner_id    AS recipe_owner_id,
             r.visibility  AS recipe_visibility`;
 
-function mealPlanSelectSql(includeMethod: boolean): string {
+export function mealPlanSelectSql(includeMethod: boolean): string {
   const methodCols = includeMethod
     ? `,
             r.ingredients AS recipe_ingredients,
             r.steps       AS recipe_steps`
     : '';
-  return `SELECT mp.*${MEAL_PLAN_RECIPE_CARD}${methodCols}
+  return `SELECT mp.*,${MEAL_PLAN_RECIPE_CARD}${methodCols}
      FROM meal_plans mp
      JOIN recipes r ON mp.recipe_id = r.id`;
 }
