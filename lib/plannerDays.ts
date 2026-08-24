@@ -113,6 +113,20 @@ export function displayDayIndex(date: Date, weekStartsOn: DayKey = 'monday'): nu
   return (current - start + 7) % 7;
 }
 
+export type PlannerDayTone = 'past' | 'today' | 'upcoming';
+
+/** Visual tone for a planner day. Other weeks never count as today or past. */
+export function plannerDayTone(
+  viewingThisWeek: boolean,
+  dayIndex: number,
+  todayIndex: number,
+): PlannerDayTone {
+  if (!viewingThisWeek) return 'upcoming';
+  if (dayIndex === todayIndex) return 'today';
+  if (dayIndex < todayIndex) return 'past';
+  return 'upcoming';
+}
+
 export function getThisDisplayWeek(weekStartsOn: DayKey = 'monday', now = new Date()): string {
   return localDateIso(startOfDisplayWeek(now, weekStartsOn));
 }

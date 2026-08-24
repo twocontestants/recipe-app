@@ -10,6 +10,7 @@ import {
   indexToDayKey,
   localDateIso,
   parseDayOfWeek,
+  plannerDayTone,
   parseLocalIso,
   parseWeekStartDay,
   shiftWeek,
@@ -122,6 +123,31 @@ describe('week helpers', () => {
     expect(todayDayIndex(new Date('2026-08-19T10:00:00'))).toBe(2);
     expect(indexToDayKey(2)).toBe('wednesday');
     expect(dayDateOf('2026-08-17', 2).getDate()).toBe(19);
+  });
+});
+
+describe('plannerDayTone', () => {
+  it('marks today and earlier days only while viewing this week', () => {
+    expect(plannerDayTone(true, 2, 2)).toBe('today');
+    expect(plannerDayTone(true, 1, 2)).toBe('past');
+    expect(plannerDayTone(true, 3, 2)).toBe('upcoming');
+  });
+
+  it('treats every day as upcoming when another week is showing', () => {
+    expect(plannerDayTone(false, 0, 2)).toBe('upcoming');
+    expect(plannerDayTone(false, 2, 2)).toBe('upcoming');
+    expect(plannerDayTone(false, 6, 2)).toBe('upcoming');
+  });
+
+  it('has no past cards when the first day of the week is today', () => {
+    expect(plannerDayTone(true, 0, 0)).toBe('today');
+    expect(plannerDayTone(true, 1, 0)).toBe('upcoming');
+  });
+
+  it('greys every earlier day when the last day of the week is today', () => {
+    expect(plannerDayTone(true, 0, 6)).toBe('past');
+    expect(plannerDayTone(true, 5, 6)).toBe('past');
+    expect(plannerDayTone(true, 6, 6)).toBe('today');
   });
 });
 

@@ -25,6 +25,7 @@ import {
   localDateIso,
   parseLocalIso,
   parseWeekStartDay,
+  plannerDayTone,
   shiftWeek,
   startOfDisplayWeek,
   storageCoords,
@@ -82,6 +83,35 @@ function ProteinBadge({ protein }: { protein?: string }) {
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function formatDate(d: Date): string { return localDateIso(d); }
+
+function PlannerWeekNav({
+  weekStart,
+  weekStartsOn,
+  viewingThisWeek,
+  onShift,
+  onToday,
+}: {
+  weekStart: Date;
+  weekStartsOn: DayKey;
+  viewingThisWeek: boolean;
+  onShift: (weeks: -1 | 1) => void;
+  onToday: () => void;
+}) {
+  return (
+    <div className="pl-week-nav">
+      <button type="button" className="pl-nav-btn" aria-label="Previous week" onClick={() => onShift(-1)}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <span className="pl-week-label">{formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}</span>
+      <button type="button" className="pl-nav-btn" aria-label="Next week" onClick={() => onShift(1)}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+      {!viewingThisWeek && (
+        <button type="button" className="pl-today-btn" onClick={onToday}>Today</button>
+      )}
+    </div>
+  );
+}
 function getDayDate(weekStart: Date, i: number): Date {
   const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
@@ -232,6 +262,10 @@ export default function PlannerClient() {
 
   const viewingThisWeek = formatDate(weekStart) === formatDate(startOfDisplayWeek(new Date(), weekStartsOn));
   const todayDisplayIdx = displayDayIndex(new Date(), weekStartsOn);
+  const shiftVisibleWeek = (weeks: -1 | 1) => {
+    setWeekStart(parseLocalIso(shiftWeek(formatDate(weekStart), weeks)));
+  };
+  const goThisWeek = () => setWeekStart(startOfDisplayWeek(new Date(), weekStartsOn));
 
   useEffect(() => {
     (async () => {
@@ -893,18 +927,13 @@ export default function PlannerClient() {
       <div className="pl-topbar">
         <div className="pl-topbar-left">
           <h1 className="pl-title">Meal <em>Planner</em></h1>
-          <div className="pl-week-nav">
-            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n; })}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-            </button>
-            <span className="pl-week-label">{formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}</span>
-            <button className="pl-nav-btn" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-            {!viewingThisWeek && (
-              <button className="pl-today-btn" onClick={() => setWeekStart(startOfDisplayWeek(new Date(), weekStartsOn))}>Today</button>
-            )}
-          </div>
+          <PlannerWeekNav
+            weekStart={weekStart}
+            weekStartsOn={weekStartsOn}
+            viewingThisWeek={viewingThisWeek}
+            onShift={shiftVisibleWeek}
+            onToday={goThisWeek}
+          />
         </div>
         <div className="pl-topbar-right">
           <span className="pl-count">{totalMeals} of 7 planned</span>
@@ -925,9 +954,9 @@ export default function PlannerClient() {
         <div className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}>
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
-            const todayIdx = todayDisplayIdx;
-            const isToday = viewingThisWeek && dayIndex === todayIdx;
-            const isPast = viewingThisWeek && dayIndex < todayIdx;
+            const tone = plannerDayTone(viewingThisWeek, dayIndex, todayDisplayIdx);
+            const isToday = tone === 'today';
+            const isPast = tone === 'past';
             const dayMeals = getMealsForDay(dayIndex);
             const daySuggestions = suggestions[dayIndex] ?? [];
 
@@ -1077,6 +1106,16 @@ export default function PlannerClient() {
           })}
         </div>
       )}
+
+      <div className="pl-week-dock" aria-label="Week">
+        <PlannerWeekNav
+          weekStart={weekStart}
+          weekStartsOn={weekStartsOn}
+          viewingThisWeek={viewingThisWeek}
+          onShift={shiftVisibleWeek}
+          onToday={goThisWeek}
+        />
+      </div>
 
       {drag?.armed && railDays.length > 0 && (
         <div
@@ -1395,6 +1434,26 @@ export default function PlannerClient() {
         .pl-title { font-family: var(--font-display); font-size: 2.8rem; font-weight: 300; line-height: 1; color: var(--ink); margin-bottom: 0.75rem; }
         .pl-title em { font-style: italic; color: var(--rust); }
         .pl-week-nav { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+        .pl-week-dock {
+          position: sticky;
+          bottom: var(--bottom-nav-height, 0px);
+          z-index: 20;
+          display: flex;
+          justify-content: center;
+          margin-top: 1.25rem;
+          padding: 0.55rem 0.75rem;
+          background: rgba(247, 243, 238, 0.96);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          box-shadow: 0 -8px 22px rgba(60, 42, 30, 0.06);
+        }
+        .pl-week-dock .pl-week-nav { justify-content: center; width: 100%; }
+        .pl-week-dock .pl-nav-btn {
+          min-width: 44px;
+          min-height: 44px;
+          justify-content: center;
+          padding: 0.5rem 0.65rem;
+        }
         .pl-nav-btn { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.5rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
         .pl-nav-btn:hover { border-color: var(--ink-muted); color: var(--ink); }
         .pl-week-label { font-size: 0.88rem; color: var(--ink-soft); padding: 0 0.25rem; }
@@ -1411,7 +1470,6 @@ export default function PlannerClient() {
         .pl-days { display: flex; flex-direction: column; }
         .pl-day { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
         .pl-day:first-child { border-top: 1px solid var(--border); }
-        .pl-day.is-past { opacity: 0.42; }
         .pl-day.is-drop-target {
           outline: 2px solid var(--rust);
           outline-offset: 2px;
@@ -1435,6 +1493,25 @@ export default function PlannerClient() {
         /* Recipe card */
         .pl-recipe-card { display: flex; align-items: stretch; gap: 0; background: white; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: all 0.15s; cursor: pointer; }
         .pl-recipe-card:hover { border-color: var(--rust); box-shadow: 0 2px 10px rgba(181,69,27,0.08); }
+        .pl-day.is-today .pl-recipe-card {
+          background: rgba(181, 69, 27, 0.07);
+          border-color: rgba(181, 69, 27, 0.28);
+          box-shadow: inset 3px 0 0 var(--rust);
+        }
+        .pl-day.is-today .pl-drag-handle {
+          background: rgba(181, 69, 27, 0.1);
+          border-right-color: rgba(181, 69, 27, 0.18);
+        }
+        .pl-day.is-past .pl-recipe-card {
+          background: var(--parchment);
+          border-color: #ddd6cc;
+        }
+        .pl-day.is-past .pl-recipe-card:hover {
+          border-color: var(--ink-muted);
+          box-shadow: none;
+        }
+        .pl-day.is-past .pl-recipe-name { color: var(--ink-muted); }
+        .pl-day.is-past .pl-drag-handle { background: #e6e1d8; }
         .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
         .pl-rail {
           position: fixed; top: 0; right: 0; bottom: var(--bottom-nav-height, 0px); z-index: 36;
