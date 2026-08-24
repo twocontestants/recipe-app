@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,5 +31,5 @@
 
 ## Notes
 
-- Three `[NEEDS CLARIFICATION]` markers remain (account creation policy, existing unowned data, public recipe on planner: copy vs live reference). Resolve via the questions in the specify completion report before `/speckit-plan`.
-- Session persistence is specified as a user-visible outcome (survives browser close and app restart), not as a particular store.
+- Clarifications from 2026-08-24 are integrated (open signup, Jessica owns existing data, live planner references + duplicate to edit, Cook/Publisher/Moderator roles).
+- Jessica’s password is specified only as “supplied by the host environment”; it is not recorded in this spec.
