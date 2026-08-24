@@ -223,7 +223,7 @@ export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: 
     const scaleFactor = plan.servings / (plan.recipe.servings || 4);
     const recipeName = plan.recipe.title;
 
-    for (const ingredient of plan.recipe.ingredients) {
+    for (const ingredient of plan.recipe.ingredients ?? []) {
       const key = normalizeIngredientName(ingredient.name);
       if (!key) continue;
       const existing = grouped.get(key) || { recipes: [], contributions: [] };

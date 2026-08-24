@@ -22,6 +22,12 @@ import {
 } from '@/lib/plannerDays';
 import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
 import { recipeDeepLinkFromSearch } from '@/lib/recipeLinks';
+import {
+  hasRecipeMethod,
+  recipeListQueryString,
+  removeRecipeFromList,
+  upsertRecipeInList,
+} from '@/lib/recipeList';
 
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
@@ -155,7 +161,7 @@ export default function RecipesPage() {
 
   const fetchRecipes = useCallback(async () => {
     try {
-      const qs = user && includePublic ? '?includePublic=1' : '';
+      const qs = recipeListQueryString({ includePublic });
       const res = await fetch(`/api/recipes${qs}`);
       if (!res.ok) throw new Error('Failed to load');
       setRecipes(await res.json());
@@ -164,9 +170,50 @@ export default function RecipesPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, includePublic]);
+  }, [includePublic]);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
+
+  const fetchRecipeDetail = async (id: string): Promise<Recipe | null> => {
+    try {
+      const res = await fetch(`/api/recipes/${id}`);
+      if (!res.ok) throw new Error('Failed to load');
+      return await res.json() as Recipe;
+    } catch {
+      showToast('Failed to load recipe', 'error');
+      return null;
+    }
+  };
+
+  const ensureRecipeDetail = async (recipe: Recipe): Promise<Recipe | null> => {
+    if (hasRecipeMethod(recipe)) return recipe;
+    return fetchRecipeDetail(recipe.id);
+  };
+
+  const cacheRecipeDetail = (full: Recipe) => {
+    setRecipes(rs => upsertRecipeInList(rs, full));
+  };
+
+  const applyEditForm = (full: Recipe) => {
+    setEditingRecipe(full);
+    setForm({
+      title: full.title,
+      description: full.description || '',
+      source_url: full.source_url || '',
+      image_url: full.image_url || '',
+      servings: full.servings,
+      prep_time: full.prep_time,
+      cook_time: full.cook_time,
+      ingredients: (full.ingredients && full.ingredients.length > 0)
+        ? full.ingredients
+        : [{ amount: '', unit: '', name: '' }],
+      steps: (full.steps && full.steps.length > 0) ? full.steps : [''],
+      tags: full.tags,
+      primary_protein: full.primary_protein || '',
+    });
+    setShowModal(true);
+    setViewRecipe(null);
+  };
 
   useEffect(() => {
     (async () => {
@@ -190,34 +237,47 @@ export default function RecipesPage() {
     setShowModal(true);
   };
 
-  const openEditModal = (r: Recipe) => {
-    setEditingRecipe(r);
-    setForm({
-      title: r.title,
-      description: r.description || '',
-      source_url: r.source_url || '',
-      image_url: r.image_url || '',
-      servings: r.servings,
-      prep_time: r.prep_time,
-      cook_time: r.cook_time,
-      ingredients: r.ingredients.length > 0 ? r.ingredients : [{ amount: '', unit: '', name: '' }],
-      steps: r.steps.length > 0 ? r.steps : [''],
-      tags: r.tags,
-      primary_protein: r.primary_protein || '',
-    });
-    setShowModal(true);
-    setViewRecipe(null);
+  const openView = async (r: Recipe) => {
+    const full = await ensureRecipeDetail(r);
+    if (!full) return;
+    cacheRecipeDetail(full);
+    setViewRecipe(full);
+  };
+
+  const openEditModal = async (r: Recipe) => {
+    const full = await ensureRecipeDetail(r);
+    if (!full) return;
+    cacheRecipeDetail(full);
+    applyEditForm(full);
   };
 
   // Auto-open or edit a recipe from ?open= / ?edit= (linked from planner)
   const searchParams = useSearchParams();
+  const openedLinkRef = useRef<string | null>(null);
   useEffect(() => {
     const link = recipeDeepLinkFromSearch(searchParams);
-    if (!link || recipes.length === 0) return;
+    if (!link) {
+      openedLinkRef.current = null;
+      return;
+    }
+    const key = `${link.mode}:${link.id}`;
+    if (openedLinkRef.current === key) return;
     const recipe = recipes.find(r => r.id === link.id);
     if (!recipe) return;
-    if (link.mode === 'edit') openEditModal(recipe);
-    else setViewRecipe(recipe);
+    let cancelled = false;
+    openedLinkRef.current = key;
+    void (async () => {
+      const full = hasRecipeMethod(recipe) ? recipe : await fetchRecipeDetail(recipe.id);
+      if (cancelled) return;
+      if (!full) {
+        openedLinkRef.current = null;
+        return;
+      }
+      if (link.mode === 'edit') applyEditForm(full);
+      else setViewRecipe(full);
+      cacheRecipeDetail(full);
+    })();
+    return () => { cancelled = true; };
   }, [searchParams, recipes]);
 
   const handlePasteImport = async () => {
@@ -353,7 +413,8 @@ export default function RecipesPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      await fetchRecipes();
+      const saved = await res.json() as Recipe;
+      setRecipes(rs => upsertRecipeInList(rs, saved));
       setShowModal(false);
       showToast(editingRecipe ? 'Recipe updated!' : 'Recipe saved!', 'success');
     } catch (e) {
@@ -368,7 +429,7 @@ export default function RecipesPage() {
     try {
       const res = await fetch(`/api/recipes/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
-      await fetchRecipes();
+      setRecipes(rs => removeRecipeFromList(rs, id));
       setViewRecipe(null);
       showToast('Recipe deleted', 'info');
     } catch {
@@ -381,8 +442,8 @@ export default function RecipesPage() {
     try {
       const res = await fetch(`/api/recipes/${recipe.id}/duplicate`, { method: 'POST' });
       if (!res.ok) throw new Error((await res.json()).error);
-      const copy = await res.json();
-      await fetchRecipes();
+      const copy = await res.json() as Recipe;
+      setRecipes(rs => upsertRecipeInList(rs, copy));
       setViewRecipe(copy);
       showToast('Copied to your kitchen — you can edit this one', 'success');
     } catch (e) {
@@ -394,8 +455,8 @@ export default function RecipesPage() {
     try {
       const res = await fetch(`/api/recipes/${recipe.id}/${makePublic ? 'publish' : 'unpublish'}`, { method: 'POST' });
       if (!res.ok) throw new Error((await res.json()).error);
-      const updated = await res.json();
-      await fetchRecipes();
+      const updated = await res.json() as Recipe;
+      setRecipes(rs => upsertRecipeInList(rs, updated));
       setViewRecipe(updated);
       showToast(makePublic ? 'Recipe is public' : 'Recipe is private', 'success');
     } catch (e) {
@@ -562,12 +623,12 @@ export default function RecipesPage() {
       ) : (
         <div className="recipe-grid">
           {filtered.map(recipe => (
-            <div key={recipe.id} className="card" onClick={() => setViewRecipe(recipe)} style={{ cursor: 'pointer' }}>
+            <div key={recipe.id} className="card" onClick={() => void openView(recipe)} style={{ cursor: 'pointer' }}>
               <div className="recipe-card-img-wrap" onClick={e => e.stopPropagation()}>
                 {recipe.image_url ? (
-                  <img src={recipe.image_url} alt={recipe.title} className="recipe-card-img" onClick={() => setViewRecipe(recipe)} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  <img src={recipe.image_url} alt={recipe.title} className="recipe-card-img" onClick={() => void openView(recipe)} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 ) : (
-                  <div className="recipe-card-img-placeholder" onClick={() => setViewRecipe(recipe)}>🍳</div>
+                  <div className="recipe-card-img-placeholder" onClick={() => void openView(recipe)}>🍳</div>
                 )}
                 <button
                   className="card-plan-btn"
@@ -602,7 +663,7 @@ export default function RecipesPage() {
                 </button>
                 {recipe.can_edit ? (
                   <>
-                    <button className="btn btn-ghost btn-sm" onClick={() => openEditModal(recipe)}>Edit</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => void openEditModal(recipe)}>Edit</button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
                   </>
                 ) : (
@@ -837,6 +898,8 @@ function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPubli
 }) {
   const [noteDraft, setNoteDraft] = useState(recipe.my_note ?? '');
   useEffect(() => { setNoteDraft(recipe.my_note ?? ''); }, [recipe.id, recipe.my_note]);
+  const ingredients = recipe.ingredients ?? [];
+  const steps = recipe.steps ?? [];
   return (
     <>
       <div className="page-header">
@@ -948,7 +1011,7 @@ function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPubli
           <div className="recipe-meta-label">Servings</div>
         </div>
         <div className="recipe-meta-item">
-          <div className="recipe-meta-value">{recipe.ingredients.length}</div>
+          <div className="recipe-meta-value">{ingredients.length}</div>
           <div className="recipe-meta-label">Ingredients</div>
         </div>
       </div>
@@ -956,11 +1019,11 @@ function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPubli
       <div className="two-col">
         <div>
           <h2 className="section-title">Ingredients</h2>
-          {recipe.ingredients.length === 0 ? (
+          {ingredients.length === 0 ? (
             <p style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>No ingredients listed</p>
           ) : (
             <ul className="ingredient-list">
-              {recipe.ingredients.map((ing, i) => (
+              {ingredients.map((ing, i) => (
                 <li key={i}>
                   <span className="ingredient-amount">{[ing.amount, ing.unit].filter(Boolean).join(' ')}</span>
                   <span>{ing.name}</span>
@@ -972,11 +1035,11 @@ function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPubli
         </div>
         <div>
           <h2 className="section-title">Method</h2>
-          {recipe.steps.length === 0 ? (
+          {steps.length === 0 ? (
             <p style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>No steps listed</p>
           ) : (
             <ol className="step-list">
-              {recipe.steps.map((step, i) => (
+              {steps.map((step, i) => (
                 <li key={i}>{step}</li>
               ))}
             </ol>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createRecipe, listRecipes, setupDatabase } from '@/lib/db';
+import { createRecipe, listRecipeCards } from '@/lib/db';
 import { canPublishRecipe } from '@/lib/visibility';
 import { isAuthUser, optionalUser, requireUser } from '@/lib/session';
 
@@ -7,12 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    await setupDatabase();
     const user = await optionalUser(req);
     const { searchParams } = new URL(req.url);
     const includePublic = searchParams.get('includePublic') === '1';
     const ownedOnly = searchParams.get('ownedOnly') === '1';
-    const recipes = await listRecipes({
+    const recipes = await listRecipeCards({
       viewerId: user?.id ?? null,
       includePublic,
       ownedOnly,

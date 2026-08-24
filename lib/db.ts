@@ -42,8 +42,9 @@ export interface Recipe {
   servings: number;
   prep_time?: number;
   cook_time?: number;
-  ingredients: Ingredient[];
-  steps: string[];
+  /** Omitted on list cards; always arrays on detail and write responses. */
+  ingredients?: Ingredient[];
+  steps?: string[];
   tags: string[];
   primary_protein?: string;
   created_at: string;
@@ -140,6 +141,8 @@ export async function setupDatabase() {
   await ensureAppSettingsTable();
   await ensurePlannedOnColumns();
   await ensureAccountsSchema();
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_owner_created ON recipes(owner_id, created_at DESC)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_visibility_created ON recipes(visibility, created_at DESC)`);
 }
 
 let _appSettingsReady = false;
@@ -325,6 +328,9 @@ export async function ensureAccountsSchema(): Promise<void> {
     )
   `);
 
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_owner_created ON recipes(owner_id, created_at DESC)`);
+  await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_visibility_created ON recipes(visibility, created_at DESC)`);
+
   _accountsReady = true;
 }
 
@@ -461,12 +467,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await pool().query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
 }
 
-export async function listRecipes(opts: {
+function recipeListFilter(opts: {
   viewerId: string | null;
   includePublic?: boolean;
   ownedOnly?: boolean;
-}): Promise<Recipe[]> {
-  await ensureAccountsSchema();
+}): { where: string; params: unknown[] } {
   const viewerId = opts.viewerId;
   let where: string;
   const params: unknown[] = [];
@@ -479,6 +484,18 @@ export async function listRecipes(opts: {
     where = `(r.owner_id = $1 OR r.visibility = 'public')`;
     params.push(viewerId);
   }
+  return { where, params };
+}
+
+/** Full recipes including ingredients and steps. Used by retag and the ingredient dictionary. */
+export async function listRecipes(opts: {
+  viewerId: string | null;
+  includePublic?: boolean;
+  ownedOnly?: boolean;
+}): Promise<Recipe[]> {
+  await ensureAccountsSchema();
+  const viewerId = opts.viewerId;
+  const { where, params } = recipeListFilter(opts);
 
   const ratingJoin = viewerId
     ? `LEFT JOIN recipe_ratings rr ON rr.recipe_id = r.id AND rr.user_id = $${params.length + 1}
@@ -499,6 +516,35 @@ export async function listRecipes(opts: {
   return result.rows.map(row => normalizeRecipe(row, viewerId));
 }
 
+/** Cookbook grid: card fields only. Does not migrate schema. */
+export async function listRecipeCards(opts: {
+  viewerId: string | null;
+  includePublic?: boolean;
+  ownedOnly?: boolean;
+}): Promise<Recipe[]> {
+  const viewerId = opts.viewerId;
+  const { where, params } = recipeListFilter(opts);
+
+  const ratingJoin = viewerId
+    ? `LEFT JOIN recipe_ratings rr ON rr.recipe_id = r.id AND rr.user_id = $${params.length + 1}`
+    : '';
+  if (viewerId) params.push(viewerId);
+
+  const result = await pool().query(
+    `SELECT r.id, r.title, r.description, r.source_url, r.image_url, r.servings,
+            r.prep_time, r.cook_time, r.tags, r.primary_protein, r.created_at, r.updated_at,
+            r.owner_id, r.visibility, u.display_name AS owner_display_name
+            ${viewerId ? ', rr.stars AS my_rating' : ''}
+       FROM recipes r
+       JOIN users u ON u.id = r.owner_id
+       ${ratingJoin}
+      WHERE ${where}
+      ORDER BY r.created_at DESC`,
+    params,
+  );
+  return result.rows.map(row => normalizeRecipe(row, viewerId, { includeMethod: false }));
+}
+
 export async function getAllRecipes(): Promise<Recipe[]> {
   await ensureAccountsSchema();
   const result = await pool().query(
@@ -510,7 +556,6 @@ export async function getAllRecipes(): Promise<Recipe[]> {
 }
 
 export async function getRecipeById(id: string, viewerId?: string | null): Promise<Recipe | null> {
-  await ensureAccountsSchema();
   const params: unknown[] = [id];
   const ratingJoin = viewerId
     ? `LEFT JOIN recipe_ratings rr ON rr.recipe_id = r.id AND rr.user_id = $2
@@ -555,8 +600,8 @@ export async function createRecipe(
       data.servings || 4,
       data.prep_time || null,
       data.cook_time || null,
-      JSON.stringify(data.ingredients),
-      JSON.stringify(data.steps),
+      JSON.stringify(data.ingredients || []),
+      JSON.stringify(data.steps || []),
       JSON.stringify(tags),
       primaryProtein,
       data.owner_id,
@@ -636,8 +681,8 @@ export async function duplicateRecipe(id: string, ownerId: string): Promise<Reci
     servings: source.servings,
     prep_time: source.prep_time,
     cook_time: source.cook_time,
-    ingredients: source.ingredients,
-    steps: source.steps,
+    ingredients: source.ingredients || [],
+    steps: source.steps || [],
     tags: source.tags,
     primary_protein: source.primary_protein,
     owner_id: ownerId,
@@ -828,20 +873,32 @@ export async function removeFromMealPlan(id: string, ownerId: string): Promise<b
   return (result.rowCount ?? 0) > 0;
 }
 
-function normalizeRecipe(row: Record<string, unknown>, viewerId: string | null = null): Recipe {
+function normalizeRecipe(
+  row: Record<string, unknown>,
+  viewerId: string | null = null,
+  opts: { includeMethod?: boolean } = {},
+): Recipe {
   const ownerId = row.owner_id as string;
-  return {
+  const includeMethod = opts.includeMethod !== false;
+  const recipe = {
     ...row,
-    ingredients: Array.isArray(row.ingredients) ? row.ingredients : [],
-    steps: Array.isArray(row.steps) ? row.steps : [],
     tags: Array.isArray(row.tags) ? row.tags : [],
     owner_id: ownerId,
     visibility: parseVisibility(row.visibility),
     owner_display_name: (row.owner_display_name as string) || undefined,
     can_edit: !!viewerId && viewerId === ownerId,
     my_rating: row.my_rating == null ? null : Number(row.my_rating),
-    my_note: (row.my_note as string) || null,
   } as Recipe;
+  if (includeMethod) {
+    recipe.ingredients = Array.isArray(row.ingredients) ? row.ingredients : [];
+    recipe.steps = Array.isArray(row.steps) ? row.steps : [];
+    recipe.my_note = (row.my_note as string) || null;
+  } else {
+    delete recipe.ingredients;
+    delete recipe.steps;
+    delete recipe.my_note;
+  }
+  return recipe;
 }
 
 export async function getPlannerNotes(weekStart: string, ownerId: string): Promise<Record<number, string>> {

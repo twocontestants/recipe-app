@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const changes: Array<{ title: string; primary_protein?: string; tags: string[] }> = [];
 
     for (const r of recipes) {
-      const auto = autoTag(r.title, r.ingredients, r.tags || []);
+      const auto = autoTag(r.title, r.ingredients || [], r.tags || []);
       const setProtein = !r.primary_protein && !!auto.primary_protein;
 
       const before = [...(r.tags || [])].map(t => t.toLowerCase()).sort().join('|');
