@@ -3,6 +3,8 @@ import { mealOnDate } from './plannerDate';
 
 export const HOLD_MS = 400;
 export const MOVE_CANCEL_PX = 8;
+export const EDGE_SCROLL_BAND_PX = 72;
+export const EDGE_SCROLL_MAX_PX = 24;
 export const RAIL_MIN_DAYS = 5;
 export const RAIL_MAX_DAYS = 11;
 export const RAIL_DAYS = RAIL_MIN_DAYS;
@@ -54,6 +56,38 @@ export function movementExceededThreshold(
   threshold = MOVE_CANCEL_PX,
 ): boolean {
   return Math.hypot(dx, dy) >= threshold;
+}
+
+/** On the dedicated handle, movement past the threshold starts a drag (desktop click-drag). */
+export function shouldArmFromMovement(
+  armed: boolean,
+  dx: number,
+  dy: number,
+  threshold = MOVE_CANCEL_PX,
+): boolean {
+  return !armed && movementExceededThreshold(dx, dy, threshold);
+}
+
+/** Pixels to scroll this frame when the pointer sits in a viewport edge band. */
+export function edgeScrollDelta(
+  clientY: number,
+  viewportHeight: number,
+  reservedBottom = 0,
+  bandPx = EDGE_SCROLL_BAND_PX,
+  maxPx = EDGE_SCROLL_MAX_PX,
+): number {
+  if (viewportHeight <= 0 || bandPx <= 0 || maxPx <= 0) return 0;
+  const topLimit = bandPx;
+  const bottomLimit = viewportHeight - Math.max(0, reservedBottom) - bandPx;
+  if (clientY < topLimit) {
+    const t = Math.min(1, (topLimit - clientY) / bandPx);
+    return -Math.max(1, Math.round(t * maxPx));
+  }
+  if (clientY > bottomLimit) {
+    const t = Math.min(1, (clientY - bottomLimit) / bandPx);
+    return Math.max(1, Math.round(t * maxPx));
+  }
+  return 0;
 }
 
 export function addCalendarDays(iso: string, days: number): string {
