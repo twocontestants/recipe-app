@@ -4,15 +4,14 @@ import type { Ref } from 'react';
 
 export function openNativeDatePicker(el: HTMLInputElement | null) {
   if (!el) return;
-  const open = () => {
+  try {
+    if (typeof el.showPicker === 'function') el.showPicker();
+    else el.focus();
+  } catch {
     try {
-      if (typeof el.showPicker === 'function') el.showPicker();
-      else el.focus();
-    } catch {
       el.focus();
-    }
-  };
-  requestAnimationFrame(open);
+    } catch { /* ignore */ }
+  }
 }
 
 type Props = {

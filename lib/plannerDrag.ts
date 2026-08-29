@@ -137,6 +137,15 @@ export function pointInRect(x: number, y: number, rect: HitRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+export function sameDragTarget(a: DragTarget, b: DragTarget): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.type !== b.type) return false;
+  if (a.type === 'week-day' && b.type === 'week-day') return a.index === b.index && a.iso === b.iso;
+  if (a.type === 'rail-day' && b.type === 'rail-day') return a.iso === b.iso;
+  if (a.type === 'rail-pick' && b.type === 'rail-pick') return a.direction === b.direction;
+  return false;
+}
+
 export function resolveDragTarget(
   x: number,
   y: number,

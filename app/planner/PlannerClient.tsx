@@ -47,6 +47,7 @@ import {
   edgeScrollDelta,
   railDayCount,
   resolveDragTarget,
+  sameDragTarget,
   shouldAllowDrag,
   shouldArmFromMovement,
   surroundingRailDays,
@@ -812,7 +813,9 @@ export default function PlannerClient() {
       if (dy !== 0) {
         window.scrollBy(0, dy);
         const target = resolveDragTarget(session.x, session.y, weekHits(), railHits());
-        updateDrag({ ...session, target });
+        if (!sameDragTarget(session.target, target)) {
+          updateDrag({ ...session, target });
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1031,12 +1034,14 @@ export default function PlannerClient() {
                         >
                           <button
                             type="button"
+                            draggable={false}
                             className={`pl-drag-handle${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${shouldAllowDrag(meal.id) ? '' : ' is-disabled'}`}
                             title="Drag to move"
                             aria-label="Drag to move"
                             disabled={!shouldAllowDrag(meal.id)}
                             onClick={e => { e.preventDefault(); e.stopPropagation(); }}
                             onContextMenu={e => e.preventDefault()}
+                            onDragStart={e => e.preventDefault()}
                             onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
                           >
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

@@ -18,11 +18,6 @@ describe('HiddenDatePicker', () => {
     const showPicker = vi.fn();
     const el = { showPicker, focus: vi.fn() } as unknown as HTMLInputElement;
     openNativeDatePicker(el);
-    return new Promise<void>(resolve => {
-      requestAnimationFrame(() => {
-        expect(showPicker).toHaveBeenCalledTimes(1);
-        resolve();
-      });
-    });
+    expect(showPicker).toHaveBeenCalledTimes(1);
   });
 });

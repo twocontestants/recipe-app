@@ -8,6 +8,7 @@ import {
   bottomNavReserve,
   railDayCount,
   resolveDragTarget,
+  sameDragTarget,
   shouldAllowDrag,
   surroundingRailDays,
   surroundingTenDays,
@@ -124,6 +125,24 @@ const weekHits: WeekHit[] = [
 const railHits: RailHit[] = [
   { iso: '2026-08-22', left: 310, right: 400, top: 200, bottom: 300 },
 ];
+
+describe('sameDragTarget', () => {
+  it('treats matching week, rail, and pick targets as the same', () => {
+    expect(sameDragTarget(null, null)).toBe(true);
+    expect(sameDragTarget(
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+    )).toBe(true);
+    expect(sameDragTarget(
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+      { type: 'week-day', index: 3, iso: '2026-08-20' },
+    )).toBe(false);
+    expect(sameDragTarget(
+      { type: 'rail-pick', direction: 'later' },
+      { type: 'rail-pick', direction: 'later' },
+    )).toBe(true);
+  });
+});
 
 describe('resolveDragTarget', () => {
   it('prefers a rail day when the pointer is over the rail even if a week row shares that Y', () => {
