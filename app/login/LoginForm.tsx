@@ -76,7 +76,7 @@ export default function LoginForm() {
           {mode === 'login' ? (
             <label className="form-group">
               Email or name
-              <input value={login} onChange={e => setLogin(e.target.value)} autoComplete="username" required />
+              <input type="text" value={login} onChange={e => setLogin(e.target.value)} autoComplete="username" required />
             </label>
           ) : (
             <>
@@ -86,7 +86,7 @@ export default function LoginForm() {
               </label>
               <label className="form-group">
                 Display name
-                <input value={displayName} onChange={e => setDisplayName(e.target.value)} autoComplete="nickname" placeholder="Optional" />
+                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} autoComplete="nickname" placeholder="Optional" />
               </label>
             </>
           )}
@@ -94,11 +94,11 @@ export default function LoginForm() {
             Password
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required />
           </label>
-          <button className="btn btn-primary" type="submit" disabled={saving}>
+          <button className="btn btn-primary login-submit" type="submit" disabled={saving}>
             {saving ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
-        <button className="link-btn" type="button" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setError(''); }}>
+        <button className="login-switch" type="button" onClick={() => { setMode(m => m === 'login' ? 'register' : 'login'); setError(''); }}>
           {mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Sign in'}
         </button>
       </div>
