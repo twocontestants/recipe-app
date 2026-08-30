@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
 import { CATEGORY_ORDER, CATEGORY_EMOJI, aggregateContributions, normalizeIngredientName } from '@/lib/shopping';
 import {
-  adoptCheckedState,
+  checkedMapFromItems,
   isShoppingListDetail,
   mergeRecipeSourceMaps,
   migrateShoppingListShape,
   recipeSourceMapFromItems,
+  rowIsChecked,
+  shoppingSubtitleSig,
   shouldAdoptCheckedState,
   type ShoppingListMeta,
 } from '@/lib/shoppingList';
@@ -33,6 +35,7 @@ interface ResolvedItem {
   originalServerName?: string; recipes?: string[];
   contributions?: ResolvedContribution[];
   isDetached?: boolean;
+  checked?: boolean;
 }
 
 // ── Shopper name ──────────────────────────────────────────────────────────────
@@ -95,7 +98,7 @@ function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onTog
     <div className={`shop-item-wrap ${isDragging ? 'item-dragging' : ''} ${isDropBefore ? 'drop-before-item' : ''} ${isDropAfter ? 'drop-after-item' : ''}`} onDragOver={onDragOverItem} onDrop={onDropOnItem}>
       <div className={`shop-item ${isChecked ? 'is-checked' : ''}`}>
         <div className="item-drag-handle no-print" draggable onDragStart={onDragStart} onDragEnd={onDragEnd}><DragHandle size={11} /></div>
-        <div className="shop-checkbox" onClick={onToggle}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div className="shop-checkbox" role="checkbox" aria-checked={isChecked} onClick={onToggle}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
         <div className="shop-item-name-wrap">
           {!isGrouped && recipes && recipes.length > 0 && (
             <div className="recipe-source-bar" title={recipes.join(', ')}>
@@ -243,7 +246,7 @@ export default function ShoppingListClient() {
   // redundant saves: the no-op resave right after a load, the ping-pong from a
   // remote refetch, and re-persisting a delta a remote client already saved.
   // Subtitle is still debounced (it's typed), so it keeps a small signature.
-  const lastSubtitleSig = useRef<string>('');
+  const lastSubtitleSig = useRef<string>(shoppingSubtitleSig(''));
   const subtitleRef = useRef(subtitle); subtitleRef.current = subtitle;
   // Op-based sync: structural + checked edits are sent as targeted operations.
   // `pendingOps` counts queued/in-flight op requests; while > 0 a resync must
@@ -320,12 +323,19 @@ export default function ShoppingListClient() {
     // A check/uncheck from another client — apply it locally. The originating
     // client already persisted it via a check op, so we don't re-save.
     socket.on('item-updated', ({ itemName, checked: isChecked, checkedBy }: any) => {
-      setChecked(prev => {
-        const next = { ...prev };
-        if (isChecked) next[itemName] = true;
-        else delete next[itemName];
-        return next;
-      });
+      setChecked(prev => ({ ...prev, [itemName]: !!isChecked }));
+      setServerItems(prev => prev.map(si => {
+        const id = si.id ?? si.name;
+        if (id === itemName) return { ...si, checked: !!isChecked };
+        if (itemName.startsWith(`${id}#`)) {
+          const index = Number(itemName.slice(id.length + 1));
+          const contributions = (si.contributions ?? []).map((c, i) => (
+            i === index ? { ...c, checked: !!isChecked } : c
+          ));
+          return { ...si, contributions };
+        }
+        return si;
+      }));
       if (checkedBy !== shopperName) {
         const label = keyToNameRef.current[itemName] ?? itemName;
         const msg = isChecked ? `${label} checked off` : `${label} unchecked`;
@@ -335,7 +345,14 @@ export default function ShoppingListClient() {
       }
     });
     // Another client cleared all checks.
-    socket.on('cleared', () => { setChecked({}); });
+    socket.on('cleared', () => {
+      setChecked({});
+      setServerItems(prev => prev.map(si => ({
+        ...si,
+        checked: false,
+        contributions: (si.contributions ?? []).map(c => ({ ...c, checked: false })),
+      })));
+    });
     // Another client changed the list structure (add/delete/rename/reorder/
     // subtitle) and persisted it. Re-pull the structural state from the DB.
     socket.on('list-changed', () => { if (activeIdRef.current) fetchActiveList(activeIdRef.current, true); });
@@ -371,9 +388,9 @@ export default function ShoppingListClient() {
   useEffect(() => {
     const flush = () => {
       if (!activeIdRef.current) return;
-      if (JSON.stringify(subtitleRef.current) !== lastSubtitleSig.current) {
+      if (shoppingSubtitleSig(subtitleRef.current) !== lastSubtitleSig.current) {
         sendOps([{ t: 'setSubtitle', subtitle: subtitleRef.current }]);
-        lastSubtitleSig.current = JSON.stringify(subtitleRef.current);
+        lastSubtitleSig.current = shoppingSubtitleSig(subtitleRef.current);
       }
     };
     const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
@@ -467,14 +484,13 @@ export default function ShoppingListClient() {
 
       // subtitle is debounced, so guard it with its own signature
       const dbSub = data.subtitle ?? '';
-      const subUnsaved = JSON.stringify(subtitleRef.current) !== lastSubtitleSig.current;
-      if (!subUnsaved) { setSubtitle(dbSub); lastSubtitleSig.current = JSON.stringify(dbSub); }
+      const subUnsaved = shoppingSubtitleSig(subtitleRef.current) !== lastSubtitleSig.current;
+      if (!subUnsaved) { setSubtitle(dbSub); lastSubtitleSig.current = shoppingSubtitleSig(dbSub); }
 
-      // checked: the DB row is source of truth, including after a structural
-      // refetch (live deltas can miss). Skip only while local ops are in flight.
-      const nextChecked = adoptCheckedState(data);
-      if (nextChecked !== undefined && shouldAdoptCheckedState({ busy })) {
-        setChecked(nextChecked);
+      // Overlay map for live deltas. Rows also read item.checked so a tick
+      // still shows if this adopt is skipped while an unrelated op is in flight.
+      if (shouldAdoptCheckedState({ busy })) {
+        setChecked(checkedMapFromItems(folded.items));
       }
 
       isFirstLoad.current = false;
@@ -491,7 +507,7 @@ export default function ShoppingListClient() {
   // sent immediately as ops by their handlers.
   useEffect(() => {
     if (!activeId) return;
-    const sig = JSON.stringify(subtitle);
+    const sig = shoppingSubtitleSig(subtitle);
     if (sig === lastSubtitleSig.current) return;
     const t = setTimeout(() => {
       sendOps([{ t: 'setSubtitle', subtitle }]);
@@ -519,6 +535,7 @@ export default function ShoppingListClient() {
           displayAmount: ov.displayAmount ?? (si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : ''),
           resolvedCategory: ov.category ?? si.category,
           isCustom: true,
+          checked: si.checked === true,
         });
         continue;
       }
@@ -547,6 +564,7 @@ export default function ShoppingListClient() {
           originalServerName: si.name,
           recipes: [...new Set(remaining.map(c => c.recipe).filter(Boolean))],
           contributions: remaining,
+          checked: si.checked === true,
         });
       }
 
@@ -563,6 +581,7 @@ export default function ShoppingListClient() {
           originalServerName: si.name,
           recipes: c.recipe ? [c.recipe] : [],
           isDetached: true,
+          checked: c.checked === true,
         });
       }
     }
@@ -589,15 +608,16 @@ export default function ShoppingListClient() {
 
   const getCatLabel = (cat: string) => categoryLabels[cat] || cat;
   const allItemKeys = resolvedItems.map(i => i.key);
-  const checkedCount = allItemKeys.filter(k => checked[k]).length;
+  const itemIsChecked = (item: ResolvedItem) => rowIsChecked(item.key, checked, item.checked);
+  const checkedCount = resolvedItems.filter(itemIsChecked).length;
   const totalCount = allItemKeys.length;
   const progress = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
 
   // ── Toggle ────────────────────────────────────────────────────────────────
 
   const toggleItem = (item: ResolvedItem) => {
-    const key = item.key; const isNowChecked = !checked[key];
-    setChecked(prev => { const next = { ...prev }; if (isNowChecked) next[key] = true; else delete next[key]; return next; });
+    const key = item.key; const isNowChecked = !itemIsChecked(item);
+    setChecked(prev => ({ ...prev, [key]: isNowChecked }));
     setServerItems(prev => prev.map(si => {
       const id = si.id ?? si.name;
       if (id === key) return { ...si, checked: isNowChecked };
@@ -649,7 +669,7 @@ export default function ShoppingListClient() {
       ops.push({ t: 'removeCustom', id: item.key });
     }
     else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } })); ops.push({ t: 'override', key: item.key, patch: { hidden: true } }); }
-    if (checked[item.key]) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
+    if (itemIsChecked(item)) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
     setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; });
     ops.push({ t: 'check', key: item.key, checked: false });
     sendOps(ops);
@@ -833,7 +853,7 @@ export default function ShoppingListClient() {
   const handleCopy = async () => {
     const lines: string[] = [];
     for (const cat of orderedCats) {
-      const catItems = getItemsForCat(cat).filter(i => !checked[i.key]);
+      const catItems = getItemsForCat(cat).filter(i => !itemIsChecked(i));
       if (!catItems.length) continue;
       lines.push(`\n${getCatLabel(cat)}`);
       catItems.forEach(i => lines.push(`  □ ${i.displayName}${i.displayAmount ? ' — ' + i.displayAmount : ''}`));
@@ -963,8 +983,8 @@ export default function ShoppingListClient() {
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
             if (!catItems.length && insertingIn?.cat !== cat) return null;
-            const checkedCat = catItems.filter(i => checked[i.key]);
-            const visibleItems = hideChecked ? catItems.filter(i => !checked[i.key]) : catItems;
+            const checkedCat = catItems.filter(itemIsChecked);
+            const visibleItems = hideChecked ? catItems.filter(i => !itemIsChecked(i)) : catItems;
             // When hiding checked items, drop categories that have nothing left to show.
             if (hideChecked && !visibleItems.length && insertingIn?.cat !== cat) return null;
             const isCatDragging = dragCat === cat;
@@ -998,7 +1018,7 @@ export default function ShoppingListClient() {
                   {visibleItems.map(item => (
                     <div key={item.key}>
                       <ItemRow
-                        item={item} isChecked={!!checked[item.key]}
+                        item={item} isChecked={itemIsChecked(item)}
                         isDragging={dragItem === item.key}
                         isDropBefore={dropItemTarget?.key === item.key && dropItemTarget.position === 'before'}
                         isDropAfter={dropItemTarget?.key === item.key && dropItemTarget.position === 'after'}

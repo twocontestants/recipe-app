@@ -305,6 +305,25 @@ export function shouldAdoptCheckedState(opts: { busy: boolean }): boolean {
   return !opts.busy;
 }
 
+/**
+ * A row is ticked when the live overlay says so, or — if that key was never
+ * adopted — when the item itself is ticked. Overlay `false` wins so a live
+ * uncheck is not undone by a stale item.checked.
+ */
+export function rowIsChecked(
+  key: string,
+  overlay: ShoppingCheckedMap,
+  itemChecked?: boolean,
+): boolean {
+  if (Object.prototype.hasOwnProperty.call(overlay, key)) return overlay[key] === true;
+  return itemChecked === true;
+}
+
+/** Signature used to skip a no-op subtitle save after load. Must match JSON.stringify. */
+export function shoppingSubtitleSig(subtitle: string): string {
+  return JSON.stringify(subtitle);
+}
+
 /** Deterministic id for a pre-id snapshot row so remigration does not reshuffle keys. */
 export function stableShoppingItemId(name: string, index: number): string {
   const input = `${index}:${name}`;
