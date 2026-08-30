@@ -8,10 +8,19 @@ import { useAuth } from '@/components/AuthProvider';
 import { RecipeDetail } from '@/components/RecipeDetail';
 import { RecipeFormModal } from '@/components/RecipeFormModal';
 import { useAddToPlannerModal } from '@/components/useAddToPlannerModal';
-import { recipeViewPath, recipeWantsEdit } from '@/lib/recipeLinks';
+import { recipeEditPath, recipeViewPath, recipeWantsEdit } from '@/lib/recipeLinks';
+import { recipeSlug } from '@/lib/recipeSlug';
 import { EMPTY_RECIPE_FORM, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
 
-export default function RecipePageClient({ recipeId }: { recipeId: string }) {
+export default function RecipePageClient({
+  recipeId,
+  urlSlug,
+  extraSlugSegments = false,
+}: {
+  recipeId: string;
+  urlSlug?: string;
+  extraSlugSegments?: boolean;
+}) {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,7 +33,10 @@ export default function RecipePageClient({ recipeId }: { recipeId: string }) {
   const openedEditRef = useRef(false);
   const { openPlannerModal, plannerModalJsx } = useAddToPlannerModal(user?.id);
 
-  const loginNext = `/login?next=${encodeURIComponent(recipeViewPath(recipeId))}`;
+  const pathFor = (id: string, title?: string | null) => (
+    recipeWantsEdit(searchParams) ? recipeEditPath(id, title) : recipeViewPath(id, title)
+  );
+  const loginNext = `/login?next=${encodeURIComponent(pathFor(recipeId, recipe?.title))}`;
 
   const loadRecipe = useCallback(async () => {
     setLoading(true);
@@ -50,6 +62,12 @@ export default function RecipePageClient({ recipeId }: { recipeId: string }) {
   useEffect(() => { void loadRecipe(); }, [loadRecipe]);
 
   useEffect(() => {
+    if (!recipe) return;
+    if (!extraSlugSegments && urlSlug === recipeSlug(recipe.title)) return;
+    router.replace(pathFor(recipe.id, recipe.title));
+  }, [recipe, urlSlug, extraSlugSegments, searchParams, router]);
+
+  useEffect(() => {
     openedEditRef.current = false;
   }, [recipeId]);
 
@@ -68,7 +86,7 @@ export default function RecipePageClient({ recipeId }: { recipeId: string }) {
 
   const closeEditor = () => {
     setShowEditor(false);
-    if (recipeWantsEdit(searchParams)) router.replace(recipeViewPath(recipeId));
+    if (recipeWantsEdit(searchParams)) router.replace(recipeViewPath(recipeId, recipe?.title));
   };
 
   const handleSave = async () => {
@@ -111,7 +129,7 @@ export default function RecipePageClient({ recipeId }: { recipeId: string }) {
       if (!res.ok) throw new Error((await res.json()).error);
       const copy = await res.json() as Recipe;
       showToast('Copied to your kitchen — you can edit this one', 'success');
-      router.replace(recipeViewPath(copy.id));
+      router.replace(recipeViewPath(copy.id, copy.title));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Could not duplicate', 'error');
     }

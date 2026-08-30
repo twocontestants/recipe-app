@@ -89,6 +89,27 @@ describe('RecipePageClient', () => {
     expect(urls.some(url => url === '/api/recipes' || url.startsWith('/api/recipes?'))).toBe(false);
     expect(urls).toContain('/api/recipes/abc-123');
     expect(screen.queryByText(/My Recipes|Public Recipes|Your cookbook is empty/i)).toBeNull();
+    expect(replace).toHaveBeenCalledWith('/recipes/abc-123/tomato-soup');
+  });
+
+  it('does not turn a hostile title into HTML and keeps the url slug safe', async () => {
+    const hostile = { ...recipe, title: '<img src=x onerror=alert(1)>' };
+    mockFetch(url => {
+      if (url === '/api/recipes/abc-123') return { json: async () => hostile };
+      if (url === '/api/preferences') return { json: async () => ({ weekStartDay: 'monday' }) };
+      return { ok: false, status: 404 };
+    });
+
+    render(
+      <ToastProvider>
+        <RecipePageClient recipeId="abc-123" urlSlug={'<script>alert(1)</script>'} />
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '<img src=x onerror=alert(1)>' })).toBeTruthy();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+    expect(document.querySelector('script')).toBeNull();
+    expect(replace).toHaveBeenCalledWith('/recipes/abc-123/recipe');
   });
 
   it('opens the editor when the dedicated page is asked to edit', async () => {

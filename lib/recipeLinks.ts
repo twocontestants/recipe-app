@@ -1,11 +1,15 @@
+import { recipeSlug } from './recipeSlug';
+
 export type RecipeDeepLink = { mode: 'view' | 'edit'; id: string };
 
-export function recipeViewPath(id: string): string {
-  return `/recipes/${encodeURIComponent(id)}`;
+export function recipeViewPath(id: string, title?: string | null): string {
+  const idPart = encodeURIComponent(id);
+  if (title === undefined || title === null) return `/recipes/${idPart}`;
+  return `/recipes/${idPart}/${recipeSlug(title)}`;
 }
 
-export function recipeEditPath(id: string): string {
-  return `/recipes/${encodeURIComponent(id)}?edit=1`;
+export function recipeEditPath(id: string, title?: string | null): string {
+  return `${recipeViewPath(id, title)}?edit=1`;
 }
 
 export function recipeDeepLinkFromSearch(

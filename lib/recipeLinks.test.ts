@@ -13,6 +13,19 @@ describe('recipeLinks', () => {
     expect(recipeViewPath('abc-123')).toBe('/recipes/abc-123');
   });
 
+  it('appends a safe short name when a title is known', () => {
+    expect(recipeViewPath('abc-123', 'Tomato Soup')).toBe('/recipes/abc-123/tomato-soup');
+    expect(recipeEditPath('abc-123', 'Tomato Soup')).toBe('/recipes/abc-123/tomato-soup?edit=1');
+  });
+
+  it('never puts markup or schemes into the path', () => {
+    expect(recipeViewPath('abc-123', '<script>alert(1)</script>')).toBe('/recipes/abc-123/alert-1');
+    expect(recipeViewPath('abc-123', 'javascript:alert(1)')).toBe('/recipes/abc-123/alert-1');
+    expect(recipeViewPath('abc-123', '"><img src=x onerror=alert(1)>')).toBe('/recipes/abc-123/recipe');
+    expect(recipeViewPath('abc-123', '<script>alert(1)</script>')).not.toContain('<');
+    expect(recipeViewPath('abc-123', '<script>alert(1)</script>')).not.toContain('>');
+  });
+
   it('builds a dedicated edit path from a recipe id', () => {
     expect(recipeEditPath('abc-123')).toBe('/recipes/abc-123?edit=1');
   });

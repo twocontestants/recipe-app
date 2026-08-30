@@ -192,7 +192,7 @@ export default function RecipesPage() {
   };
 
   const openView = (r: Recipe) => {
-    router.push(recipeViewPath(r.id));
+    router.push(recipeViewPath(r.id, r.title));
   };
 
   const openEditModal = async (r: Recipe) => {
@@ -366,7 +366,7 @@ export default function RecipesPage() {
       const copy = await res.json() as Recipe;
       setRecipes(rs => upsertRecipeInList(rs, copy));
       showToast('Copied to your kitchen — you can edit this one', 'success');
-      router.push(recipeViewPath(copy.id));
+      router.push(recipeViewPath(copy.id, copy.title));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Could not duplicate', 'error');
     }

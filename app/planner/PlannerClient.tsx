@@ -861,9 +861,9 @@ export default function PlannerClient() {
     });
   };
 
-  const goToRecipe = (recipeId: string, mode: 'view' | 'edit') => {
+  const goToRecipe = (recipeId: string, mode: 'view' | 'edit', title?: string) => {
     if (!recipeId) return;
-    window.location.href = mode === 'edit' ? recipeEditPath(recipeId) : recipeViewPath(recipeId);
+    window.location.href = mode === 'edit' ? recipeEditPath(recipeId, title) : recipeViewPath(recipeId, title);
   };
 
   useEffect(() => {
@@ -1032,7 +1032,7 @@ export default function PlannerClient() {
                               suppressCardClick.current = false;
                               return;
                             }
-                            if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view');
+                            if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view', meal.recipe?.title);
                           }}
                           title="View recipe"
                         >
@@ -1300,15 +1300,16 @@ export default function PlannerClient() {
               dateLabel: getDayDate(weekStart, i).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
             }))}
             onViewRecipe={() => {
-              const { recipeId } = cardMenu;
+              const { recipeId, mealId } = cardMenu;
               setCardMenu(null);
-              goToRecipe(recipeId, 'view');
+              const meal = mealPlans.find(m => m.id === mealId);
+              goToRecipe(recipeId, 'view', meal?.recipe?.title);
             }}
             onEditRecipe={() => {
               const { recipeId, mealId } = cardMenu;
               setCardMenu(null);
               const meal = mealPlans.find(m => m.id === mealId);
-              goToRecipe(recipeId, meal?.recipe?.can_edit ? 'edit' : 'view');
+              goToRecipe(recipeId, meal?.recipe?.can_edit ? 'edit' : 'view', meal?.recipe?.title);
             }}
             onReplace={() => {
               const { mealId, dayIndex } = cardMenu;
