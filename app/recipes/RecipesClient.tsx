@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import type { Recipe, Ingredient } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
+import { PROTEIN_COLORS, PROTEIN_EMOJI, PROTEIN_OPTIONS } from '@/components/ProteinBadge';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
 import { fetchMealsForMonths, fetchMealsForWeeks } from '@/lib/loadPlannerMonth';
 import {
@@ -21,58 +22,13 @@ import {
   type DayKey,
 } from '@/lib/plannerDays';
 import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
-import { recipeDeepLinkFromSearch } from '@/lib/recipeLinks';
+import { recipeViewPath } from '@/lib/recipeLinks';
 import {
   hasRecipeMethod,
   recipeListQueryString,
   removeRecipeFromList,
   upsertRecipeInList,
 } from '@/lib/recipeList';
-
-
-const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
-type ProteinType = typeof PROTEINS[number];
-
-const PROTEIN_COLORS: Record<string, string> = {
-  chicken: '#E8A838',
-  beef:    '#C0392B',
-  pork:    '#D4697A',
-  lamb:    '#8E44AD',
-  fish:    '#2980B9',
-  seafood: '#16A085',
-  tofu:    '#27AE60',
-  eggs:    '#D4AC0D',
-  legumes: '#A04000',
-  dairy:   '#717D7E',
-};
-
-const PROTEIN_EMOJI: Record<string, string> = {
-  chicken: '🍗',
-  beef:    '🥩',
-  pork:    '🐷',
-  lamb:    '🐑',
-  fish:    '🐟',
-  seafood: '🦐',
-  tofu:    '🫘',
-  eggs:    '🥚',
-  legumes: '🫘',
-  dairy:   '🧀',
-};
-
-function ProteinBadge({ protein, size = 'sm' }: { protein?: string; size?: 'sm' | 'xs' }) {
-  if (!protein) return null;
-  const color = PROTEIN_COLORS[protein] || '#888';
-  const emoji = PROTEIN_EMOJI[protein] || '🍽';
-  return (
-    <span
-      className={`protein-badge protein-badge-${size}`}
-      style={{ background: color + '22', color, borderColor: color + '44' }}
-      title={`Primary protein: ${protein}`}
-    >
-      {emoji} {protein}
-    </span>
-  );
-}
 
 
 const EMPTY_RECIPE = {
@@ -102,7 +58,6 @@ export default function RecipesPage() {
   const [scraping, setScraping] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [viewRecipe, setViewRecipe] = useState<Recipe | null>(null);
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [parsing, setParsing] = useState(false);
@@ -212,7 +167,6 @@ export default function RecipesPage() {
       primary_protein: full.primary_protein || '',
     });
     setShowModal(true);
-    setViewRecipe(null);
   };
 
   useEffect(() => {
@@ -237,11 +191,8 @@ export default function RecipesPage() {
     setShowModal(true);
   };
 
-  const openView = async (r: Recipe) => {
-    const full = await ensureRecipeDetail(r);
-    if (!full) return;
-    cacheRecipeDetail(full);
-    setViewRecipe(full);
+  const openView = (r: Recipe) => {
+    router.push(recipeViewPath(r.id));
   };
 
   const openEditModal = async (r: Recipe) => {
@@ -250,35 +201,6 @@ export default function RecipesPage() {
     cacheRecipeDetail(full);
     applyEditForm(full);
   };
-
-  // Auto-open or edit a recipe from ?open= / ?edit= (linked from planner)
-  const searchParams = useSearchParams();
-  const openedLinkRef = useRef<string | null>(null);
-  useEffect(() => {
-    const link = recipeDeepLinkFromSearch(searchParams);
-    if (!link) {
-      openedLinkRef.current = null;
-      return;
-    }
-    const key = `${link.mode}:${link.id}`;
-    if (openedLinkRef.current === key) return;
-    const recipe = recipes.find(r => r.id === link.id);
-    if (!recipe) return;
-    let cancelled = false;
-    openedLinkRef.current = key;
-    void (async () => {
-      const full = hasRecipeMethod(recipe) ? recipe : await fetchRecipeDetail(recipe.id);
-      if (cancelled) return;
-      if (!full) {
-        openedLinkRef.current = null;
-        return;
-      }
-      if (link.mode === 'edit') applyEditForm(full);
-      else setViewRecipe(full);
-      cacheRecipeDetail(full);
-    })();
-    return () => { cancelled = true; };
-  }, [searchParams, recipes]);
 
   const handlePasteImport = async () => {
     if (!pasteText.trim()) return;
@@ -430,7 +352,6 @@ export default function RecipesPage() {
       const res = await fetch(`/api/recipes/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       setRecipes(rs => removeRecipeFromList(rs, id));
-      setViewRecipe(null);
       showToast('Recipe deleted', 'info');
     } catch {
       showToast('Failed to delete recipe', 'error');
@@ -444,57 +365,10 @@ export default function RecipesPage() {
       if (!res.ok) throw new Error((await res.json()).error);
       const copy = await res.json() as Recipe;
       setRecipes(rs => upsertRecipeInList(rs, copy));
-      setViewRecipe(copy);
       showToast('Copied to your kitchen — you can edit this one', 'success');
+      router.push(recipeViewPath(copy.id));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Could not duplicate', 'error');
-    }
-  };
-
-  const handlePublish = async (recipe: Recipe, makePublic: boolean) => {
-    try {
-      const res = await fetch(`/api/recipes/${recipe.id}/${makePublic ? 'publish' : 'unpublish'}`, { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json()).error);
-      const updated = await res.json() as Recipe;
-      setRecipes(rs => upsertRecipeInList(rs, updated));
-      setViewRecipe(updated);
-      showToast(makePublic ? 'Recipe is public' : 'Recipe is private', 'success');
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not change visibility', 'error');
-    }
-  };
-
-  const handleRating = async (recipe: Recipe, stars: number | null) => {
-    if (!user) { router.push('/login?next=/recipes'); return; }
-    try {
-      const res = await fetch(`/api/recipes/${recipe.id}/rating`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stars }),
-      });
-      if (!res.ok) throw new Error();
-      const next = { ...recipe, my_rating: stars };
-      setViewRecipe(next);
-      setRecipes(rs => rs.map(r => r.id === recipe.id ? next : r));
-    } catch {
-      showToast('Could not save rating', 'error');
-    }
-  };
-
-  const handleNote = async (recipe: Recipe, note: string) => {
-    if (!user) { router.push('/login?next=/recipes'); return; }
-    try {
-      const res = await fetch(`/api/recipes/${recipe.id}/notes`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note }),
-      });
-      if (!res.ok) throw new Error();
-      const next = { ...recipe, my_note: note };
-      setViewRecipe(next);
-      setRecipes(rs => rs.map(r => r.id === recipe.id ? next : r));
-    } catch {
-      showToast('Could not save note', 'error');
     }
   };
 
@@ -551,24 +425,6 @@ export default function RecipesPage() {
       weekStartsOn={weekStartsOn}
     />
   );
-
-  if (viewRecipe) {
-    return <>
-      <RecipeDetail
-        recipe={viewRecipe}
-        signedIn={!!user}
-        onEdit={viewRecipe.can_edit ? () => openEditModal(viewRecipe) : undefined}
-        onDelete={viewRecipe.can_edit ? () => handleDelete(viewRecipe.id) : undefined}
-        onDuplicate={() => handleDuplicate(viewRecipe)}
-        onPublish={viewRecipe.can_publish ? (pub) => handlePublish(viewRecipe, pub) : undefined}
-        onRate={(stars) => handleRating(viewRecipe, stars)}
-        onNote={(note) => handleNote(viewRecipe, note)}
-        onBack={() => setViewRecipe(null)}
-        onAddToPlanner={() => openPlannerModal(viewRecipe)}
-      />
-      {plannerModalJsx}
-    </>;
-  }
 
   return (
     <>
@@ -741,7 +597,7 @@ export default function RecipesPage() {
                   >
                     None / Veg
                   </button>
-                  {PROTEINS.map(p => (
+                  {PROTEIN_OPTIONS.map(p => (
                     <button
                       key={p}
                       type="button"
@@ -884,168 +740,3 @@ export default function RecipesPage() {
   );
 }
 
-function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onRate, onNote, onBack, onAddToPlanner }: {
-  recipe: Recipe;
-  signedIn: boolean;
-  onEdit?: () => void;
-  onDelete?: () => void;
-  onDuplicate: () => void;
-  onPublish?: (makePublic: boolean) => void;
-  onRate: (stars: number | null) => void;
-  onNote: (note: string) => void;
-  onBack: () => void;
-  onAddToPlanner: () => void;
-}) {
-  const [noteDraft, setNoteDraft] = useState(recipe.my_note ?? '');
-  useEffect(() => { setNoteDraft(recipe.my_note ?? ''); }, [recipe.id, recipe.my_note]);
-  const ingredients = recipe.ingredients ?? [];
-  const steps = recipe.steps ?? [];
-  return (
-    <>
-      <div className="page-header">
-        <div className="page-header-leading">
-          <button className="btn btn-ghost" onClick={onBack} style={{ flexShrink: 0 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5M12 19l-7-7 7-7"/>
-            </svg>
-            Back
-          </button>
-          <div>
-            <h1 className="page-title" style={{ fontSize: 'clamp(1.35rem, 5vw, 2rem)' }}>{recipe.title}</h1>
-            {recipe.tags?.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
-                {recipe.tags.map(t => <span key={t} className="tag">{t}</span>)}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="page-header-actions" style={{ gap: '0.5rem' }}>
-          {recipe.source_url && (
-            <a href={recipe.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
-              View Source ↗
-            </a>
-          )}
-          <button className="btn btn-primary btn-sm" onClick={onAddToPlanner}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px' }}><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
-            Add to Planner
-          </button>
-          {onEdit && <button className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>}
-          {onDelete && <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>}
-          {!onEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>Duplicate to edit</button>}
-          {onPublish && recipe.visibility !== 'public' && (
-            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(true)}>Make public</button>
-          )}
-          {onPublish && recipe.visibility === 'public' && (
-            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(false)}>Make private</button>
-          )}
-        </div>
-      </div>
-
-      {recipe.image_url ? (
-        <img src={recipe.image_url} alt={recipe.title} className="recipe-detail-hero" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-      ) : (
-        <div className="recipe-detail-hero-placeholder">🍽️</div>
-      )}
-
-      {recipe.description && (
-        <p style={{ fontSize: '1.05rem', color: 'var(--ink-soft)', marginBottom: '1.5rem', fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 300, lineHeight: 1.6 }}>
-          {recipe.description}
-        </p>
-      )}
-
-      {recipe.primary_protein && (
-        <div style={{ marginBottom: '1rem' }}><ProteinBadge protein={recipe.primary_protein} /></div>
-      )}
-      {recipe.owner_display_name && (
-        <p className="recipe-owner-line">
-          {recipe.visibility === 'public' ? 'Public recipe' : 'Private'} · {recipe.owner_display_name}
-        </p>
-      )}
-      {signedIn && (
-        <div className="recipe-personal">
-          <div className="recipe-stars" role="group" aria-label="Your rating">
-            {[1, 2, 3, 4, 5].map(n => (
-              <button
-                key={n}
-                type="button"
-                className={`star-btn ${(recipe.my_rating ?? 0) >= n ? 'is-on' : ''}`}
-                onClick={() => onRate(recipe.my_rating === n ? null : n)}
-                aria-label={`${n} star${n === 1 ? '' : 's'}`}
-              >★</button>
-            ))}
-          </div>
-          <label className="recipe-note-label">
-            Your notes
-            <textarea
-              className="recipe-note"
-              rows={3}
-              value={noteDraft}
-              onChange={e => setNoteDraft(e.target.value)}
-              onBlur={() => { if (noteDraft !== (recipe.my_note ?? '')) onNote(noteDraft); }}
-              placeholder="Tweaks, reminders, who liked it…"
-            />
-          </label>
-        </div>
-      )}
-      <div className="recipe-meta-bar">
-        {recipe.prep_time && (
-          <div className="recipe-meta-item">
-            <div className="recipe-meta-value">{recipe.prep_time}</div>
-            <div className="recipe-meta-label">Prep (min)</div>
-          </div>
-        )}
-        {recipe.cook_time && (
-          <div className="recipe-meta-item">
-            <div className="recipe-meta-value">{recipe.cook_time}</div>
-            <div className="recipe-meta-label">Cook (min)</div>
-          </div>
-        )}
-        {recipe.prep_time && recipe.cook_time && (
-          <div className="recipe-meta-item">
-            <div className="recipe-meta-value">{recipe.prep_time + recipe.cook_time}</div>
-            <div className="recipe-meta-label">Total (min)</div>
-          </div>
-        )}
-        <div className="recipe-meta-item">
-          <div className="recipe-meta-value">{recipe.servings}</div>
-          <div className="recipe-meta-label">Servings</div>
-        </div>
-        <div className="recipe-meta-item">
-          <div className="recipe-meta-value">{ingredients.length}</div>
-          <div className="recipe-meta-label">Ingredients</div>
-        </div>
-      </div>
-
-      <div className="two-col">
-        <div>
-          <h2 className="section-title">Ingredients</h2>
-          {ingredients.length === 0 ? (
-            <p style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>No ingredients listed</p>
-          ) : (
-            <ul className="ingredient-list">
-              {ingredients.map((ing, i) => (
-                <li key={i}>
-                  <span className="ingredient-amount">{[ing.amount, ing.unit].filter(Boolean).join(' ')}</span>
-                  <span>{ing.name}</span>
-                  {ing.notes && <span style={{ color: 'var(--ink-muted)', fontSize: '0.8rem' }}> ({ing.notes})</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div>
-          <h2 className="section-title">Method</h2>
-          {steps.length === 0 ? (
-            <p style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>No steps listed</p>
-          ) : (
-            <ol className="step-list">
-              {steps.map((step, i) => (
-                <li key={i}>{step}</li>
-              ))}
-            </ol>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}

@@ -1,11 +1,11 @@
 export type RecipeDeepLink = { mode: 'view' | 'edit'; id: string };
 
 export function recipeViewPath(id: string): string {
-  return `/recipes?open=${encodeURIComponent(id)}`;
+  return `/recipes/${encodeURIComponent(id)}`;
 }
 
 export function recipeEditPath(id: string): string {
-  return `/recipes?edit=${encodeURIComponent(id)}`;
+  return `/recipes/${encodeURIComponent(id)}?edit=1`;
 }
 
 export function recipeDeepLinkFromSearch(
@@ -16,4 +16,34 @@ export function recipeDeepLinkFromSearch(
   const openId = params.get('open')?.trim();
   if (openId) return { mode: 'view', id: openId };
   return null;
+}
+
+export function recipeLegacyListRedirect(
+  params: { get(name: string): string | null },
+): string | null {
+  const link = recipeDeepLinkFromSearch(params);
+  if (!link) return null;
+  return link.mode === 'edit' ? recipeEditPath(link.id) : recipeViewPath(link.id);
+}
+
+export function recipeLegacyListRedirectFromQuery(
+  query: Record<string, string | string[] | undefined>,
+): string | null {
+  const first = (key: string) => {
+    const value = query[key];
+    return (Array.isArray(value) ? value[0] : value)?.trim() || '';
+  };
+  const params = new URLSearchParams();
+  const edit = first('edit');
+  const open = first('open');
+  if (edit) params.set('edit', edit);
+  if (open) params.set('open', open);
+  return recipeLegacyListRedirect(params);
+}
+
+export function recipeWantsEdit(
+  params: { get(name: string): string | null },
+): boolean {
+  const value = params.get('edit')?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
 }
