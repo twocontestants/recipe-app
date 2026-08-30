@@ -9,6 +9,8 @@ export interface ShoppingContribution {
   unit: string;
   recipe: string;   // recipe title this line came from
   source_url?: string; // original recipe URL when known at generate time
+  // Tick when this wording is shown as its own detached row.
+  checked?: boolean;
 }
 
 export interface ShoppingItem {
@@ -29,6 +31,10 @@ export interface ShoppingItem {
   // single-source item; length > 1 when several recipes merged into this item.
   contributions: ShoppingContribution[];
   category: string;
+  // Yes/no tick on this line. Who/when is not stored.
+  checked: boolean;
+  // Hand-typed line (not generated from a recipe). Lives in the same items array.
+  custom?: boolean;
 }
 
 // Short random id for shopping items (recipe-derived and custom alike).
@@ -265,6 +271,7 @@ export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: 
       recipes: data.recipes,
       contributions: data.contributions,
       category: resolveCategory(name, categoryOverrides),
+      checked: false,
     });
   });
 

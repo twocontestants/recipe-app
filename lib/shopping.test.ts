@@ -47,4 +47,12 @@ describe('generateShoppingList source URLs', () => {
     ]);
     expect(items[0].contributions[0].source_url).toBeUndefined();
   });
+
+  it('starts every generated line unchecked and not custom', () => {
+    const items = generateShoppingList([
+      dinner({ title: 'Stew', ingredient: 'carrot' }),
+    ]);
+    expect(items[0].checked).toBe(false);
+    expect(items[0].custom).toBeUndefined();
+  });
 });
