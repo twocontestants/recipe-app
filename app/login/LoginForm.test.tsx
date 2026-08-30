@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import LoginForm from './LoginForm';
 import { ToastProvider } from '@/components/Toast';
@@ -14,7 +14,23 @@ vi.mock('@/components/AuthProvider', () => ({
 
 describe('LoginForm', () => {
   afterEach(() => {
+    cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it('uses matching field types and a text switch, not a second filled button', () => {
+    render(
+      <ToastProvider>
+        <LoginForm />
+      </ToastProvider>,
+    );
+
+    expect((screen.getByLabelText(/email or name/i) as HTMLInputElement).type).toBe('text');
+    expect((screen.getByLabelText(/^password$/i) as HTMLInputElement).type).toBe('password');
+    const switcher = screen.getByRole('button', { name: /need an account/i });
+    expect(switcher.className).toMatch(/login-switch/);
+    expect(switcher.className).not.toMatch(/btn-primary/);
+    expect(screen.getByRole('button', { name: /^sign in$/i }).className).toMatch(/btn-primary/);
   });
 
   it('shows the server error on the form when sign-in is rejected', async () => {
