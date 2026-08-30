@@ -88,11 +88,11 @@ export function mergeRecipeSourceMaps(
   return out;
 }
 
-export type ShoppingCheckedState = Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
+export type ShoppingCheckedMap = Record<string, boolean>;
 
 export type ShoppingListDetail = {
   items: ShoppingItem[];
-  checked_state?: ShoppingCheckedState | null;
+  checked_state?: unknown;
   recipe_sources?: Record<string, string>;
   item_overrides?: Record<string, {
     displayName?: string;
@@ -114,29 +114,6 @@ export function isShoppingListDetail(payload: unknown): payload is ShoppingListD
     && typeof payload === 'object'
     && !Array.isArray(payload)
     && Array.isArray((payload as { items?: unknown }).items);
-}
-
-export type ShoppingCheckedEntry = { checked: boolean; checkedBy: string; checkedAt: number };
-
-/** Merge a check onto the JSON object. Text keys stay object keys, never array indexes. */
-export function shoppingListCheckSetSql(): string {
-  return `UPDATE shopping_lists
-             SET checked_state = CASE
-               WHEN jsonb_typeof(COALESCE(checked_state, '{}'::jsonb)) = 'object'
-               THEN COALESCE(checked_state, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb)
-               ELSE jsonb_build_object($2::text, $3::jsonb)
-             END
-           WHERE id = $1`;
-}
-
-export function shoppingListCheckClearKeySql(): string {
-  return `UPDATE shopping_lists
-             SET checked_state = CASE
-               WHEN jsonb_typeof(COALESCE(checked_state, '{}'::jsonb)) = 'object'
-               THEN COALESCE(checked_state, '{}'::jsonb) - $2::text
-               ELSE '{}'::jsonb
-             END
-           WHERE id = $1`;
 }
 
 function asRecord(raw: unknown): Record<string, unknown> | undefined {
@@ -161,67 +138,85 @@ function asRecord(raw: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function isCheckedFlag(value: unknown): boolean {
-  if (value === false || value === 0 || value === 'false' || value === '0') return false;
-  if (value === undefined) return true;
-  return !!value;
-}
-
-export function normalizeCheckedEntry(raw: unknown): ShoppingCheckedEntry | undefined {
-  if (raw == null) return undefined;
-  if (typeof raw === 'string') {
+function isTicked(value: unknown): boolean {
+  if (value === true) return true;
+  if (value === false || value === 0 || value === 'false' || value === '0' || value == null) return false;
+  if (typeof value === 'string') {
     try {
-      return normalizeCheckedEntry(JSON.parse(raw));
+      return isTicked(JSON.parse(value));
     } catch {
-      return undefined;
+      return false;
     }
   }
-  if (raw === true) return { checked: true, checkedBy: '', checkedAt: 0 };
-  if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  if (!isCheckedFlag(obj.checked)) return undefined;
-  return {
-    checked: true,
-    checkedBy: typeof obj.checkedBy === 'string' ? obj.checkedBy : '',
-    checkedAt: typeof obj.checkedAt === 'number' && Number.isFinite(obj.checkedAt)
-      ? obj.checkedAt
-      : Number(obj.checkedAt) || 0,
-  };
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return isTicked((value as { checked?: unknown }).checked);
+  }
+  return false;
 }
 
-export function normalizeCheckedState(raw: unknown): ShoppingCheckedState {
+/** Leftover tick map (id → yes/no). Who/when is discarded. */
+export function leftoverCheckedMap(raw: unknown): ShoppingCheckedMap {
   const record = asRecord(raw);
   if (!record) return {};
-  const out: ShoppingCheckedState = {};
+  const out: ShoppingCheckedMap = {};
   for (const [key, value] of Object.entries(record)) {
-    const entry = normalizeCheckedEntry(value);
-    if (entry) out[key] = entry;
+    if (isTicked(value)) out[key] = true;
   }
   return out;
 }
 
-function itemIdOf(obj: Record<string, unknown>): string {
+export function itemIdOf(obj: Record<string, unknown>): string {
   if (typeof obj.id === 'string' && obj.id.trim()) return obj.id;
   if (typeof obj.id === 'number' && Number.isFinite(obj.id)) return String(obj.id);
   return '';
 }
 
-function customItemIds(customItems: unknown): string[] {
+function asItemRecord(item: unknown): Record<string, unknown> {
+  if (item && typeof item === 'object' && !Array.isArray(item)) return { ...(item as Record<string, unknown>) };
+  return {};
+}
+
+function contributionChecked(item: Record<string, unknown>, index: number): boolean {
+  const contributions = Array.isArray(item.contributions) ? item.contributions : [];
+  const raw = contributions[index];
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return isTicked((raw as { checked?: unknown }).checked);
+  }
+  return false;
+}
+
+/** Boolean ticks keyed by item id or `id#index` for a detached wording. */
+export function checkedMapFromItems(items: unknown[]): ShoppingCheckedMap {
+  const out: ShoppingCheckedMap = {};
+  for (const item of items) {
+    const obj = asItemRecord(item);
+    const id = itemIdOf(obj);
+    if (!id) continue;
+    if (isTicked(obj.checked)) out[id] = true;
+    const contributions = Array.isArray(obj.contributions) ? obj.contributions : [];
+    contributions.forEach((_, index) => {
+      if (contributionChecked(obj, index)) out[`${id}#${index}`] = true;
+    });
+  }
+  return out;
+}
+
+function customItemRecords(customItems: unknown): Record<string, unknown>[] {
   if (!Array.isArray(customItems)) return [];
   return customItems
-    .map(item => (item && typeof item === 'object' && !Array.isArray(item) ? itemIdOf(item as Record<string, unknown>) : ''))
-    .filter(Boolean);
+    .map(item => asItemRecord(item))
+    .filter(obj => itemIdOf(obj));
 }
 
 /**
- * Map name-keyed ticks onto item ids so the UI key (`id ?? name`) finds them.
- * Unknown keys (custom rows, detached sub-lines) pass through.
+ * Map leftover name-keyed ticks onto item ids.
+ * Unknown keys (detached sub-lines) pass through.
  */
-export function alignCheckedStateToItems(
-  checked: ShoppingCheckedState,
+export function alignCheckedKeysToItems(
+  ticks: ShoppingCheckedMap,
   items: Array<{ id?: unknown; name?: unknown; displayName?: unknown }>,
   extraKeys: string[] = [],
-): ShoppingCheckedState {
+): ShoppingCheckedMap {
   const idSet = new Set<string>(extraKeys.filter(Boolean));
   const nameToId = new Map<string, string>();
   for (const item of items) {
@@ -238,34 +233,71 @@ export function alignCheckedStateToItems(
     }
   }
 
-  const out: ShoppingCheckedState = {};
-  for (const [key, entry] of Object.entries(checked)) {
+  const out: ShoppingCheckedMap = {};
+  for (const [key, on] of Object.entries(ticks)) {
+    if (!on) continue;
     if (idSet.has(key) || key.includes('#')) {
-      out[key] = entry;
+      out[key] = true;
       continue;
     }
     const remapped = nameToId.get(key);
-    if (remapped) {
-      if (!out[remapped]) out[remapped] = entry;
-    } else {
-      out[key] = entry;
-    }
+    out[remapped ?? key] = true;
   }
   return out;
 }
 
+function applyTicksToItems(items: Record<string, unknown>[], ticks: ShoppingCheckedMap): Record<string, unknown>[] {
+  return items.map(item => {
+    const id = itemIdOf(item);
+    const contributions = Array.isArray(item.contributions)
+      ? item.contributions.map((raw, index) => {
+        const obj = asItemRecord(raw);
+        const on = ticks[`${id}#${index}`] === true;
+        if (on) return { ...obj, checked: true };
+        if ('checked' in obj) {
+          const { checked: _drop, ...rest } = obj;
+          return rest;
+        }
+        return obj;
+      })
+      : item.contributions;
+    const checked = ticks[id] === true;
+    return { ...item, checked, contributions };
+  });
+}
+
+function toCustomItem(obj: Record<string, unknown>, checked: boolean): Record<string, unknown> {
+  const id = itemIdOf(obj);
+  const displayName = typeof obj.displayName === 'string' ? obj.displayName
+    : typeof obj.name === 'string' ? obj.name : '';
+  const totalAmount = typeof obj.totalAmount === 'string' ? obj.totalAmount
+    : typeof obj.displayAmount === 'string' ? obj.displayAmount : '';
+  return {
+    id,
+    name: typeof obj.name === 'string' && obj.name ? obj.name : displayName,
+    displayName,
+    totalAmount,
+    unit: typeof obj.unit === 'string' ? obj.unit : '',
+    recipes: Array.isArray(obj.recipes) ? obj.recipes : [],
+    contributions: Array.isArray(obj.contributions) ? obj.contributions : [],
+    category: typeof obj.category === 'string' ? obj.category : 'Pantry',
+    checked,
+    custom: true,
+  };
+}
+
 /**
  * Checked map to adopt from a detail GET. `undefined` means the payload is not
- * a list body (do not clobber local checks). Missing/empty `checked_state` is `{}`.
+ * a list body (do not clobber local checks). Missing ticks is `{}`.
  */
-export function adoptCheckedState(payload: unknown): ShoppingCheckedState | undefined {
+export function adoptCheckedState(payload: unknown): ShoppingCheckedMap | undefined {
   if (!isShoppingListDetail(payload)) return undefined;
-  const customIds = customItemIds(payload.custom_items);
-  return alignCheckedStateToItems(
-    normalizeCheckedState(payload.checked_state),
-    payload.items ?? [],
-    customIds,
-  );
+  const { list } = migrateShoppingListShape({
+    items: payload.items ?? [],
+    custom_items: payload.custom_items,
+    checked_state: payload.checked_state,
+  });
+  return checkedMapFromItems(list.items);
 }
 
 /** Structural refetch still adopts DB checks — live deltas can miss; the row is source of truth. */
@@ -284,18 +316,13 @@ export function stableShoppingItemId(name: string, index: number): string {
   return `m${(hash >>> 0).toString(36)}`;
 }
 
-type MigratableList = {
+export type MigratableList = {
   items: unknown[];
   item_overrides?: Record<string, unknown>;
   custom_items?: unknown[];
   item_order?: Record<string, string[]>;
   checked_state?: unknown;
 };
-
-function asItemRecord(item: unknown): Record<string, unknown> {
-  if (item && typeof item === 'object' && !Array.isArray(item)) return { ...(item as Record<string, unknown>) };
-  return {};
-}
 
 function upgradeItemWithoutId(obj: Record<string, unknown>, id: string): Record<string, unknown> {
   const name = typeof obj.name === 'string' ? obj.name : '';
@@ -314,6 +341,8 @@ function upgradeItemWithoutId(obj: Record<string, unknown>, id: string): Record<
     recipes,
     contributions,
     category: (obj.category as string) ?? 'Pantry',
+    checked: isTicked(obj.checked),
+    custom: obj.custom === true,
   };
 }
 
@@ -331,10 +360,17 @@ function remapKeyedRecord<T>(
   return { next, changed };
 }
 
+function parseDetachedKey(key: string): { itemId: string; index: number } | null {
+  const hash = key.lastIndexOf('#');
+  if (hash <= 0) return null;
+  const index = Number(key.slice(hash + 1));
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { itemId: key.slice(0, hash), index };
+}
+
 /**
- * Upgrade a pre-id shopping list and remap name-keyed edits onto item ids.
- * Existing ids are kept. Remigration is stable so a failed write-back still
- * serves the same keys on the next read.
+ * Upgrade a pre-id shopping list, fold leftover extras/ticks onto items, and
+ * remap name-keyed edits onto item ids. Existing ids are kept.
  */
 export function migrateShoppingListShape<T extends MigratableList>(list: T): { list: T; changed: boolean } {
   const items = Array.isArray(list.items) ? list.items : [];
@@ -355,8 +391,18 @@ export function migrateShoppingListShape<T extends MigratableList>(list: T): { l
     return upgradeItemWithoutId(obj, stableShoppingItemId(name, index));
   });
 
+  const customRecords = customItemRecords(list.custom_items);
+  const existingIds = new Set(migratedItems.map(itemIdOf).filter(Boolean));
+  for (const custom of customRecords) {
+    const id = itemIdOf(custom);
+    if (!id || existingIds.has(id)) continue;
+    changed = true;
+    existingIds.add(id);
+    migratedItems.push(toCustomItem(custom, isTicked(custom.checked)));
+  }
+
   const nameToId = new Map<string, string>();
-  const idSet = new Set<string>(customItemIds(list.custom_items));
+  const idSet = new Set<string>();
   for (const item of migratedItems) {
     const id = itemIdOf(item);
     if (!id) continue;
@@ -373,13 +419,20 @@ export function migrateShoppingListShape<T extends MigratableList>(list: T): { l
   };
 
   const overrides = remapKeyedRecord(list.item_overrides ?? {}, remap);
-  const alignedChecks = alignCheckedStateToItems(
-    normalizeCheckedState(list.checked_state),
+  const leftoverTicks = alignCheckedKeysToItems(
+    leftoverCheckedMap(list.checked_state),
     migratedItems,
-    customItemIds(list.custom_items),
+    [...idSet],
   );
-  const previousChecks = normalizeCheckedState(list.checked_state);
-  const checksChanged = JSON.stringify(previousChecks) !== JSON.stringify(alignedChecks);
+  const itemTicks = checkedMapFromItems(migratedItems);
+  const mergedTicks: ShoppingCheckedMap = { ...itemTicks, ...leftoverTicks };
+  const tickedItems = applyTicksToItems(migratedItems, mergedTicks);
+
+  const previousTicks = JSON.stringify(itemTicks);
+  const nextTicks = JSON.stringify(checkedMapFromItems(tickedItems));
+  const leftoverPresent = leftoverTicks && Object.keys(leftoverCheckedMap(list.checked_state)).length > 0;
+  const leftoverCustomPresent = customRecords.length > 0;
+  const checksChanged = previousTicks !== nextTicks;
 
   const item_order: Record<string, string[]> = {};
   let orderChanged = false;
@@ -389,17 +442,126 @@ export function migrateShoppingListShape<T extends MigratableList>(list: T): { l
     if (mapped.some((key, i) => key !== keys[i])) orderChanged = true;
   }
 
-  changed = changed || overrides.changed || checksChanged || orderChanged;
+  changed = changed || overrides.changed || checksChanged || orderChanged || leftoverPresent || leftoverCustomPresent;
   if (!changed) return { list, changed: false };
 
   return {
     list: {
       ...list,
-      items: migratedItems,
+      items: tickedItems,
       item_overrides: overrides.next,
-      checked_state: alignedChecks,
+      custom_items: [],
+      checked_state: {},
       item_order,
     } as T,
     changed: true,
   };
+}
+
+/** Set `checked` on the item whose id matches `$2`. Preserves array order. */
+export function shoppingListItemCheckSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(e ORDER BY ord), '[]'::jsonb)
+               FROM (
+                 SELECT CASE WHEN elem->>'id' = $2
+                   THEN elem || jsonb_build_object('checked', to_jsonb($3::boolean))
+                   ELSE elem
+                 END AS e, ord
+                 FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                   WITH ORDINALITY AS t(elem, ord)
+               ) s
+             )
+           WHERE id = $1`;
+}
+
+/** Set `checked` on contributions[$3] of the item whose id is `$2`. */
+export function shoppingListContributionCheckSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(e ORDER BY ord), '[]'::jsonb)
+               FROM (
+                 SELECT CASE WHEN elem->>'id' = $2
+                   THEN jsonb_set(
+                     elem,
+                     ARRAY['contributions', $3::text, 'checked'],
+                     to_jsonb($4::boolean),
+                     true
+                   )
+                   ELSE elem
+                 END AS e, ord
+                 FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                   WITH ORDINALITY AS t(elem, ord)
+               ) s
+             )
+           WHERE id = $1`;
+}
+
+/** Set every item and contribution `checked` to false. */
+export function shoppingListClearCheckedSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(cleared ORDER BY ord), '[]'::jsonb)
+               FROM (
+                 SELECT (elem || '{"checked":false}'::jsonb) || jsonb_build_object(
+                   'contributions',
+                   COALESCE((
+                     SELECT jsonb_agg(c || '{"checked":false}'::jsonb ORDER BY c_ord)
+                     FROM jsonb_array_elements(COALESCE(elem->'contributions', '[]'::jsonb))
+                       WITH ORDINALITY AS ct(c, c_ord)
+                   ), '[]'::jsonb)
+                 ) AS cleared, ord
+                 FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                   WITH ORDINALITY AS t(elem, ord)
+               ) s
+             )
+           WHERE id = $1`;
+}
+
+/** Upsert an item by id onto the items array (used for hand-added lines). */
+export function shoppingListAddItemSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(e ORDER BY ord), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                 WITH ORDINALITY AS t(e, ord)
+               WHERE e->>'id' <> $2
+             ) || jsonb_build_array($3::jsonb)
+           WHERE id = $1`;
+}
+
+/** Merge a patch into the item whose id matches. */
+export function shoppingListUpdateItemSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(
+                 CASE WHEN e->>'id' = $2 THEN e || $3::jsonb ELSE e END
+                 ORDER BY ord
+               ), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                 WITH ORDINALITY AS t(e, ord)
+             )
+           WHERE id = $1`;
+}
+
+/** Drop the item whose id matches. */
+export function shoppingListRemoveItemSql(): string {
+  return `UPDATE shopping_lists
+             SET items = (
+               SELECT COALESCE(jsonb_agg(e ORDER BY ord), '[]'::jsonb)
+               FROM jsonb_array_elements(COALESCE(items, '[]'::jsonb))
+                 WITH ORDINALITY AS t(e, ord)
+               WHERE e->>'id' <> $2
+             )
+           WHERE id = $1`;
+}
+
+export function splitCheckKey(key: string): { itemId: string; contributionIndex: number | null } {
+  const detached = parseDetachedKey(key);
+  if (detached) return { itemId: detached.itemId, contributionIndex: detached.index };
+  return { itemId: key, contributionIndex: null };
+}
+
+export function customItemPayload(item: Record<string, unknown>): Record<string, unknown> {
+  return toCustomItem(item, isTicked(item.checked));
 }

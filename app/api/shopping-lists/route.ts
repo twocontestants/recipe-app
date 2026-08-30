@@ -4,6 +4,7 @@ import {
   deleteShoppingList, getShoppingListById, getMealPlansForWeeks, applyShoppingListOps,
   getCategoryDictionary
 } from '@/lib/db';
+import { migrateShoppingListShape } from '@/lib/shoppingList';
 import { generateShoppingList } from '@/lib/shopping';
 import type { ShoppingOp } from '@/lib/shoppingOps';
 import { isAuthUser, requireUser } from '@/lib/session';
@@ -61,7 +62,28 @@ export async function PUT(req: NextRequest) {
     const id = new URL(req.url).searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
     const body = await req.json();
-    await updateShoppingListEdits(id, user.id, body);
+    const current = (body.custom_items !== undefined || body.checked_state !== undefined)
+      ? await getShoppingListById(id, user.id)
+      : null;
+    if (current && (body.custom_items !== undefined || body.checked_state !== undefined)) {
+      const { list } = migrateShoppingListShape({
+        items: body.items ?? current.items,
+        custom_items: body.custom_items,
+        checked_state: body.checked_state,
+        item_overrides: body.item_overrides ?? current.item_overrides,
+        item_order: body.item_order ?? current.item_order,
+      });
+      await updateShoppingListEdits(id, user.id, {
+        ...body,
+        items: list.items,
+        custom_items: [],
+        checked_state: {},
+        item_overrides: list.item_overrides,
+        item_order: list.item_order,
+      });
+    } else {
+      await updateShoppingListEdits(id, user.id, body);
+    }
     return NextResponse.json({ success: true });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

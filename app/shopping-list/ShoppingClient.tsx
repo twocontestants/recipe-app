@@ -7,6 +7,7 @@ import {
   adoptCheckedState,
   isShoppingListDetail,
   mergeRecipeSourceMaps,
+  migrateShoppingListShape,
   recipeSourceMapFromItems,
   shouldAdoptCheckedState,
   type ShoppingListMeta,
@@ -24,11 +25,8 @@ type ResolvedContribution = ShoppingContribution & { id: string };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface CheckedState {
-  [itemKey: string]: { checked: boolean; checkedBy: string; checkedAt: number };
-}
+type CheckedState = Record<string, boolean>;
 interface ItemOverride { displayName?: string; displayAmount?: string; category?: string; hidden?: boolean; detached?: boolean; }
-interface CustomItem { id: string; displayName: string; category: string; displayAmount: string; }
 interface ResolvedItem {
   key: string; displayName: string; displayAmount: string;
   resolvedCategory: string; isCustom: boolean;
@@ -50,7 +48,7 @@ function getShopperName(): string {
 // ── Item row ─────────────────────────────────────────────────────────────────
 
 interface ItemRowProps {
-  item: ResolvedItem; isChecked: boolean; checkedBy?: string;
+  item: ResolvedItem; isChecked: boolean;
   isDragging: boolean; isDropBefore: boolean; isDropAfter: boolean;
   onToggle: () => void; onDelete: () => void;
   onNameChange: (v: string) => void; onAmountChange: (v: string) => void;
@@ -61,7 +59,7 @@ interface ItemRowProps {
   onMoveClick?: (e: React.MouseEvent) => void; onSubMoveClick?: (e: React.MouseEvent, contribId: string) => void;
 }
 
-function ItemRow({ item, isChecked, checkedBy, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd, onMoveClick, onSubMoveClick }: ItemRowProps) {
+function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd, onMoveClick, onSubMoveClick }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
 
@@ -196,7 +194,6 @@ export default function ShoppingListClient() {
 
   const [checked, setChecked] = useState<CheckedState>({});
   const [itemOverrides, setItemOverrides] = useState<Record<string, ItemOverride>>({});
-  const [customItems, setCustomItems] = useState<CustomItem[]>([]);
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [itemOrder, setItemOrder] = useState<Record<string, string[]>>({});
@@ -325,7 +322,7 @@ export default function ShoppingListClient() {
     socket.on('item-updated', ({ itemName, checked: isChecked, checkedBy }: any) => {
       setChecked(prev => {
         const next = { ...prev };
-        if (isChecked) next[itemName] = { checked: true, checkedBy, checkedAt: Date.now() };
+        if (isChecked) next[itemName] = true;
         else delete next[itemName];
         return next;
       });
@@ -440,9 +437,16 @@ export default function ShoppingListClient() {
       if (!res.ok) throw new Error('load failed');
       const data = await res.json();
       if (!isShoppingListDetail(data)) throw new Error('load failed');
-      setServerItems(data.items ?? []); // snapshot — constant for the list's life
+      const { list: folded } = migrateShoppingListShape({
+        items: data.items ?? [],
+        custom_items: data.custom_items,
+        checked_state: data.checked_state,
+        item_overrides: data.item_overrides,
+        item_order: data.item_order,
+      });
+      setServerItems(folded.items as ShoppingItem[]);
       setRecipeSources(mergeRecipeSourceMaps(
-        recipeSourceMapFromItems(data.items ?? []),
+        recipeSourceMapFromItems(folded.items ?? []),
         data.recipe_sources,
       ));
 
@@ -453,12 +457,11 @@ export default function ShoppingListClient() {
 
       const order = data.category_order && data.category_order.length > 0
         ? data.category_order
-        : CATEGORY_ORDER.filter((c: string) => (data.items ?? []).some((i: ShoppingItem) => i.category === c));
+        : CATEGORY_ORDER.filter((c: string) => (folded.items ?? []).some((i: ShoppingItem) => i.category === c));
       if (!busy) {
-        setItemOverrides(data.item_overrides ?? {});
-        setCustomItems((data.custom_items ?? []) as CustomItem[]);
+        setItemOverrides((folded.item_overrides ?? data.item_overrides ?? {}) as Record<string, ItemOverride>);
         setCategoryLabels(data.category_labels ?? {});
-        setItemOrder(data.item_order ?? {});
+        setItemOrder(folded.item_order ?? data.item_order ?? {});
         setCategoryOrder(order);
       }
 
@@ -506,6 +509,19 @@ export default function ShoppingListClient() {
   const getResolvedItems = (): ResolvedItem[] => {
     const results: ResolvedItem[] = [];
     for (const si of serverItems) {
+      if (si.custom) {
+        const parentKey = si.id ?? si.name;
+        const ov = itemOverrides[parentKey] || {};
+        if (ov.hidden) continue;
+        results.push({
+          key: parentKey,
+          displayName: ov.displayName ?? si.displayName ?? si.name,
+          displayAmount: ov.displayAmount ?? (si.totalAmount ? `${si.totalAmount}${si.unit ? ' ' + si.unit : ''}` : ''),
+          resolvedCategory: ov.category ?? si.category,
+          isCustom: true,
+        });
+        continue;
+      }
       const parentKey = si.id ?? si.name;
       // Give each contribution a stable id (deterministic from the parent id +
       // index, so it survives reloads without storing extra data).
@@ -550,9 +566,6 @@ export default function ShoppingListClient() {
         });
       }
     }
-    for (const ci of customItems) {
-      results.push({ key: ci.id, displayName: ci.displayName, displayAmount: ci.displayAmount, resolvedCategory: ci.category, isCustom: true });
-    }
     return results;
   };
 
@@ -576,49 +589,87 @@ export default function ShoppingListClient() {
 
   const getCatLabel = (cat: string) => categoryLabels[cat] || cat;
   const allItemKeys = resolvedItems.map(i => i.key);
-  const checkedCount = allItemKeys.filter(k => checked[k]?.checked).length;
+  const checkedCount = allItemKeys.filter(k => checked[k]).length;
   const totalCount = allItemKeys.length;
   const progress = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
 
   // ── Toggle ────────────────────────────────────────────────────────────────
 
   const toggleItem = (item: ResolvedItem) => {
-    const key = item.key; const isNowChecked = !checked[key]?.checked;
-    const value = isNowChecked ? { checked: true, checkedBy: shopperName, checkedAt: Date.now() } : null;
-    setChecked(prev => { const next = { ...prev }; if (value) next[key] = value; else delete next[key]; return next; });
-    // Live delta to other clients for instant feedback…
+    const key = item.key; const isNowChecked = !checked[key];
+    setChecked(prev => { const next = { ...prev }; if (isNowChecked) next[key] = true; else delete next[key]; return next; });
+    setServerItems(prev => prev.map(si => {
+      const id = si.id ?? si.name;
+      if (id === key) return { ...si, checked: isNowChecked };
+      if (key.startsWith(`${id}#`)) {
+        const index = Number(key.slice(id.length + 1));
+        const contributions = (si.contributions ?? []).map((c, i) => (
+          i === index ? { ...c, checked: isNowChecked } : c
+        ));
+        return { ...si, contributions };
+      }
+      return si;
+    }));
+    // Live delta to other clients for instant feedback. Shopper name is toast-only.
     socketRef.current?.emit('check-item', { listId: activeId, itemName: key, checked: isNowChecked, checkedBy: shopperName });
-    // …and a check op for durable, composable persistence.
-    sendOps([{ t: 'check', key, value }]);
+    sendOps([{ t: 'check', key, checked: isNowChecked }]);
   };
-  const clearAll = () => { setChecked({}); socketRef.current?.emit('clear-all', { listId: activeId }); sendOps([{ t: 'clearChecked' }]); };
+  const clearAll = () => {
+    setChecked({});
+    setServerItems(prev => prev.map(si => ({
+      ...si,
+      checked: false,
+      contributions: (si.contributions ?? []).map(c => ({ ...c, checked: false })),
+    })));
+    socketRef.current?.emit('clear-all', { listId: activeId });
+    sendOps([{ t: 'clearChecked' }]);
+  };
 
   // ── Edits ─────────────────────────────────────────────────────────────────
 
   const updateItemName = (item: ResolvedItem, val: string) => {
     if (!val) return;
-    if (item.isCustom) { setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayName: val } : c)); sendOps([{ t: 'updateCustom', id: item.key, patch: { displayName: val } }]); }
+    if (item.isCustom) {
+      setServerItems(prev => prev.map(si => si.id === item.key ? { ...si, displayName: val, name: val } : si));
+      sendOps([{ t: 'updateCustom', id: item.key, patch: { displayName: val, name: val } }]);
+    }
     else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayName: val } })); sendOps([{ t: 'override', key: item.key, patch: { displayName: val } }]); }
   };
   const updateItemAmount = (item: ResolvedItem, val: string) => {
-    if (item.isCustom) { setCustomItems(prev => prev.map(c => c.id === item.key ? { ...c, displayAmount: val } : c)); sendOps([{ t: 'updateCustom', id: item.key, patch: { displayAmount: val } }]); }
+    if (item.isCustom) {
+      setServerItems(prev => prev.map(si => si.id === item.key ? { ...si, totalAmount: val } : si));
+      sendOps([{ t: 'updateCustom', id: item.key, patch: { totalAmount: val } }]);
+    }
     else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], displayAmount: val } })); sendOps([{ t: 'override', key: item.key, patch: { displayAmount: val } }]); }
   };
   const deleteItem = (item: ResolvedItem) => {
     const ops: ShoppingOp[] = [];
-    if (item.isCustom) { setCustomItems(prev => prev.filter(c => c.id !== item.key)); ops.push({ t: 'removeCustom', id: item.key }); }
+    if (item.isCustom) {
+      setServerItems(prev => prev.filter(si => si.id !== item.key));
+      ops.push({ t: 'removeCustom', id: item.key });
+    }
     else { setItemOverrides(prev => ({ ...prev, [item.key]: { ...prev[item.key], hidden: true } })); ops.push({ t: 'override', key: item.key, patch: { hidden: true } }); }
-    // Drop it from checked state too (and broadcast) so it doesn't linger.
-    if (checked[item.key]?.checked) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
+    if (checked[item.key]) socketRef.current?.emit('check-item', { listId: activeId, itemName: item.key, checked: false, checkedBy: shopperName });
     setChecked(prev => { const n = { ...prev }; delete n[item.key]; return n; });
-    ops.push({ t: 'check', key: item.key, value: null });
+    ops.push({ t: 'check', key: item.key, checked: false });
     sendOps(ops);
   };
 
   const addItem = (cat: string, name: string, amount: string, afterKey: string | null) => {
     const id = genId();
-    const item: CustomItem = { id, displayName: name, category: cat, displayAmount: amount };
-    setCustomItems(prev => [...prev, item]);
+    const item: ShoppingItem = {
+      id,
+      name,
+      displayName: name,
+      totalAmount: amount,
+      unit: '',
+      recipes: [],
+      contributions: [],
+      category: cat,
+      checked: false,
+      custom: true,
+    };
+    setServerItems(prev => [...prev, item]);
 
     const ops: ShoppingOp[] = [{ t: 'addCustom', item: item as unknown as Record<string, unknown> }];
 
@@ -687,9 +738,9 @@ export default function ShoppingListClient() {
       normName = item?.isCustom ? normalizeIngredientName(item.displayName) : (item?.originalServerName ?? '');
     }
 
-    const ci = customItems.find(c => c.id === itemKey);
-    if (ci) {
-      setCustomItems(prev => prev.map(c => c.id === itemKey ? { ...c, category: newCat } : c));
+    const custom = serverItems.find(s => s.custom && (s.id ?? s.name) === itemKey);
+    if (custom) {
+      setServerItems(prev => prev.map(s => s.id === itemKey ? { ...s, category: newCat } : s));
       ops.push({ t: 'updateCustom', id: itemKey, patch: { category: newCat } });
     } else {
       // Detaching is just another field on the item's override: { detached, category }.
@@ -775,14 +826,14 @@ export default function ShoppingListClient() {
       const remaining = lists.filter(l => l.id !== activeId);
       setLists(remaining);
       setActiveId(remaining[0]?.id ?? null);
-      if (!remaining.length) { setServerItems([]); setCustomItems([]); setChecked({}); }
+      if (!remaining.length) { setServerItems([]); setChecked({}); }
     } catch { showToast('Failed to delete', 'error'); }
   };
 
   const handleCopy = async () => {
     const lines: string[] = [];
     for (const cat of orderedCats) {
-      const catItems = getItemsForCat(cat).filter(i => !checked[i.key]?.checked);
+      const catItems = getItemsForCat(cat).filter(i => !checked[i.key]);
       if (!catItems.length) continue;
       lines.push(`\n${getCatLabel(cat)}`);
       catItems.forEach(i => lines.push(`  □ ${i.displayName}${i.displayAmount ? ' — ' + i.displayAmount : ''}`));
@@ -791,7 +842,7 @@ export default function ShoppingListClient() {
     showToast('Copied!', 'success');
   };
 
-  const isEmpty = !loadingItems && serverItems.length === 0 && customItems.length === 0;
+  const isEmpty = !loadingItems && serverItems.length === 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -912,8 +963,8 @@ export default function ShoppingListClient() {
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
             if (!catItems.length && insertingIn?.cat !== cat) return null;
-            const checkedCat = catItems.filter(i => checked[i.key]?.checked);
-            const visibleItems = hideChecked ? catItems.filter(i => !checked[i.key]?.checked) : catItems;
+            const checkedCat = catItems.filter(i => checked[i.key]);
+            const visibleItems = hideChecked ? catItems.filter(i => !checked[i.key]) : catItems;
             // When hiding checked items, drop categories that have nothing left to show.
             if (hideChecked && !visibleItems.length && insertingIn?.cat !== cat) return null;
             const isCatDragging = dragCat === cat;
@@ -947,7 +998,7 @@ export default function ShoppingListClient() {
                   {visibleItems.map(item => (
                     <div key={item.key}>
                       <ItemRow
-                        item={item} isChecked={!!checked[item.key]?.checked} checkedBy={checked[item.key]?.checkedBy}
+                        item={item} isChecked={!!checked[item.key]}
                         isDragging={dragItem === item.key}
                         isDropBefore={dropItemTarget?.key === item.key && dropItemTarget.position === 'before'}
                         isDropAfter={dropItemTarget?.key === item.key && dropItemTarget.position === 'after'}

@@ -5,14 +5,19 @@ import { primaryKeyMatches } from './primaryKey';
 import { parseDayOfWeek } from './plannerDays';
 import { coordsFromPlannedOn, inferPlannedOn, toDayIso, weekSpanForStoredKey } from './plannerDate';
 import { parseRole, type AuthUser, type Role } from './roles';
-import type { ShoppingOp } from './shoppingOps';
+import { checkOpIsOn, type ShoppingOp } from './shoppingOps';
 import {
+  customItemPayload,
   migrateShoppingListShape,
-  normalizeCheckedState,
   recipeSourceMapFromRecipes,
-  shoppingListCheckClearKeySql,
-  shoppingListCheckSetSql,
+  shoppingListAddItemSql,
+  shoppingListClearCheckedSql,
+  shoppingListContributionCheckSql,
+  shoppingListItemCheckSql,
   shoppingListMetaSelectSql,
+  shoppingListRemoveItemSql,
+  shoppingListUpdateItemSql,
+  splitCheckKey,
   toShoppingListMeta,
   type ShoppingListMeta,
 } from './shoppingList';
@@ -113,8 +118,8 @@ export async function setupDatabase() {
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_meal_plans_week ON meal_plans(week_start)`);
   await pool().query(`CREATE INDEX IF NOT EXISTS idx_recipes_created ON recipes(created_at DESC)`);
   await pool().query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS primary_protein TEXT`);
-  // Named shopping lists. checked_state lives here too and is owned by the
-  // socket layer (server.js); structural edit columns are owned by the HTTP API.
+  // Named shopping lists. Ticks and hand-added lines live on items JSON.
+  // leftover custom_items / checked_state columns stay for older rows.
   await pool().query(`
     CREATE TABLE IF NOT EXISTS shopping_lists (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1024,7 +1029,7 @@ export interface ShoppingList {
   category_labels: Record<string, string>;
   category_order:  string[];
   item_order:      Record<string, string[]>;
-  checked_state:   Record<string, { checked: boolean; checkedBy: string; checkedAt: number }>;
+  checked_state:   Record<string, unknown>;
   recipe_sources?: Record<string, string>;
 }
 
@@ -1039,7 +1044,7 @@ function rowToShoppingList(r: Record<string, unknown>): ShoppingList {
     category_labels: (r.category_labels as Record<string, string>) ?? {},
     category_order: (r.category_order as string[]) ?? [],
     item_order: (r.item_order as Record<string, string[]>) ?? {},
-    checked_state: normalizeCheckedState(r.checked_state),
+    checked_state: (r.checked_state as Record<string, unknown>) ?? {},
   };
 }
 
@@ -1109,44 +1114,16 @@ export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerI
         );
         break;
       case 'addCustom': {
-        // upsert by id: drop any existing element with this id, then append
-        const itemId = String((op.item as { id?: unknown }).id ?? '');
-        await pool().query(
-          `UPDATE shopping_lists
-             SET custom_items = (
-               SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)
-               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
-               WHERE e->>'id' <> $2
-             ) || jsonb_build_array($3::jsonb)
-           WHERE id = $1`,
-          [id, itemId, JSON.stringify(op.item)]
-        );
+        const item = customItemPayload((op.item as Record<string, unknown>) ?? {});
+        const itemId = String(item.id ?? '');
+        await pool().query(shoppingListAddItemSql(), [id, itemId, JSON.stringify(item)]);
         break;
       }
       case 'updateCustom':
-        // merge patch into the element whose id matches, in place
-        await pool().query(
-          `UPDATE shopping_lists
-             SET custom_items = (
-               SELECT COALESCE(jsonb_agg(
-                 CASE WHEN e->>'id' = $2 THEN e || $3::jsonb ELSE e END), '[]'::jsonb)
-               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
-             )
-           WHERE id = $1`,
-          [id, op.id, JSON.stringify(op.patch)]
-        );
+        await pool().query(shoppingListUpdateItemSql(), [id, op.id, JSON.stringify(op.patch)]);
         break;
       case 'removeCustom':
-        await pool().query(
-          `UPDATE shopping_lists
-             SET custom_items = (
-               SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)
-               FROM jsonb_array_elements(COALESCE(custom_items, '[]'::jsonb)) e
-               WHERE e->>'id' <> $2
-             )
-           WHERE id = $1`,
-          [id, op.id]
-        );
+        await pool().query(shoppingListRemoveItemSql(), [id, op.id]);
         break;
       case 'setLabel':
         if (op.label === null) {
@@ -1177,15 +1154,18 @@ export async function applyShoppingListOps(id: string, ops: ShoppingOp[], ownerI
           [id, op.cat, JSON.stringify(op.order)]
         );
         break;
-      case 'check':
-        if (op.value === null) {
-          await pool().query(shoppingListCheckClearKeySql(), [id, op.key]);
+      case 'check': {
+        const on = checkOpIsOn(op);
+        const { itemId, contributionIndex } = splitCheckKey(op.key);
+        if (contributionIndex != null) {
+          await pool().query(shoppingListContributionCheckSql(), [id, itemId, String(contributionIndex), on]);
         } else {
-          await pool().query(shoppingListCheckSetSql(), [id, op.key, JSON.stringify(op.value)]);
+          await pool().query(shoppingListItemCheckSql(), [id, itemId, on]);
         }
         break;
+      }
       case 'clearChecked':
-        await pool().query(`UPDATE shopping_lists SET checked_state = '{}'::jsonb WHERE id = $1`, [id]);
+        await pool().query(shoppingListClearCheckedSql(), [id]);
         break;
       case 'setSubtitle':
         await pool().query(`UPDATE shopping_lists SET subtitle = $2 WHERE id = $1`, [id, op.subtitle]);
@@ -1211,7 +1191,8 @@ export async function getShoppingListById(id: string, ownerId: string): Promise<
       await updateShoppingListEdits(id, ownerId, {
         items: migrated.items,
         item_overrides: migrated.item_overrides,
-        checked_state: migrated.checked_state,
+        custom_items: [],
+        checked_state: {},
         item_order: migrated.item_order,
       });
     } catch { /* best-effort: still serve the migrated shape even if write-back fails */ }
