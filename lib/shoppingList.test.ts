@@ -6,6 +6,8 @@ import {
   isShoppingListDetail,
   leftoverCheckedMap,
   migrateShoppingListShape,
+  rowIsChecked,
+  shoppingSubtitleSig,
   mergeRecipeSourceMaps,
   recipeSourceMapFromItems,
   recipeSourceMapFromRecipes,
@@ -133,6 +135,18 @@ describe('shopping list checked flags', () => {
       { id: 'a1', checked: true, contributions: [{ name: 'Onion' }] },
       { id: 'c9', custom: true, checked: false },
     ])).toEqual({ a1: true });
+  });
+
+  it('shows a tick from the item when the overlay was never adopted', () => {
+    expect(rowIsChecked('a1', {}, true)).toBe(true);
+    expect(rowIsChecked('a1', {}, false)).toBe(false);
+    expect(rowIsChecked('a1', { a1: true }, false)).toBe(true);
+    expect(rowIsChecked('a1', { a1: false }, true)).toBe(false);
+  });
+
+  it('uses the same subtitle signature as a loaded empty note so mount does not look dirty', () => {
+    expect(shoppingSubtitleSig('')).toBe(JSON.stringify(''));
+    expect(shoppingSubtitleSig('')).not.toBe('');
   });
 });
 
