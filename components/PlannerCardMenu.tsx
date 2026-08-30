@@ -1,7 +1,6 @@
 'use client';
 
-import { useRef, type Ref } from 'react';
-import HiddenDatePicker, { openNativeDatePicker } from './HiddenDatePicker';
+import type { Ref } from 'react';
 
 export type PlannerCardMenuView = 'root' | 'move';
 
@@ -26,7 +25,7 @@ type Props = {
   onOpenMove: () => void;
   onBack: () => void;
   onMoveTo: (dayIndex: number) => void;
-  onAnotherDate: (isoDate: string) => void;
+  onAnotherDate: () => void;
   onDelete: () => void;
 };
 
@@ -48,7 +47,6 @@ export default function PlannerCardMenu({
   onAnotherDate,
   onDelete,
 }: Props) {
-  const dateInputRef = useRef<HTMLInputElement>(null);
   return (
     <div
       ref={menuRef}
@@ -152,7 +150,7 @@ export default function PlannerCardMenu({
             type="button"
             className="pl-card-menu-item"
             role="menuitem"
-            onClick={() => openNativeDatePicker(dateInputRef.current)}
+            onClick={onAnotherDate}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -160,11 +158,6 @@ export default function PlannerCardMenu({
             </svg>
             Another date…
           </button>
-          <HiddenDatePicker
-            inputRef={dateInputRef}
-            ariaLabel="Pick another date"
-            onPick={onAnotherDate}
-          />
         </>
       )}
     </div>

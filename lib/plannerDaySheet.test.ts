@@ -3,9 +3,23 @@ import { shiftWeek } from './plannerDays';
 import {
   displayWeekOf,
   isRailOrigin,
+  sheetAnchorForDate,
   sheetAnchorForRailPick,
   weekPlanFromMeals,
 } from './plannerDaySheet';
+
+describe('sheetAnchorForDate', () => {
+  it('opens the display week that contains the meal, on that weekday', () => {
+    expect(sheetAnchorForDate('2026-08-19', 'monday')).toEqual({
+      weekStart: '2026-08-17',
+      selectedDay: 2,
+    });
+    expect(sheetAnchorForDate('2026-08-19', 'sunday')).toEqual({
+      weekStart: '2026-08-16',
+      selectedDay: 3,
+    });
+  });
+});
 
 describe('sheetAnchorForRailPick', () => {
   it('opens the previous display week on the last day for Earlier', () => {

@@ -37,6 +37,7 @@ import {
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
   isRailOrigin,
+  sheetAnchorForDate,
   sheetAnchorForRailPick,
   weekPlanFromMeals,
 } from '@/lib/plannerDaySheet';
@@ -623,9 +624,8 @@ export default function PlannerClient() {
     return hits;
   };
 
-  const openRailDaySheet = (mealId: string, direction: 'earlier' | 'later', originIso: string) => {
+  const openMoveDaySheet = (mealId: string, anchor: { weekStart: string; selectedDay: number }) => {
     const meal = mealPlans.find(m => m.id === mealId);
-    const anchor = sheetAnchorForRailPick(direction, originIso, weekStartsOn);
     setMoveSheetPlan({});
     setMoveSheet({
       mealId,
@@ -633,6 +633,10 @@ export default function PlannerClient() {
       weekStart: anchor.weekStart,
       selectedDay: anchor.selectedDay,
     });
+  };
+
+  const openRailDaySheet = (mealId: string, direction: 'earlier' | 'later', originIso: string) => {
+    openMoveDaySheet(mealId, sheetAnchorForRailPick(direction, originIso, weekStartsOn));
   };
 
   const updateDrag = (next: typeof dragRef.current) => {
@@ -1319,10 +1323,11 @@ export default function PlannerClient() {
               setCardMenu(null);
               moveMeal(mealId, dayIndex, i);
             }}
-            onAnotherDate={iso => {
-              const { mealId } = cardMenu;
+            onAnotherDate={() => {
+              const { mealId, dayIndex } = cardMenu;
               setCardMenu(null);
-              void moveMealToDate(mealId, parseLocalIso(iso));
+              const originIso = formatDate(getDayDate(weekStart, dayIndex));
+              openMoveDaySheet(mealId, sheetAnchorForDate(originIso, weekStartsOn));
             }}
             onDelete={() => {
               const { mealId } = cardMenu;
@@ -1640,9 +1645,6 @@ export default function PlannerClient() {
         .pl-picker-date-hidden {
           position: absolute; right: 0; top: 0; bottom: 0; width: 40px;
           opacity: 0.01; border: 0; padding: 0; margin: 0; z-index: 0;
-        }
-        .pl-card-menu .pl-picker-date-hidden {
-          width: 1px; height: 1px; bottom: auto; pointer-events: none;
         }
         .pl-picker-row-meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 3px; }
         .pl-picker-row-menu-btn {

@@ -61,13 +61,10 @@ describe('PlannerCardMenu', () => {
     expect(screen.getByRole('menuitem', { name: /tuesday/i })).toHaveProperty('disabled', true);
   });
 
-  it('lets you pick another date from the move submenu', () => {
+  it('opens the day sheet from Another date in the move submenu', () => {
     const props = renderMenu({ view: 'move' });
     fireEvent.click(screen.getByRole('menuitem', { name: /another date/i }));
-    fireEvent.change(screen.getByLabelText('Pick another date'), {
-      target: { value: '2026-08-25' },
-    });
-    expect(props.onAnotherDate).toHaveBeenCalledWith('2026-08-25');
+    expect(props.onAnotherDate).toHaveBeenCalledTimes(1);
     expect(props.onMoveTo).not.toHaveBeenCalled();
   });
 });
