@@ -37,6 +37,7 @@ import {
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
   isRailOrigin,
+  sheetAnchorForDate,
   sheetAnchorForRailPick,
   weekPlanFromMeals,
 } from '@/lib/plannerDaySheet';
@@ -44,10 +45,12 @@ import {
   HOLD_MS,
   bottomNavReserve,
   dayOccupied,
-  movementExceededThreshold,
+  edgeScrollDelta,
   railDayCount,
   resolveDragTarget,
+  sameDragTarget,
   shouldAllowDrag,
+  shouldArmFromMovement,
   surroundingRailDays,
   titlesOnDay,
   type DragTarget,
@@ -621,9 +624,8 @@ export default function PlannerClient() {
     return hits;
   };
 
-  const openRailDaySheet = (mealId: string, direction: 'earlier' | 'later', originIso: string) => {
+  const openMoveDaySheet = (mealId: string, anchor: { weekStart: string; selectedDay: number }) => {
     const meal = mealPlans.find(m => m.id === mealId);
-    const anchor = sheetAnchorForRailPick(direction, originIso, weekStartsOn);
     setMoveSheetPlan({});
     setMoveSheet({
       mealId,
@@ -631,6 +633,10 @@ export default function PlannerClient() {
       weekStart: anchor.weekStart,
       selectedDay: anchor.selectedDay,
     });
+  };
+
+  const openRailDaySheet = (mealId: string, direction: 'earlier' | 'later', originIso: string) => {
+    openMoveDaySheet(mealId, sheetAnchorForRailPick(direction, originIso, weekStartsOn));
   };
 
   const updateDrag = (next: typeof dragRef.current) => {
@@ -662,6 +668,26 @@ export default function PlannerClient() {
     } catch { /* occupancy falls back to the week already on screen */ }
   };
 
+  const reservedBottomForDrag = () => {
+    const nav = document.querySelector('.sidebar');
+    return bottomNavReserve(
+      window.innerWidth,
+      nav instanceof HTMLElement ? nav.getBoundingClientRect().height : 0,
+    );
+  };
+
+  const armDrag = (session: NonNullable<typeof dragRef.current>) => {
+    if (session.armed) return;
+    const viewport = window.visualViewport?.height ?? window.innerHeight;
+    const reserved = reservedBottomForDrag();
+    setRailBottom(reserved);
+    const days = surroundingRailDays(session.originIso, railDayCount(viewport, reserved));
+    setRailDays(days);
+    void loadRailMeals(days);
+    const target = resolveDragTarget(session.x, session.y, weekHits(), railHits());
+    updateDrag({ ...session, armed: true, target });
+  };
+
   const onDragHandlePointerDown = (e: React.PointerEvent, mealId: string, fromDay: number) => {
     if (e.button !== 0) return;
     if (!shouldAllowDrag(mealId)) return;
@@ -686,17 +712,7 @@ export default function PlannerClient() {
     holdTimer.current = setTimeout(() => {
       const session = dragRef.current;
       if (!session || session.mealId !== mealId || session.pointerId !== e.pointerId) return;
-      const viewport = window.visualViewport?.height ?? window.innerHeight;
-      const nav = document.querySelector('.sidebar');
-      const reserved = bottomNavReserve(
-        window.innerWidth,
-        nav instanceof HTMLElement ? nav.getBoundingClientRect().height : 0,
-      );
-      setRailBottom(reserved);
-      const days = surroundingRailDays(session.originIso, railDayCount(viewport, reserved));
-      setRailDays(days);
-      void loadRailMeals(days);
-      updateDrag({ ...session, armed: true });
+      armDrag(session);
     }, HOLD_MS);
   };
 
@@ -706,10 +722,11 @@ export default function PlannerClient() {
     const dx = e.clientX - session.startX;
     const dy = e.clientY - session.startY;
     if (!session.armed) {
-      if (movementExceededThreshold(dx, dy)) {
+      if (shouldArmFromMovement(session.armed, dx, dy)) {
         clearHoldTimer();
-        holdEl.current = null;
-        updateDrag(null);
+        const next = { ...session, x: e.clientX, y: e.clientY };
+        dragRef.current = next;
+        armDrag(next);
       }
       return;
     }
@@ -787,6 +804,27 @@ export default function PlannerClient() {
       html.style.touchAction = prevTouch;
       html.style.userSelect = prevUser;
     };
+  }, [drag?.armed]);
+
+  useEffect(() => {
+    if (!drag?.armed) return;
+    let raf = 0;
+    const tick = () => {
+      const session = dragRef.current;
+      if (!session?.armed) return;
+      const viewport = window.visualViewport?.height ?? window.innerHeight;
+      const dy = edgeScrollDelta(session.y, viewport, reservedBottomForDrag());
+      if (dy !== 0) {
+        window.scrollBy(0, dy);
+        const target = resolveDragTarget(session.x, session.y, weekHits(), railHits());
+        if (!sameDragTarget(session.target, target)) {
+          updateDrag({ ...session, target });
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [drag?.armed]);
 
   // ── Notes ───────────────────────────────────────────────────────────────────
@@ -1000,12 +1038,14 @@ export default function PlannerClient() {
                         >
                           <button
                             type="button"
+                            draggable={false}
                             className={`pl-drag-handle${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${shouldAllowDrag(meal.id) ? '' : ' is-disabled'}`}
-                            title="Hold to move"
-                            aria-label="Hold to move"
+                            title="Drag to move"
+                            aria-label="Drag to move"
                             disabled={!shouldAllowDrag(meal.id)}
                             onClick={e => { e.preventDefault(); e.stopPropagation(); }}
                             onContextMenu={e => e.preventDefault()}
+                            onDragStart={e => e.preventDefault()}
                             onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
                           >
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1282,6 +1322,12 @@ export default function PlannerClient() {
               const { mealId, dayIndex } = cardMenu;
               setCardMenu(null);
               moveMeal(mealId, dayIndex, i);
+            }}
+            onAnotherDate={() => {
+              const { mealId, dayIndex } = cardMenu;
+              setCardMenu(null);
+              const originIso = formatDate(getDayDate(weekStart, dayIndex));
+              openMoveDaySheet(mealId, sheetAnchorForDate(originIso, weekStartsOn));
             }}
             onDelete={() => {
               const { mealId } = cardMenu;

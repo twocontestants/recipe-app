@@ -27,6 +27,7 @@ function renderMenu(overrides: Partial<ComponentProps<typeof PlannerCardMenu>> =
     onOpenMove: vi.fn(),
     onBack: vi.fn(),
     onMoveTo: vi.fn(),
+    onAnotherDate: vi.fn(),
     onDelete: vi.fn(),
     ...overrides,
   };
@@ -58,5 +59,12 @@ describe('PlannerCardMenu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /wednesday/i }));
     expect(props.onMoveTo).toHaveBeenCalledWith(2);
     expect(screen.getByRole('menuitem', { name: /tuesday/i })).toHaveProperty('disabled', true);
+  });
+
+  it('opens the day sheet from Another date in the move submenu', () => {
+    const props = renderMenu({ view: 'move' });
+    fireEvent.click(screen.getByRole('menuitem', { name: /another date/i }));
+    expect(props.onAnotherDate).toHaveBeenCalledTimes(1);
+    expect(props.onMoveTo).not.toHaveBeenCalled();
   });
 });

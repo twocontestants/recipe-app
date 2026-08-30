@@ -1,6 +1,7 @@
 import { mealOnIso } from './plannerDrag';
 import {
   dayDateOf,
+  displayDayIndex,
   localDateIso,
   parseDayOfWeek,
   parseLocalIso,
@@ -21,6 +22,16 @@ export interface SheetAnchor {
 
 export function displayWeekOf(iso: string, weekStartsOn: DayKey): string {
   return localDateIso(startOfDisplayWeek(parseLocalIso(iso), weekStartsOn));
+}
+
+export function sheetAnchorForDate(
+  iso: string,
+  weekStartsOn: DayKey = 'monday',
+): SheetAnchor {
+  return {
+    weekStart: displayWeekOf(iso, weekStartsOn),
+    selectedDay: displayDayIndex(parseLocalIso(iso), weekStartsOn),
+  };
 }
 
 export function sheetAnchorForRailPick(

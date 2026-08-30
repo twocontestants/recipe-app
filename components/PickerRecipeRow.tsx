@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import HiddenDatePicker, { openNativeDatePicker } from './HiddenDatePicker';
 
 export type PickerDayOption = {
   index: number;
@@ -56,17 +57,7 @@ export default function PickerRecipeRow({
 
   const openDatePicker = () => {
     setMenu(null);
-    const el = dateInputRef.current;
-    if (!el) return;
-    const open = () => {
-      try {
-        if (typeof el.showPicker === 'function') el.showPicker();
-        else el.focus();
-      } catch {
-        el.focus();
-      }
-    };
-    requestAnimationFrame(open);
+    openNativeDatePicker(dateInputRef.current);
   };
 
   return (
@@ -105,17 +96,10 @@ export default function PickerRecipeRow({
           <circle cx="12" cy="19" r="1.7"/>
         </svg>
       </button>
-      <input
-        ref={dateInputRef}
-        type="date"
-        className="pl-picker-date-hidden"
-        aria-label={`Pick another date for ${title}`}
-        onChange={e => {
-          const value = e.target.value;
-          if (!value) return;
-          onAddToDate(value);
-          e.target.value = '';
-        }}
+      <HiddenDatePicker
+        inputRef={dateInputRef}
+        ariaLabel={`Pick another date for ${title}`}
+        onPick={onAddToDate}
       />
       {menu && createPortal(
         <>

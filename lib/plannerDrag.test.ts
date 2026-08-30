@@ -3,9 +3,12 @@ import {
   dayOccupied,
   holdArmed,
   movementExceededThreshold,
+  shouldArmFromMovement,
+  edgeScrollDelta,
   bottomNavReserve,
   railDayCount,
   resolveDragTarget,
+  sameDragTarget,
   shouldAllowDrag,
   surroundingRailDays,
   surroundingTenDays,
@@ -27,6 +30,32 @@ describe('movementExceededThreshold', () => {
     expect(movementExceededThreshold(5, 5)).toBe(false);
     expect(movementExceededThreshold(0, 8)).toBe(true);
     expect(movementExceededThreshold(8, 0)).toBe(true);
+  });
+});
+
+describe('shouldArmFromMovement', () => {
+  it('arms a mouse or touch handle-drag once movement passes 8px', () => {
+    expect(shouldArmFromMovement(false, 0, 7)).toBe(false);
+    expect(shouldArmFromMovement(false, 0, 8)).toBe(true);
+    expect(shouldArmFromMovement(false, 8, 0)).toBe(true);
+    expect(shouldArmFromMovement(true, 0, 20)).toBe(false);
+  });
+});
+
+describe('edgeScrollDelta', () => {
+  it('scrolls up in the top band and down in the bottom band', () => {
+    expect(edgeScrollDelta(0, 800)).toBeLessThan(0);
+    expect(edgeScrollDelta(400, 800)).toBe(0);
+    expect(edgeScrollDelta(800, 800)).toBeGreaterThan(0);
+  });
+
+  it('scrolls faster closer to the edge', () => {
+    expect(Math.abs(edgeScrollDelta(0, 800))).toBeGreaterThan(Math.abs(edgeScrollDelta(40, 800)));
+  });
+
+  it('keeps the bottom tab bar out of the downward scroll zone', () => {
+    expect(edgeScrollDelta(640, 800, 80)).toBe(0);
+    expect(edgeScrollDelta(799, 800, 80)).toBeGreaterThan(0);
   });
 });
 
@@ -96,6 +125,24 @@ const weekHits: WeekHit[] = [
 const railHits: RailHit[] = [
   { iso: '2026-08-22', left: 310, right: 400, top: 200, bottom: 300 },
 ];
+
+describe('sameDragTarget', () => {
+  it('treats matching week, rail, and pick targets as the same', () => {
+    expect(sameDragTarget(null, null)).toBe(true);
+    expect(sameDragTarget(
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+    )).toBe(true);
+    expect(sameDragTarget(
+      { type: 'week-day', index: 2, iso: '2026-08-19' },
+      { type: 'week-day', index: 3, iso: '2026-08-20' },
+    )).toBe(false);
+    expect(sameDragTarget(
+      { type: 'rail-pick', direction: 'later' },
+      { type: 'rail-pick', direction: 'later' },
+    )).toBe(true);
+  });
+});
 
 describe('resolveDragTarget', () => {
   it('prefers a rail day when the pointer is over the rail even if a week row shares that Y', () => {
