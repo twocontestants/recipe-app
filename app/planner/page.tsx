@@ -5,14 +5,14 @@ import PlannerClient from './PlannerClient';
 
 export default function PlannerPage() {
   return (
-    <div className="app-shell">
+    <div className="app-shell is-planner">
       <Sidebar />
-      <main className="main-content">
+      <main className="main-content is-planner">
         <AuthGate>
           <PlannerClient />
         </AuthGate>
+        <ToastProvider />
       </main>
-      <ToastProvider />
     </div>
   );
 }

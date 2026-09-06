@@ -132,6 +132,31 @@ body {
   width: 100%;
 }
 
+/* Planner fills the visible viewport so the week cannot scroll the document
+   and so day-row heights stay still when the mobile URL bar shows or hides. */
+html:has(.app-shell.is-planner),
+body:has(.app-shell.is-planner) {
+  height: 100svh;
+  overflow: hidden;
+}
+.app-shell.is-planner {
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+}
+.main-content.is-planner {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+.main-content.is-planner .empty-state {
+  flex: 1;
+}
+
 /* ── Page header ──────────────────────────── */
 .page-header {
   margin-bottom: 2.5rem;
@@ -1103,6 +1128,9 @@ select.settings-select {
   .main-content {
     padding: 1.5rem;
   }
+  .main-content.is-planner {
+    padding: 0.85rem 1.25rem 0.85rem;
+  }
 
   .page-header {
     flex-direction: column;
@@ -1207,6 +1235,9 @@ select.settings-select {
   .main-content {
     padding: 1rem 0.9rem;
     padding-bottom: var(--bottom-nav-height);
+  }
+  .main-content.is-planner {
+    padding: 0.45rem 0.75rem var(--bottom-nav-height);
   }
 
   /* Page header — stacks cleanly */
@@ -1326,6 +1357,9 @@ select.settings-select {
   .main-content {
     padding: 0.75rem;
     padding-bottom: var(--bottom-nav-height);
+  }
+  .main-content.is-planner {
+    padding: 0.35rem 0.65rem var(--bottom-nav-height);
   }
 }
 

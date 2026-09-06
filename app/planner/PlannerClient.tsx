@@ -281,6 +281,22 @@ export default function PlannerClient() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+    };
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    window.scrollTo(0, 0);
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!picker && !showMagic) return;
     if (recipes.length) return;
     let cancelled = false;
@@ -729,36 +745,7 @@ export default function PlannerClient() {
   applyPointerMoveRef.current = applyPointerMove;
   finishHoldDragRef.current = finishHoldDrag;
 
-  // Keep the drag alive after the finger leaves the handle. The rail used to
-  // vanish because the card lost the pointer and fired cancel.
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => applyPointerMoveRef.current(e);
-    const onUp = (e: PointerEvent) => finishHoldDragRef.current(e, false);
-    const onCancel = (e: PointerEvent) => {
-      const session = dragRef.current;
-      if (!session || e.pointerId !== session.pointerId) return;
-      if (!session.armed) {
-        finishHoldDragRef.current(e, true);
-        return;
-      }
-      applyPointerMoveRef.current(e);
-    };
-    const onTouchEnd = () => {
-      const session = dragRef.current;
-      if (!session?.armed) return;
-      finishHoldDragRef.current({ pointerId: session.pointerId, preventDefault() {} } as PointerEvent, false);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('touchend', onTouchEnd);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('touchend', onTouchEnd);
-    };
-  }, []);
+  // Drag-to-move is temporarily disabled: do not attach pointer listeners.
 
   useEffect(() => {
     if (!drag?.armed) return;
@@ -941,6 +928,14 @@ export default function PlannerClient() {
     setShowCalendar(false);
   };
 
+  const shiftDisplayWeek = (weeks: number) => {
+    setWeekStart(d => {
+      const next = new Date(d);
+      next.setDate(d.getDate() + weeks * 7);
+      return next;
+    });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -958,21 +953,10 @@ export default function PlannerClient() {
       <div className="pl-nav">
         <div className="pl-nav-bar">
           <div className="pl-nav-left">
-            <button
-              type="button"
-              className={`pl-week-toggle${showCalendar ? ' is-open' : ''}`}
-              aria-expanded={showCalendar}
-              aria-label={showCalendar ? 'Close calendar' : 'Open calendar'}
-              onClick={() => { if (showCalendar) setShowCalendar(false); else openCalendar(); }}
-            >
-              <span className="pl-week-label">
-                {showCalendar ? monthTitle(calendarMonthKey) : formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}
-              </span>
-              <svg className="pl-week-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
-                <path d="M6 9l6 6 6-6"/>
-              </svg>
-            </button>
-            {!viewingThisWeek && !showCalendar && (
+            <span className="pl-week-label">
+              {showCalendar ? monthTitle(calendarMonthKey) : formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}
+            </span>
+            {!viewingThisWeek && (
               <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
             )}
           </div>
@@ -984,46 +968,10 @@ export default function PlannerClient() {
           </button>
         </div>
 
-        {showCalendar ? (
-          <div className="pl-cal" role="dialog" aria-label="Month calendar">
-            <div className="pl-cal-toolbar">
-              <button type="button" className="pl-nav-btn" aria-label="Previous month" onClick={() => shiftCalendar(-1)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-              </button>
-              <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
-              <button type="button" className="pl-nav-btn" aria-label="Next month" onClick={() => shiftCalendar(1)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-            </div>
-            <div className="pl-cal-weekdays" aria-hidden="true">
-              {dayKeys.map(key => (
-                <span key={key}>{DAY_SHORT[key]}</span>
-              ))}
-            </div>
-            <div className="pl-cal-grid">
-              {monthCalendarCells(calendarMonthKey, weekStartsOn).map(cell => {
-                const date = parseLocalIso(cell.iso);
-                const planned = dayIsPlanned(cell.iso);
-                const isToday = cell.iso === todayIso;
-                const isSelected = cell.iso === selectedIso;
-                const weekday = date.toLocaleDateString('en-AU', { weekday: 'long' });
-                const longDate = date.toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
-                return (
-                  <button
-                    key={cell.iso}
-                    type="button"
-                    className={calendarDayClass({ inMonth: cell.inMonth, planned, today: isToday, selected: isSelected })}
-                    aria-current={isToday ? 'date' : undefined}
-                    aria-label={`${weekday} ${longDate}${isToday ? ', today' : ''}${planned ? ', planned' : ''}`}
-                    onClick={() => jumpToIso(cell.iso)}
-                  >
-                    {date.getDate()}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
+        <div className="pl-week-bar">
+          <button type="button" className="pl-nav-btn" aria-label="Previous week" onClick={() => shiftDisplayWeek(-1)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
           <div className="pl-week-strip" role="tablist" aria-label="Days this week">
             {DAYS.map((dayName, dayIndex) => {
               const date = getDayDate(weekStart, dayIndex);
@@ -1047,7 +995,67 @@ export default function PlannerClient() {
               );
             })}
           </div>
-        )}
+          <button type="button" className="pl-nav-btn" aria-label="Next week" onClick={() => shiftDisplayWeek(1)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+
+        <div className={`pl-cal-slot${showCalendar ? ' is-open' : ''}`}>
+          <div className="pl-cal-slot-inner">
+            <div className="pl-cal" role="dialog" aria-label="Month calendar" aria-hidden={!showCalendar}>
+              <div className="pl-cal-toolbar">
+                <button type="button" className="pl-nav-btn" aria-label="Previous month" onClick={() => shiftCalendar(-1)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
+                <button type="button" className="pl-nav-btn" aria-label="Next month" onClick={() => shiftCalendar(1)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+              </div>
+              <div className="pl-cal-weekdays" aria-hidden="true">
+                {dayKeys.map(key => (
+                  <span key={key}>{DAY_SHORT[key]}</span>
+                ))}
+              </div>
+              <div className="pl-cal-grid">
+                {monthCalendarCells(calendarMonthKey, weekStartsOn).map(cell => {
+                  const date = parseLocalIso(cell.iso);
+                  const planned = dayIsPlanned(cell.iso);
+                  const isToday = cell.iso === todayIso;
+                  const isSelected = cell.iso === selectedIso;
+                  const weekday = date.toLocaleDateString('en-AU', { weekday: 'long' });
+                  const longDate = date.toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+                  return (
+                    <button
+                      key={cell.iso}
+                      type="button"
+                      tabIndex={showCalendar ? 0 : -1}
+                      className={calendarDayClass({ inMonth: cell.inMonth, planned, today: isToday, selected: isSelected })}
+                      aria-current={isToday ? 'date' : undefined}
+                      aria-label={`${weekday} ${longDate}${isToday ? ', today' : ''}${planned ? ', planned' : ''}`}
+                      onClick={() => jumpToIso(cell.iso)}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className={`pl-cal-tab${showCalendar ? ' is-open' : ''}`}
+          aria-expanded={showCalendar}
+          aria-label={showCalendar ? 'Close month calendar' : 'Open month calendar'}
+          onClick={() => { if (showCalendar) setShowCalendar(false); else openCalendar(); }}
+        >
+          <span className="pl-cal-tab-handle" aria-hidden="true" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
       </div>
 
       {loading ? (
@@ -1092,21 +1100,10 @@ export default function PlannerClient() {
                           }}
                           title="View recipe"
                         >
-                          <button
-                            type="button"
-                            draggable={false}
-                            className={`pl-card-date${mealIndex > 0 ? ' is-repeat' : ''}${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${shouldAllowDrag(meal.id) ? '' : ' is-disabled'}`}
-                            title="Drag to move"
-                            aria-label={`${short} ${dayNum}, drag to move`}
-                            disabled={!shouldAllowDrag(meal.id)}
-                            onClick={e => { e.preventDefault(); e.stopPropagation(); }}
-                            onContextMenu={e => e.preventDefault()}
-                            onDragStart={e => e.preventDefault()}
-                            onPointerDown={e => onDragHandlePointerDown(e, meal.id, dayIndex)}
-                          >
+                          <span className={`pl-card-date${mealIndex > 0 ? ' is-repeat' : ''}`}>
                             <span className="pl-card-wd">{short}</span>
                             <span className="pl-card-num">{dayNum}</span>
-                          </button>
+                          </span>
                           <div className="pl-recipe-img">
                             {recipe?.image_url ? (
                               <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -1446,9 +1443,13 @@ export default function PlannerClient() {
         .pl-root {
           position: relative;
           max-width: 680px;
+          width: 100%;
           display: flex; flex-direction: column;
-          height: calc(100dvh - var(--bottom-nav-height, 0px) - 2rem);
+          flex: 1 1 auto;
+          height: 100%;
           min-height: 0;
+          overflow: hidden;
+          --pl-nav-offset: 6.1rem;
         }
 
         /* Absolute nav panel — stays on top of the week */
@@ -1468,18 +1469,35 @@ export default function PlannerClient() {
           gap: 0.5rem; min-height: 32px;
         }
         .pl-nav-left { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
-        .pl-week-toggle {
-          display: inline-flex; align-items: center; gap: 0.28rem;
-          background: none; border: none; padding: 0.2rem 0.15rem;
-          cursor: pointer; font-family: var(--font-body); color: var(--ink);
-          min-width: 0;
-        }
         .pl-week-label {
           font-size: 0.92rem; font-weight: 650; letter-spacing: -0.01em;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .pl-week-chevron { flex-shrink: 0; color: var(--ink-muted); transition: transform 0.15s; }
-        .pl-week-toggle.is-open .pl-week-chevron { transform: rotate(180deg); }
+        .pl-week-bar {
+          display: flex; align-items: center; gap: 0.05rem;
+        }
+        .pl-week-bar .pl-week-strip { flex: 1; min-width: 0; }
+        .pl-week-bar .pl-nav-btn { flex-shrink: 0; }
+        .pl-cal-slot {
+          display: grid;
+          grid-template-rows: 0fr;
+          transition: grid-template-rows 0.22s ease;
+        }
+        .pl-cal-slot.is-open { grid-template-rows: 1fr; }
+        .pl-cal-slot-inner { overflow: hidden; min-height: 0; }
+        .pl-cal-tab {
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          gap: 1px; width: 100%; margin: 0; padding: 0.12rem 0 0.02rem;
+          border: none; background: none; cursor: pointer;
+          color: var(--ink-muted); font-family: var(--font-body);
+        }
+        .pl-cal-tab-handle {
+          width: 34px; height: 3px; border-radius: 99px; background: var(--border);
+        }
+        .pl-cal-tab svg { transition: transform 0.18s ease; }
+        .pl-cal-tab.is-open svg { transform: rotate(180deg); }
+        .pl-cal-tab:hover { color: var(--ink); }
+        .pl-cal-tab:hover .pl-cal-tab-handle { background: var(--ink-muted); }
         .pl-nav-btn {
           background: none; border: none; border-radius: 8px; padding: 0.28rem;
           cursor: pointer; color: var(--ink-muted); display: flex; align-items: center;
@@ -1575,7 +1593,7 @@ export default function PlannerClient() {
           display: flex; flex-direction: column;
           gap: 2px;
           overflow: hidden;
-          padding-top: 4.55rem;
+          padding-top: var(--pl-nav-offset);
         }
         .pl-day {
           flex: 1 1 0;
@@ -1685,12 +1703,9 @@ export default function PlannerClient() {
         .pl-card-date {
           flex-shrink: 0; width: 42px; display: flex; flex-direction: column; align-items: center;
           justify-content: center; gap: 1px; background: none; border: none; padding: 0;
-          cursor: grab; color: inherit; font-family: var(--font-body);
-          touch-action: none; user-select: none; -webkit-user-select: none;
+          color: inherit; font-family: var(--font-body);
         }
         .pl-card-date.is-repeat { visibility: hidden; }
-        .pl-card-date.is-dragging { cursor: grabbing; }
-        .pl-card-date.is-disabled { cursor: default; opacity: 0.55; }
         .pl-card-wd { font-size: 0.68rem; font-weight: 600; color: var(--ink-muted); }
         .pl-card-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.15; }
         .pl-recipe-img {
@@ -1843,20 +1858,15 @@ export default function PlannerClient() {
 
         .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; padding-top: 6rem; }
 
-        @media (min-width: 901px) {
-          .pl-root { height: calc(100dvh - 6rem); }
-        }
-
         /* Mobile */
         @media (max-width: 600px) {
-          .pl-root { height: calc(100dvh - var(--bottom-nav-height, 0px) - 1.25rem); }
-          .pl-nav { padding-bottom: 0.28rem; }
+          .pl-root { --pl-nav-offset: 5.85rem; }
+          .pl-nav { padding-bottom: 0.12rem; }
           .pl-week-label { font-size: 0.88rem; }
           .pl-chip { padding: 0.18rem 0.04rem; min-height: 28px; }
           .pl-chip-wd { font-size: 0.56rem; }
           .pl-chip-num { font-size: 0.72rem; }
           .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
-          .pl-days { padding-top: 4.2rem; }
           .pl-cal-day { max-height: 36px; font-size: 0.74rem; }
           .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
           .pl-recipe-name { font-size: 0.84rem; }
