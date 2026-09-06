@@ -1,0 +1,82 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
+
+vi.mock('@/components/AuthProvider', () => ({
+  useAuth: () => ({
+    user: { id: 'u1', login_name: 'cook', display_name: 'Cook', role: 'cook' },
+    loading: false,
+    refresh: async () => {},
+    logout: async () => {},
+  }),
+}));
+
+vi.mock('@/components/usePlannerLive', () => ({
+  usePlannerLive: () => ({ broadcastPlannerChanged: vi.fn() }),
+}));
+
+import PlannerClient from './PlannerClient';
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+function dinner(id: string, plannedOn: string) {
+  return {
+    id,
+    planned_on: plannedOn,
+    week_start: plannedOn,
+    recipe_id: id,
+    day_of_week: 0,
+    meal_type: 'dinner',
+    servings: 4,
+    recipe: { title: `Meal ${id}`, primary_protein: 'chicken' },
+  };
+}
+
+describe('PlannerClient planned-day count', () => {
+  it('shows unique dinner days this week, not every loaded meal', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const lastWeek = shiftWeek(thisWeek, -1);
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    const wed = localDateIso(dayDateOf(thisWeek, 2));
+    const lastMon = localDateIso(dayDateOf(lastWeek, 0));
+    const lastTue = localDateIso(dayDateOf(lastWeek, 1));
+    const lastWed = localDateIso(dayDateOf(lastWeek, 2));
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return {
+          ok: true,
+          json: async () => [
+            dinner('this-mon-a', mon),
+            dinner('this-mon-b', mon),
+            dinner('this-wed', wed),
+            dinner('last-mon', lastMon),
+            dinner('last-tue', lastTue),
+            dinner('last-wed', lastWed),
+          ],
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    await waitFor(() => {
+      expect(screen.getByText('2 of 7 planned')).toBeTruthy();
+    });
+    expect(screen.queryByText(/[3-9]\d* of 7 planned/)).toBeNull();
+    expect(screen.queryByText('6 of 7 planned')).toBeNull();
+  });
+});
