@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ShoppingItem, ShoppingContribution } from '@/lib/shopping';
 import { CATEGORY_ORDER, CATEGORY_EMOJI, aggregateContributions, normalizeIngredientName } from '@/lib/shopping';
 import {
@@ -17,6 +17,7 @@ import {
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
+import NewShoppingItemRow from '@/components/NewShoppingItemRow';
 import { opsNeedListChanged, type ShoppingOp } from '@/lib/shoppingOps';
 
 function genId() { return 'i' + Math.random().toString(36).slice(2, 10); }
@@ -164,28 +165,6 @@ function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onTog
   );
 }
 
-// ── New item row ──────────────────────────────────────────────────────────────
-
-function NewItemRow({ autoFocus, onCommit, onCancel }: { autoFocus?: boolean; onCommit: (n: string, a: string) => void; onCancel: () => void; }) {
-  const nameRef = useRef<HTMLInputElement>(null);
-  const amountRef = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState(''); const [amount, setAmount] = useState('');
-  useEffect(() => { if (autoFocus) nameRef.current?.focus(); }, [autoFocus]);
-  const commit = () => { if (name.trim()) onCommit(name.trim(), amount.trim()); else onCancel(); };
-  return (
-    <div className="new-item-row">
-      <div className="item-drag-handle" style={{ opacity: 0, pointerEvents: 'none' }}><DragHandle size={11} /></div>
-      <div className="shop-checkbox new-item-checkbox" />
-      <input ref={nameRef} className="new-item-name" placeholder="New item…" value={name} onChange={e => setName(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (name.trim()) { onCommit(name.trim(), amount.trim()); setName(''); setAmount(''); nameRef.current?.focus(); } } if (e.key === 'Escape') { e.preventDefault(); onCancel(); } if (e.key === 'Tab') { e.preventDefault(); amountRef.current?.focus(); } }}
-        onBlur={() => setTimeout(() => { if (!amountRef.current?.matches(':focus')) commit(); }, 100)} />
-      <input ref={amountRef} className="new-item-amount" placeholder="qty" value={amount} onChange={e => setAmount(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') { e.preventDefault(); onCancel(); } }}
-        onBlur={() => setTimeout(() => { if (!nameRef.current?.matches(':focus')) commit(); }, 100)} />
-    </div>
-  );
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function ShoppingListClient() {
@@ -223,6 +202,7 @@ export default function ShoppingListClient() {
   const [editingCat, setEditingCat] = useState<string | null>(null);
   const [editingCatValue, setEditingCatValue] = useState('');
   const [insertingIn, setInsertingIn] = useState<{ cat: string; afterKey: string | null } | null>(null);
+  const [knownIngredients, setKnownIngredients] = useState<string[]>([]);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [dragCat, setDragCat] = useState<string | null>(null);
@@ -240,6 +220,7 @@ export default function ShoppingListClient() {
   // runs once with [] deps and would otherwise capture a stale activeId).
   const activeIdRef = useRef<string | null>(activeId);
   activeIdRef.current = activeId;
+  const knownIngredientsLoaded = useRef(false);
   // The DB is the source of truth for everything. Sockets only relay live
   // updates so other connected clients stay in sync between reads. These
   // signatures track the last-persisted value of each slice so we skip
@@ -436,6 +417,24 @@ export default function ShoppingListClient() {
       } catch { /* default to 'ask' */ }
     })();
   }, []);
+
+  // Ingredient names for the add-item autocomplete. Loaded once, when the cook
+  // first opens an add row, so opening Shopping does not wait on the dictionary.
+  useEffect(() => {
+    if (!insertingIn || knownIngredientsLoaded.current) return;
+    knownIngredientsLoaded.current = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/ingredient-categories');
+        if (!res.ok) return;
+        const data = await res.json();
+        const names = Array.isArray(data?.entries)
+          ? data.entries.map((e: { name?: string }) => String(e?.name ?? '')).filter(Boolean)
+          : [];
+        setKnownIngredients(names);
+      } catch { /* typing without suggestions is fine */ }
+    })();
+  }, [insertingIn]);
 
   // ── Fetch active list items ───────────────────────────────────────────────
 
@@ -674,6 +673,16 @@ export default function ShoppingListClient() {
     ops.push({ t: 'check', key: item.key, checked: false });
     sendOps(ops);
   };
+
+  const addCatalog = useMemo(() => {
+    const names: string[] = [];
+    for (const item of serverItems) {
+      if (item.displayName) names.push(item.displayName);
+      if (item.name) names.push(item.name);
+    }
+    names.push(...knownIngredients);
+    return names;
+  }, [serverItems, knownIngredients]);
 
   const addItem = (cat: string, name: string, amount: string, afterKey: string | null) => {
     const id = genId();
@@ -1036,12 +1045,12 @@ export default function ShoppingListClient() {
                         onSubMoveClick={(e, cid) => openMoveMenu(e, cid, true, cat)}
                       />
                       {insertingIn?.cat === cat && insertingIn.afterKey === item.key && (
-                        <NewItemRow autoFocus onCommit={(n, a) => { addItem(cat, n, a, item.key); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
+                        <NewShoppingItemRow autoFocus catalog={addCatalog} onCommit={(n, a) => { addItem(cat, n, a, item.key); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
                       )}
                     </div>
                   ))}
                   {insertingIn?.cat === cat && insertingIn.afterKey === null && (
-                    <NewItemRow autoFocus onCommit={(n, a) => { addItem(cat, n, a, null); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
+                    <NewShoppingItemRow autoFocus catalog={addCatalog} onCommit={(n, a) => { addItem(cat, n, a, null); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
                   )}
                 </div>
               </div>
@@ -1270,14 +1279,6 @@ export default function ShoppingListClient() {
           .move-menu-item { padding: 0.7rem 0.7rem; font-size: 0.92rem; }
           .item-move-btn { opacity: 0.7; padding: 5px; }
         }
-
-        .new-item-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.35rem; border-radius: 0 0 5px 5px; background: rgba(181,69,27,0.025); border: 1px dashed var(--border); border-top: none; animation: fadeInRow 0.12s ease; }
-        @keyframes fadeInRow { from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none} }
-        .new-item-checkbox { opacity: 0.2; pointer-events: none; }
-        .new-item-name { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 16px; font-family: var(--font-body); color: var(--ink); padding: 2px 4px; }
-        .new-item-name::placeholder { color: var(--border); }
-        .new-item-amount { width: 60px; border: none; outline: none; background: transparent; font-family: var(--font-display); font-size: 16px; color: var(--rust); text-align: right; padding: 2px 5px; }
-        .new-item-amount::placeholder { color: var(--border); font-family: var(--font-body); font-size: 0.78rem; }
 
         .bottom-controls { margin-top: 1rem; }
         .bottom-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
