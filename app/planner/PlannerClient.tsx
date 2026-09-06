@@ -974,9 +974,9 @@ export default function PlannerClient() {
               }}>Today</button>
             )}
           </div>
-        </div>
-        <div className="pl-topbar-right" style={{ position: 'relative' }}>
           <span className="pl-count">{totalMeals} of 7 planned</span>
+        </div>
+        <div className="pl-topbar-right">
           <button className="pl-icon-btn" title="Jump to a date" aria-label="Jump to a date" onClick={() => openNativeDatePicker(jumpDateRef.current)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -1481,7 +1481,7 @@ export default function PlannerClient() {
         .pl-root { max-width: 680px; }
 
         /* Top bar */
-        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.25rem; }
         .pl-title { font-family: var(--font-body); font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-bottom: 0.35rem; letter-spacing: -0.02em; }
         .pl-week-nav { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
         .pl-nav-btn { background: none; border: none; border-radius: 8px; padding: 0.3rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
@@ -1489,7 +1489,7 @@ export default function PlannerClient() {
         .pl-week-label { font-size: 0.95rem; color: var(--ink-muted); padding: 0 0.2rem; font-weight: 500; }
         .pl-today-btn { background: none; border: none; font-size: 0.78rem; color: var(--sage); cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px; font-family: var(--font-body); transition: all 0.15s; }
         .pl-today-btn:hover { background: var(--sage-light); }
-        .pl-topbar-right { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+        .pl-topbar-right { position: relative; display: flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
         .pl-count { font-size: 0.75rem; color: var(--ink-muted); margin-right: 0.35rem; }
         .pl-icon-btn { width: 38px; height: 38px; border: none; background: none; border-radius: 10px; color: var(--ink-soft); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s, color 0.15s; }
         .pl-icon-btn:hover { background: var(--parchment); color: var(--ink); }
