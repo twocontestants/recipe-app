@@ -87,7 +87,10 @@ describe('PlannerClient week nav', () => {
     expect(screen.getByRole('button', { name: 'Auto-plan' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Jump to a date' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Shopping list' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Previous week' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Previous week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open month calendar' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open calendar' })).toBeNull();
     const monday = screen.getByRole('tab', { name: /monday .* planned/i });
     const tuesday = screen.getByRole('tab', { name: /tuesday .* nothing planned/i });
     expect(monday.className).toContain('is-planned');
@@ -97,6 +100,7 @@ describe('PlannerClient week nav', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(7);
     expect(screen.getAllByRole('tab').some(el => el.className.includes('is-today'))).toBe(true);
     expect(screen.getAllByRole('button', { name: /add dinner/i }).length).toBeGreaterThanOrEqual(4);
+    expect(screen.queryByRole('button', { name: /drag to move/i })).toBeNull();
     expect(screen.queryByPlaceholderText(/add a note/i)).toBeNull();
     expect(screen.queryByText(/this week's suggestions/i)).toBeNull();
     expect(screen.queryByText(/add another/i)).toBeNull();
@@ -129,7 +133,18 @@ describe('PlannerClient week nav', () => {
     Element.prototype.scrollIntoView = vi.fn();
     render(<PlannerClient />);
 
-    const open = await screen.findByRole('button', { name: 'Open calendar' });
+    const mondayChip = await screen.findByRole('tab', { name: /monday/i });
+    const mondayBefore = mondayChip.textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
+    });
+
+    const open = await screen.findByRole('button', { name: 'Open month calendar' });
     fireEvent.click(open);
     expect(screen.getByRole('dialog', { name: 'Month calendar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous month' })).toBeTruthy();
