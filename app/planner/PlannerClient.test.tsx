@@ -82,6 +82,7 @@ describe('PlannerClient week nav', () => {
     }));
 
     Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
     render(<PlannerClient />);
 
     await waitFor(() => {
@@ -93,6 +94,8 @@ describe('PlannerClient week nav', () => {
     expect(screen.queryByRole('button', { name: 'Jump to a date' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Previous week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Scroll to next week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Scroll to previous week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open month calendar' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open calendar' })).toBeNull();
     const monday = screen.getByRole('tab', { name: /monday .* planned/i });
@@ -135,6 +138,7 @@ describe('PlannerClient week nav', () => {
     }));
 
     Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
     render(<PlannerClient />);
 
     const mondayChip = await screen.findByRole('tab', { name: /monday/i });
@@ -189,6 +193,7 @@ describe('PlannerClient week nav', () => {
     }));
 
     Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
     render(<PlannerClient />);
 
     const menuBtn = await screen.findByRole('button', { name: 'Meal options' });
@@ -212,20 +217,65 @@ describe('PlannerClient week nav', () => {
         return { ok: true, json: async () => ({}) };
       }
       if (url.includes('/api/planner')) {
-        return {
-          ok: true,
-          json: async () => [dinner('today-meal', today)],
-        };
+        return { ok: true, json: async () => [dinner('today-meal', today)] };
       }
       return { ok: false, json: async () => ({}) };
     }));
 
     Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
     render(<PlannerClient />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New shopping list' }));
     expect(await screen.findByRole('dialog', { name: 'New shopping list' })).toBeTruthy();
     expect(await screen.findByRole('checkbox', { name: /meal today-meal/i })).toBeTruthy();
     expect(screen.getByText('this week')).toBeTruthy();
+  });
+
+  it('loads the next week from the bottom button, then scrolls back up', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const nextWeek = shiftWeek(thisWeek, 1);
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    const nextMon = localDateIso(dayDateOf(nextWeek, 0));
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return {
+          ok: true,
+          json: async () => [dinner('this-mon-a', mon), dinner('next-mon', nextMon)],
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    const scrollTo = vi.fn();
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
+    render(<PlannerClient />);
+
+    const mondayBefore = (await screen.findByRole('tab', { name: /monday/i })).textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll to next week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
+    });
+    expect(screen.getByText('Meal next-mon')).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', { name: 'Scroll to previous week' }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll to previous week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
+    });
+    expect(screen.getByText('Meal this-mon-a')).toBeTruthy();
   });
 });

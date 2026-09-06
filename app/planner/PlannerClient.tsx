@@ -41,6 +41,12 @@ import {
 } from '@/lib/plannerDays';
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
+  adjacentWeekDate,
+  prefersReducedMotion,
+  runWeekShiftScroll,
+  type WeekShiftDirection,
+} from '@/lib/plannerWeekShift';
+import {
   isRailOrigin,
   sheetAnchorForDate,
   sheetAnchorForRailPick,
@@ -149,6 +155,17 @@ export default function PlannerClient() {
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const dayEls = useRef<(HTMLDivElement | null)[]>([]);
+  const daysScrollRef = useRef<HTMLDivElement>(null);
+  const weekPaneEls = useRef<Record<string, HTMLDivElement | null>>({});
+  const weekNavGen = useRef(0);
+  const [weekNav, setWeekNav] = useState<WeekShiftDirection | null>(null);
+  const [weekShift, setWeekShift] = useState<{
+    direction: WeekShiftDirection;
+    from: Date;
+    to: Date;
+    fromNotes: Record<number, string>;
+    toNotes: Record<number, string>;
+  } | null>(null);
   const railEls = useRef<(HTMLDivElement | null)[]>([]);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdEl = useRef<HTMLElement | null>(null);
@@ -926,19 +943,102 @@ export default function PlannerClient() {
   };
 
   const jumpToIso = (iso: string) => {
+    weekNavGen.current += 1;
+    setWeekShift(null);
+    setWeekNav(null);
     const d = parseLocalIso(iso);
     setWeekStart(startOfDisplayWeek(d, weekStartsOn));
     setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
     setShowCalendar(false);
   };
 
-  const shiftDisplayWeek = (weeks: number) => {
-    setWeekStart(d => {
-      const next = new Date(d);
-      next.setDate(d.getDate() + weeks * 7);
-      return next;
-    });
+  const fetchNotesByIso = async (displayIso: string): Promise<Record<string, string>> => {
+    const { from, to } = displayWeekDateRange(displayIso);
+    const notesRes = await fetch(
+      `/api/planner-notes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
+    if (!notesRes.ok) return {};
+    const raw = await notesRes.json();
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, string>;
+    return {};
   };
+
+  const navigateWeek = async (weeks: 1 | -1) => {
+    if (loading || weekNav) return;
+    const direction: WeekShiftDirection = weeks > 0 ? 'down' : 'up';
+    const gen = ++weekNavGen.current;
+    setWeekNav(direction);
+    const from = weekStart;
+    const to = adjacentWeekDate(weekStart, weeks);
+    const toIso = formatDate(to);
+    try {
+      const monthKeys = monthsForDisplayWeek(toIso);
+      const [, notesByIso] = await Promise.all([
+        ensureMonths(monthKeys),
+        fetchNotesByIso(toIso),
+      ]);
+      if (gen !== weekNavGen.current) return;
+      setMealPlans(snapshotMealPlans());
+      setWeekShift({
+        direction,
+        from,
+        to,
+        fromNotes: notes,
+        toNotes: notesByDisplayIndex(notesByIso, toIso),
+      });
+      setWeekStart(to);
+      setNotes(notesByDisplayIndex(notesByIso, toIso));
+      const neighbours = monthKeys.flatMap(key => adjacentMonthKeys(key));
+      void ensureMonths(neighbours).then(all => setMealPlans(all)).catch(() => { /* optional prefetch */ });
+    } catch {
+      if (gen === weekNavGen.current) {
+        showToast('Failed to load planner', 'error');
+        setWeekNav(null);
+      }
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (!weekShift) {
+      if (daysScrollRef.current) daysScrollRef.current.scrollTop = 0;
+      return;
+    }
+    const scroller = daysScrollRef.current;
+    const incoming = weekPaneEls.current[formatDate(weekShift.to)];
+    if (!scroller || !incoming) {
+      setWeekShift(null);
+      setWeekNav(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await runWeekShiftScroll(scroller, incoming, weekShift.direction, prefersReducedMotion());
+      if (cancelled) return;
+      setWeekShift(null);
+      setWeekNav(null);
+    })();
+    return () => { cancelled = true; };
+  }, [weekShift]);
+
+  const shiftDisplayWeek = (weeks: number) => {
+    void navigateWeek(weeks > 0 ? 1 : -1);
+  };
+
+  const mealsForWeekDay = (week: Date, dayIndex: number) =>
+    mealPlans.filter(m => mealOnDate(m, formatDate(getDayDate(week, dayIndex))) && m.meal_type === 'dinner');
+
+  const thisWeekIso = formatDate(startOfDisplayWeek(new Date(), weekStartsOn));
+  const weekPanes = weekShift
+    ? weekShift.direction === 'down'
+      ? [
+          { week: weekShift.from, notes: weekShift.fromNotes },
+          { week: weekShift.to, notes: weekShift.toNotes },
+        ]
+      : [
+          { week: weekShift.to, notes: weekShift.toNotes },
+          { week: weekShift.from, notes: weekShift.fromNotes },
+        ]
+    : [{ week: weekStart, notes }];
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -1080,118 +1180,161 @@ export default function PlannerClient() {
       {loading ? (
         <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : (
-        <>
-        <div className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}>
-          {DAYS.map((dayName, dayIndex) => {
-            const date = getDayDate(weekStart, dayIndex);
-            const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
-            const isPast = viewingThisWeek && dayIndex < todayDisplayIdx;
-            const dayMeals = getMealsForDay(dayIndex);
-            const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
-            const dayNum = date.getDate();
-
+        <div
+          ref={daysScrollRef}
+          className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}
+          aria-busy={weekNav !== null}
+        >
+          {weekPanes.map(pane => {
+            const paneIso = formatDate(pane.week);
+            const paneIsActive = paneIso === formatDate(weekStart);
+            const paneIsThisWeek = paneIso === thisWeekIso;
             return (
-              <div
-                key={dayIndex}
-                ref={el => { dayEls.current[dayIndex] = el; }}
-                className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
+              <section
+                key={paneIso}
+                ref={el => { weekPaneEls.current[paneIso] = el; }}
+                className={`pl-week-pane${paneIsActive ? '' : ' is-outgoing'}`}
+                data-week={paneIso}
+                aria-label={formatWeekLabel(paneIso, new Date(), weekStartsOn)}
               >
-                {dayMeals.length > 0 && (
-                  <div className="pl-meal-stack">
-                    {dayMeals.map((meal, mealIndex) => {
-                      const recipe = meal.recipe;
-                      const menuOpen = cardMenu?.mealId === meal.id;
-                      const meta = recipeCardMeta({
-                        cookTime: recipe?.cook_time,
-                        prepTime: recipe?.prep_time,
-                        servings: meal.servings || recipe?.servings,
-                      });
-                      return (
-                        <div
-                          key={meal.id}
-                          className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
-                          onClick={() => {
-                            if (suppressCardClick.current) {
-                              suppressCardClick.current = false;
-                              return;
-                            }
-                            if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view', meal.recipe?.title);
-                          }}
-                          title="View recipe"
-                        >
-                          <span className={`pl-card-date${mealIndex > 0 ? ' is-repeat' : ''}`}>
-                            <span className="pl-card-wd">{short}</span>
-                            <span className="pl-card-num">{dayNum}</span>
-                          </span>
-                          <div className="pl-recipe-img">
-                            {recipe?.image_url ? (
-                              <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                            ) : (
-                              <span className="pl-recipe-img-fallback" aria-hidden>🍽</span>
-                            )}
+                <button
+                  type="button"
+                  className="pl-week-shift"
+                  aria-label="Scroll to previous week"
+                  disabled={weekNav !== null}
+                  onClick={() => { void navigateWeek(-1); }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                    <path d="M6 14l6-6 6 6"/>
+                  </svg>
+                  <span>{weekNav === 'up' ? 'Loading…' : 'Previous week'}</span>
+                </button>
+                <div className="pl-week-days">
+                  {DAYS.map((dayName, dayIndex) => {
+                    const date = getDayDate(pane.week, dayIndex);
+                    const isToday = paneIsThisWeek && dayIndex === todayDisplayIdx;
+                    const isPast = paneIsThisWeek && dayIndex < todayDisplayIdx;
+                    const dayMeals = mealsForWeekDay(pane.week, dayIndex);
+                    const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
+                    const dayNum = date.getDate();
+
+                    return (
+                      <div
+                        key={`${paneIso}-${dayIndex}`}
+                        ref={el => { if (paneIsActive) dayEls.current[dayIndex] = el; }}
+                        className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.armed && paneIsActive && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
+                      >
+                        {dayMeals.length > 0 && (
+                          <div className="pl-meal-stack">
+                            {dayMeals.map((meal, mealIndex) => {
+                              const recipe = meal.recipe;
+                              const menuOpen = cardMenu?.mealId === meal.id;
+                              const meta = recipeCardMeta({
+                                cookTime: recipe?.cook_time,
+                                prepTime: recipe?.prep_time,
+                                servings: meal.servings || recipe?.servings,
+                              });
+                              return (
+                                <div
+                                  key={meal.id}
+                                  className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
+                                  onClick={() => {
+                                    if (suppressCardClick.current) {
+                                      suppressCardClick.current = false;
+                                      return;
+                                    }
+                                    if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view', meal.recipe?.title);
+                                  }}
+                                  title="View recipe"
+                                >
+                                  <span className={`pl-card-date${mealIndex > 0 ? ' is-repeat' : ''}`}>
+                                    <span className="pl-card-wd">{short}</span>
+                                    <span className="pl-card-num">{dayNum}</span>
+                                  </span>
+                                  <div className="pl-recipe-img">
+                                    {recipe?.image_url ? (
+                                      <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                    ) : (
+                                      <span className="pl-recipe-img-fallback" aria-hidden>🍽</span>
+                                    )}
+                                  </div>
+                                  <div className="pl-recipe-info">
+                                    <span className="pl-recipe-name">{recipe?.title}</span>
+                                    {meta && <div className="pl-recipe-meta">{meta}</div>}
+                                  </div>
+                                  <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
+                                    <button
+                                      className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
+                                      title="Meal options"
+                                      aria-label="Meal options"
+                                      aria-haspopup="menu"
+                                      aria-expanded={menuOpen}
+                                      onClick={e => openCardMenu(e, meal.id, dayIndex, meal.recipe_id)}
+                                    >
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                        <circle cx="6" cy="12" r="1.7"/>
+                                        <circle cx="12" cy="12" r="1.7"/>
+                                        <circle cx="18" cy="12" r="1.7"/>
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                          <div className="pl-recipe-info">
-                            <span className="pl-recipe-name">{recipe?.title}</span>
-                            {meta && <div className="pl-recipe-meta">{meta}</div>}
-                          </div>
-                          <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
+                        )}
+
+                        {!dayMeals.length && (
+                          <div className="pl-empty-slot">
                             <button
-                              className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
-                              title="Meal options"
-                              aria-label="Meal options"
-                              aria-haspopup="menu"
-                              aria-expanded={menuOpen}
-                              onClick={e => openCardMenu(e, meal.id, dayIndex, meal.recipe_id)}
+                              className="pl-empty-card"
+                              onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
                             >
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                                <circle cx="6" cy="12" r="1.7"/>
-                                <circle cx="12" cy="12" r="1.7"/>
-                                <circle cx="18" cy="12" r="1.7"/>
-                              </svg>
+                              <span className="pl-card-date">
+                                <span className="pl-card-wd">{short}</span>
+                                <span className="pl-card-num">{dayNum}</span>
+                              </span>
+                              <span className="pl-add-dinner-pill">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                                Add dinner
+                              </span>
                             </button>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        )}
 
-                {!dayMeals.length && (
-                  <div className="pl-empty-slot">
-                    <button
-                      className="pl-empty-card"
-                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
-                    >
-                      <span className="pl-card-date">
-                        <span className="pl-card-wd">{short}</span>
-                        <span className="pl-card-num">{dayNum}</span>
-                      </span>
-                      <span className="pl-add-dinner-pill">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                        Add dinner
-                      </span>
-                    </button>
-                  </div>
-                )}
-
-                {notes[dayIndex] ? (
-                  <textarea
-                    className="pl-day-note"
-                    value={notes[dayIndex]}
-                    onChange={e => handleNoteChange(dayIndex, e.target.value)}
-                    rows={1}
-                    onInput={e => {
-                      const el = e.currentTarget;
-                      el.style.height = 'auto';
-                      el.style.height = el.scrollHeight + 'px';
-                    }}
-                  />
-                ) : null}
-              </div>
+                        {pane.notes[dayIndex] ? (
+                          <textarea
+                            className="pl-day-note"
+                            value={pane.notes[dayIndex]}
+                            onChange={e => handleNoteChange(dayIndex, e.target.value)}
+                            rows={1}
+                            onInput={e => {
+                              const el = e.currentTarget;
+                              el.style.height = 'auto';
+                              el.style.height = el.scrollHeight + 'px';
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  className="pl-week-shift"
+                  aria-label="Scroll to next week"
+                  disabled={weekNav !== null}
+                  onClick={() => { void navigateWeek(1); }}
+                >
+                  <span>{weekNav === 'down' ? 'Loading…' : 'Next week'}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                    <path d="M6 10l6 6 6-6"/>
+                  </svg>
+                </button>
+              </section>
             );
           })}
         </div>
-        </>
       )}
 
       {drag?.armed && railDays.length > 0 && (
@@ -1627,15 +1770,43 @@ export default function PlannerClient() {
         }
         .pl-cal-day:hover:not(.is-today):not(.is-selected) { background: var(--parchment); }
 
-        /* Day list — seven equal rows so the week fits one screen */
+        /* Day list — each week fills the scrollport; shift buttons page to the next */
         .pl-days {
+          position: relative;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-x: hidden;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          scroll-snap-type: y mandatory;
+          -webkit-overflow-scrolling: touch;
+        }
+        .pl-week-pane {
+          box-sizing: border-box;
+          min-height: 100%;
+          display: flex; flex-direction: column;
+          padding-top: var(--pl-nav-offset);
+          scroll-snap-align: start;
+          scroll-snap-stop: always;
+        }
+        .pl-week-pane.is-outgoing { pointer-events: none; }
+        .pl-week-days {
           flex: 1 1 auto;
           min-height: 0;
           display: flex; flex-direction: column;
           gap: 2px;
-          overflow: hidden;
-          padding-top: var(--pl-nav-offset);
         }
+        .pl-week-shift {
+          display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+          flex-shrink: 0; width: 100%;
+          margin: 0; padding: 0.45rem 0.7rem;
+          border: none; border-radius: 10px;
+          background: none; color: var(--ink-muted);
+          font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
+          cursor: pointer; transition: background 0.15s, color 0.15s;
+        }
+        .pl-week-shift:hover:not(:disabled) { background: var(--parchment); color: var(--ink); }
+        .pl-week-shift:disabled { opacity: 0.55; cursor: wait; }
         .pl-day {
           flex: 1 1 0;
           min-height: 0;
