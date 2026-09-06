@@ -3,11 +3,14 @@ import {
   adjacentMonthKeys,
   inclusiveDayCount,
   missingMonths,
+  monthCalendarCells,
   monthKeyOf,
   monthRange,
+  monthTitle,
   monthsForDisplayWeek,
   parseWeekStartList,
   plannerQueryWindow,
+  shiftMonthKey,
   storageWeeksForDateRange,
 } from './plannerMonth';
 
@@ -60,6 +63,24 @@ describe('plannerQueryWindow', () => {
     const window = plannerQueryWindow('2026-08-01', '2026-08-31');
     expect('2026-08-16' >= window.from && '2026-08-16' <= window.to).toBe(true);
     expect('2026-08-17' >= window.from && '2026-08-17' <= window.to).toBe(true);
+  });
+});
+
+describe('shiftMonthKey / monthTitle', () => {
+  it('moves by calendar months and names them in en-AU', () => {
+    expect(shiftMonthKey('2026-08', 1)).toBe('2026-09');
+    expect(shiftMonthKey('2026-01', -1)).toBe('2025-12');
+    expect(monthTitle('2026-09')).toBe('September 2026');
+  });
+});
+
+describe('monthCalendarCells', () => {
+  it('aligns August 2026 to a Monday-start grid including outside days', () => {
+    const cells = monthCalendarCells('2026-08', 'monday');
+    expect(cells[0]).toEqual({ iso: '2026-07-27', inMonth: false });
+    expect(cells.find(c => c.iso === '2026-08-01')).toEqual({ iso: '2026-08-01', inMonth: true });
+    expect(cells.at(-1)).toEqual({ iso: '2026-09-06', inMonth: false });
+    expect(cells.length).toBe(42);
   });
 });
 

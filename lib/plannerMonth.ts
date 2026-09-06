@@ -1,4 +1,4 @@
-import { dayDateOf, localDateIso, parseLocalIso, storageCoords } from './plannerDays';
+import { dayDateOf, localDateIso, parseLocalIso, startOfDisplayWeek, storageCoords, type DayKey } from './plannerDays';
 
 const MONTH_KEY = /^(\d{4})-(\d{2})$/;
 const DAY_ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -50,6 +50,38 @@ export function storageWeeksForDateRange(from: string, to: string): string[] {
 export function missingMonths(needed: string[], loaded: Iterable<string>): string[] {
   const have = loaded instanceof Set ? loaded : new Set(loaded);
   return needed.filter(key => !have.has(key));
+}
+
+export function shiftMonthKey(key: string, months: number): string {
+  const { from } = monthRange(key);
+  const start = parseLocalIso(from);
+  return monthKeyOf(localDateIso(new Date(start.getFullYear(), start.getMonth() + months, 1)));
+}
+
+export function monthTitle(key: string): string {
+  const { from } = monthRange(key);
+  return parseLocalIso(from).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+}
+
+/** Display-week-aligned cells for a month grid, including leading/trailing days. */
+export function monthCalendarCells(
+  monthKey: string,
+  weekStartsOn: DayKey = 'monday',
+): Array<{ iso: string; inMonth: boolean }> {
+  const { from, to } = monthRange(monthKey);
+  const gridStart = startOfDisplayWeek(parseLocalIso(from), weekStartsOn);
+  const lastWeekStart = startOfDisplayWeek(parseLocalIso(to), weekStartsOn);
+  const endIso = localDateIso(dayDateOf(localDateIso(lastWeekStart), 6));
+  const cells: Array<{ iso: string; inMonth: boolean }> = [];
+  const cursor = new Date(gridStart.getTime());
+  while (true) {
+    const iso = localDateIso(cursor);
+    cells.push({ iso, inMonth: iso >= from && iso <= to });
+    if (iso === endIso) break;
+    cursor.setDate(cursor.getDate() + 1);
+    if (cells.length > 42) break;
+  }
+  return cells;
 }
 
 export function adjacentMonthKeys(key: string): string[] {

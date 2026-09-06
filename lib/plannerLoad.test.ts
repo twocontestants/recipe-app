@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calendarDayClass,
   countPlannedDays,
   displayWeekDateRange,
   hasMealRecipeMethod,
@@ -52,6 +53,15 @@ describe('weekChipClass', () => {
     expect(weekChipClass({ planned: false, today: true })).toBe('pl-chip is-empty is-today');
     expect(weekChipClass({ planned: true, selected: true, today: true }))
       .toBe('pl-chip is-planned is-today is-selected');
+  });
+});
+
+describe('calendarDayClass', () => {
+  it('marks outside, planned, today, and selected days', () => {
+    expect(calendarDayClass({ inMonth: false })).toBe('pl-cal-day is-outside');
+    expect(calendarDayClass({ inMonth: true, planned: true })).toBe('pl-cal-day is-planned');
+    expect(calendarDayClass({ inMonth: true, today: true, selected: true }))
+      .toBe('pl-cal-day is-today is-selected');
   });
 });
 

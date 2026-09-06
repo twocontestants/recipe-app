@@ -3,26 +3,28 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
-import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import PlannerCardMenu from '@/components/PlannerCardMenu';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
-import HiddenDatePicker, { openNativeDatePicker } from '@/components/HiddenDatePicker';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, mergePlannerMeals } from '@/lib/loadPlannerMonth';
-import { countPlannedDays, displayWeekDateRange, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
+import { calendarDayClass, displayWeekDateRange, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
+  monthCalendarCells,
   monthKeyOf,
   monthRange,
+  monthTitle,
   monthsForDisplayWeek,
+  shiftMonthKey,
 } from '@/lib/plannerMonth';
 import {
+  DAY_SHORT,
   dayDateOf,
   displayDayIndex,
   displayDays,
@@ -106,14 +108,14 @@ export default function PlannerClient() {
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   const [weekStart, setWeekStart] = useState<Date>(() => startOfDisplayWeek(new Date(), 'monday'));
   const [selectedDayIndex, setSelectedDayIndex] = useState(() => displayDayIndex(new Date(), 'monday'));
-  const jumpDateRef = useRef<HTMLInputElement>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarMonthKey, setCalendarMonthKey] = useState(() => monthKeyOf(localDateIso(new Date())));
   const dayKeys = displayDays(weekStartsOn);
   const DAYS = dayKeys.map(k => k.charAt(0).toUpperCase() + k.slice(1));
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
-  const [showGenerateList, setShowGenerateList] = useState(false);
 
   // Picker
   const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
@@ -908,103 +910,150 @@ export default function PlannerClient() {
     return !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()));
   });
 
-  const totalMeals = countPlannedDays(mealPlans, weekStartIso);
+  const todayIso = formatDate(new Date());
+  const selectedIso = formatDate(getDayDate(weekStart, selectedDayIndex));
+  const dayIsPlanned = (iso: string) =>
+    mealPlans.some(m => mealOnDate(m, iso) && m.meal_type === 'dinner');
+
+  const loadCalendarMonth = (key: string) => {
+    void ensureMonths([key, ...adjacentMonthKeys(key)])
+      .then(all => setMealPlans(all))
+      .catch(() => { /* keep what is already on screen */ });
+  };
+
+  const openCalendar = () => {
+    const key = monthKeyOf(selectedIso);
+    setCalendarMonthKey(key);
+    setShowCalendar(true);
+    loadCalendarMonth(key);
+  };
+
+  const shiftCalendar = (months: number) => {
+    const next = shiftMonthKey(calendarMonthKey, months);
+    setCalendarMonthKey(next);
+    loadCalendarMonth(next);
+  };
+
+  const jumpToIso = (iso: string) => {
+    const d = parseLocalIso(iso);
+    setWeekStart(startOfDisplayWeek(d, weekStartsOn));
+    setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
+    setShowCalendar(false);
+  };
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="pl-root">
 
-      {/* Top bar */}
-      <div className="pl-topbar">
-        <div className="pl-topbar-left">
-          <h1 className="pl-title">Meal Planner</h1>
-          <div className="pl-week-nav">
-            <button className="pl-nav-btn" aria-label="Previous week" onClick={() => {
-              setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n; });
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+      {showCalendar && (
+        <button
+          type="button"
+          className="pl-cal-backdrop"
+          aria-label="Close calendar"
+          onClick={() => setShowCalendar(false)}
+        />
+      )}
+
+      <div className="pl-nav">
+        <div className="pl-nav-bar">
+          <div className="pl-nav-left">
+            <button
+              type="button"
+              className={`pl-week-toggle${showCalendar ? ' is-open' : ''}`}
+              aria-expanded={showCalendar}
+              aria-label={showCalendar ? 'Close calendar' : 'Open calendar'}
+              onClick={() => { if (showCalendar) setShowCalendar(false); else openCalendar(); }}
+            >
+              <span className="pl-week-label">
+                {showCalendar ? monthTitle(calendarMonthKey) : formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}
+              </span>
+              <svg className="pl-week-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
             </button>
-            <span className="pl-week-label">{formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}</span>
-            <button className="pl-nav-btn" aria-label="Next week" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-            {!viewingThisWeek && (
-              <button className="pl-today-btn" onClick={() => {
-                setWeekStart(startOfDisplayWeek(new Date(), weekStartsOn));
-                setSelectedDayIndex(displayDayIndex(new Date(), weekStartsOn));
-              }}>Today</button>
+            {!viewingThisWeek && !showCalendar && (
+              <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
             )}
           </div>
-          <span className="pl-count">{totalMeals} of 7 planned</span>
-        </div>
-        <div className="pl-topbar-right">
-          <button className="pl-icon-btn" title="Jump to a date" aria-label="Jump to a date" onClick={() => openNativeDatePicker(jumpDateRef.current)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <path d="M16 2v4M8 2v4M3 10h18"/>
+          <button type="button" className="pl-magic-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>
-          </button>
-          <HiddenDatePicker
-            ariaLabel="Jump to a date"
-            inputRef={jumpDateRef}
-            className="pl-jump-date"
-            onPick={iso => {
-              const d = parseLocalIso(iso);
-              setWeekStart(startOfDisplayWeek(d, weekStartsOn));
-              setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
-            }}
-          />
-          <button className="pl-icon-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
-          </button>
-          <button className="pl-icon-btn" title="Shopping list" aria-label="Shopping list" onClick={() => setShowGenerateList(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 6h15l-1.5 9h-12z"/>
-              <circle cx="9" cy="20" r="1.4"/>
-              <circle cx="18" cy="20" r="1.4"/>
-              <path d="M6 6L5 3H2"/>
-            </svg>
-          </button>
-          <button
-            className="pl-icon-btn is-add"
-            title="Add dinner"
-            aria-label="Add dinner"
-            onClick={() => { setPicker({ dayIndex: selectedDayIndex }); setPickerSearch(''); }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Auto-plan</span>
           </button>
         </div>
+
+        {showCalendar ? (
+          <div className="pl-cal" role="dialog" aria-label="Month calendar">
+            <div className="pl-cal-toolbar">
+              <button type="button" className="pl-nav-btn" aria-label="Previous month" onClick={() => shiftCalendar(-1)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
+              <button type="button" className="pl-nav-btn" aria-label="Next month" onClick={() => shiftCalendar(1)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+            <div className="pl-cal-weekdays" aria-hidden="true">
+              {dayKeys.map(key => (
+                <span key={key}>{DAY_SHORT[key]}</span>
+              ))}
+            </div>
+            <div className="pl-cal-grid">
+              {monthCalendarCells(calendarMonthKey, weekStartsOn).map(cell => {
+                const date = parseLocalIso(cell.iso);
+                const planned = dayIsPlanned(cell.iso);
+                const isToday = cell.iso === todayIso;
+                const isSelected = cell.iso === selectedIso;
+                const weekday = date.toLocaleDateString('en-AU', { weekday: 'long' });
+                const longDate = date.toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    className={calendarDayClass({ inMonth: cell.inMonth, planned, today: isToday, selected: isSelected })}
+                    aria-current={isToday ? 'date' : undefined}
+                    aria-label={`${weekday} ${longDate}${isToday ? ', today' : ''}${planned ? ', planned' : ''}`}
+                    onClick={() => jumpToIso(cell.iso)}
+                  >
+                    {date.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="pl-week-strip" role="tablist" aria-label="Days this week">
+            {DAYS.map((dayName, dayIndex) => {
+              const date = getDayDate(weekStart, dayIndex);
+              const planned = getMealsForDay(dayIndex).length > 0;
+              const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
+              const isSelected = dayIndex === selectedDayIndex;
+              const short = DAY_SHORT[dayKeys[dayIndex]];
+              return (
+                <button
+                  key={dayIndex}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  className={weekChipClass({ planned, today: isToday, selected: isSelected })}
+                  aria-label={`${dayName} ${date.getDate()}, ${planned ? 'planned' : 'nothing planned'}`}
+                  onClick={() => setSelectedDayIndex(dayIndex)}
+                >
+                  <span className="pl-chip-wd">{short}</span>
+                  <span className="pl-chip-num">{date.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {loading ? (
         <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : (
         <>
-        <div className="pl-week-strip" role="tablist" aria-label="Days this week">
-          {DAYS.map((dayName, dayIndex) => {
-            const date = getDayDate(weekStart, dayIndex);
-            const planned = getMealsForDay(dayIndex).length > 0;
-            const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
-            const isSelected = dayIndex === selectedDayIndex;
-            const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
-            return (
-              <button
-                key={dayIndex}
-                type="button"
-                role="tab"
-                aria-selected={isSelected}
-                className={weekChipClass({ planned, today: isToday, selected: isSelected })}
-                aria-label={`${dayName} ${date.getDate()}, ${planned ? 'planned' : 'nothing planned'}`}
-                onClick={() => setSelectedDayIndex(dayIndex)}
-              >
-                <span className="pl-chip-wd">{short}</span>
-                <span className="pl-chip-num">{date.getDate()}</span>
-              </button>
-            );
-          })}
-        </div>
-
         <div className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}>
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
@@ -1328,16 +1377,6 @@ export default function PlannerClient() {
         </>
       )}
 
-      {/* Magic modal */}
-      {showGenerateList && (
-        <GenerateListModal
-          onClose={() => setShowGenerateList(false)}
-          onCreated={(id) => { setShowGenerateList(false); window.location.href = '/shopping-list'; }}
-          defaultWeekStart={formatDate(weekStart)}
-          weekStartsOn={weekStartsOn}
-        />
-      )}
-
       {showMagic && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
           <div className="magic-modal">
@@ -1405,51 +1444,129 @@ export default function PlannerClient() {
 
       <style>{`
         .pl-root {
+          position: relative;
           max-width: 680px;
           display: flex; flex-direction: column;
           height: calc(100dvh - var(--bottom-nav-height, 0px) - 2rem);
           min-height: 0;
         }
 
-        /* Top bar */
-        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.55rem; flex-shrink: 0; }
-        .pl-title { font-family: var(--font-body); font-size: 1.45rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-bottom: 0.15rem; letter-spacing: -0.02em; }
-        .pl-week-nav { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-        .pl-nav-btn { background: none; border: none; border-radius: 8px; padding: 0.3rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
+        /* Absolute nav panel — stays on top of the week */
+        .pl-nav {
+          position: absolute; top: 0; left: 0; right: 0; z-index: 40;
+          background: var(--cream);
+          padding: 0.15rem 0 0.35rem;
+          box-shadow: 0 8px 18px -12px rgba(26,22,18,0.35);
+        }
+        .pl-cal-backdrop {
+          position: absolute; inset: 0; z-index: 35;
+          border: none; background: rgba(26,22,18,0.18);
+          cursor: pointer;
+        }
+        .pl-nav-bar {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 0.5rem; min-height: 32px;
+        }
+        .pl-nav-left { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
+        .pl-week-toggle {
+          display: inline-flex; align-items: center; gap: 0.28rem;
+          background: none; border: none; padding: 0.2rem 0.15rem;
+          cursor: pointer; font-family: var(--font-body); color: var(--ink);
+          min-width: 0;
+        }
+        .pl-week-label {
+          font-size: 0.92rem; font-weight: 650; letter-spacing: -0.01em;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .pl-week-chevron { flex-shrink: 0; color: var(--ink-muted); transition: transform 0.15s; }
+        .pl-week-toggle.is-open .pl-week-chevron { transform: rotate(180deg); }
+        .pl-nav-btn {
+          background: none; border: none; border-radius: 8px; padding: 0.28rem;
+          cursor: pointer; color: var(--ink-muted); display: flex; align-items: center;
+          transition: all 0.15s;
+        }
         .pl-nav-btn:hover { background: var(--parchment); color: var(--ink); }
-        .pl-week-label { font-size: 0.95rem; color: var(--ink-muted); padding: 0 0.2rem; font-weight: 500; }
-        .pl-today-btn { background: none; border: none; font-size: 0.78rem; color: var(--sage); cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px; font-family: var(--font-body); transition: all 0.15s; }
-        .pl-today-btn:hover { background: var(--sage-light); }
-        .pl-topbar-right { position: relative; display: flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
-        .pl-count { font-size: 0.75rem; color: var(--ink-muted); margin-right: 0.35rem; }
-        .pl-icon-btn { width: 38px; height: 38px; border: none; background: none; border-radius: 10px; color: var(--ink-soft); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s, color 0.15s; }
-        .pl-icon-btn:hover { background: var(--parchment); color: var(--ink); }
-        .pl-icon-btn.is-add { background: var(--sage-light); color: var(--sage); }
-        .pl-icon-btn.is-add:hover { background: var(--sage); color: white; }
-        .pl-jump-date { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        .pl-today-btn {
+          background: none; border: none; font-size: 0.72rem; font-weight: 600;
+          color: var(--rust); cursor: pointer; padding: 0.2rem 0.4rem;
+          border-radius: 99px; font-family: var(--font-body); transition: all 0.15s;
+        }
+        .pl-today-btn:hover { background: rgba(181,69,27,0.1); }
+        .pl-magic-btn {
+          display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+          height: 30px; padding: 0 0.7rem; flex-shrink: 0;
+          border: none; border-radius: 99px;
+          background: var(--ink); color: var(--cream);
+          font-family: var(--font-body); font-size: 0.72rem; font-weight: 600;
+          cursor: pointer; transition: background 0.15s;
+        }
+        .pl-magic-btn:hover { background: var(--rust); }
 
-        /* Week strip */
-        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; margin-bottom: 0.45rem; flex-shrink: 0; }
+        /* Compact week navbar */
+        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
         .pl-chip {
-          display: flex; flex-direction: column; align-items: center; justify-content: center;
-          gap: 2px; padding: 0.45rem 0.15rem 0.5rem; border: none; background: transparent;
-          border-radius: 16px; cursor: pointer; font-family: var(--font-body); min-width: 0;
-          transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+          display: flex; flex-direction: row; align-items: center; justify-content: center;
+          gap: 3px; padding: 0.22rem 0.08rem; border: none; background: transparent;
+          border-radius: 99px; cursor: pointer; font-family: var(--font-body); min-width: 0;
+          min-height: 30px;
+          transition: background 0.15s, color 0.15s;
         }
-        .pl-chip-wd { font-size: 0.68rem; font-weight: 500; color: var(--ink-muted); letter-spacing: 0.01em; }
-        .pl-chip-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.2; }
-        .pl-chip.is-planned .pl-chip-num {
-          width: 28px; height: 28px; border-radius: 50%;
-          display: inline-flex; align-items: center; justify-content: center;
-          background: var(--sage-light); color: var(--sage);
+        .pl-chip-wd { font-size: 0.6rem; font-weight: 500; color: var(--ink-muted); letter-spacing: 0.01em; }
+        .pl-chip-num {
+          font-size: 0.76rem; font-weight: 700; color: var(--ink); line-height: 1;
+          min-width: 1.35em; text-align: center;
         }
+        .pl-chip.is-planned:not(.is-today):not(.is-selected) .pl-chip-num { color: var(--sage); }
+        .pl-chip.is-planned:not(.is-today):not(.is-selected) { background: var(--sage-light); }
         .pl-chip.is-empty .pl-chip-num { color: var(--ink-muted); font-weight: 500; }
-        .pl-chip.is-today:not(.is-selected) { box-shadow: inset 0 0 0 1.5px var(--rust); }
+        .pl-chip.is-today .pl-chip-num {
+          width: 20px; height: 20px; min-width: 20px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: var(--rust); color: white;
+        }
+        .pl-chip.is-today:not(.is-selected) { background: rgba(181,69,27,0.1); }
         .pl-chip.is-selected { background: var(--sage); }
         .pl-chip.is-selected .pl-chip-wd,
         .pl-chip.is-selected .pl-chip-num { color: white; }
-        .pl-chip.is-selected.is-planned .pl-chip-num { background: rgba(255,255,255,0.18); color: white; }
-        .pl-chip:hover:not(.is-selected) { background: var(--parchment); }
+        .pl-chip.is-selected.is-today { background: var(--rust); }
+        .pl-chip.is-selected.is-today .pl-chip-num { background: rgba(255,255,255,0.2); }
+        .pl-chip:hover:not(.is-selected):not(.is-today) { background: var(--parchment); }
+
+        /* Month calendar panel */
+        .pl-cal { padding: 0.2rem 0 0.15rem; }
+        .pl-cal-toolbar {
+          display: flex; align-items: center; justify-content: space-between;
+          margin-bottom: 0.25rem;
+        }
+        .pl-cal-weekdays {
+          display: grid; grid-template-columns: repeat(7, 1fr);
+          text-align: center; font-size: 0.6rem; font-weight: 600;
+          color: var(--ink-muted); letter-spacing: 0.02em;
+          padding: 0.15rem 0 0.2rem;
+        }
+        .pl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .pl-cal-day {
+          aspect-ratio: 1; max-height: 40px; width: 100%;
+          border: none; background: none; border-radius: 50%;
+          font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
+          color: var(--ink); cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          transition: background 0.12s, color 0.12s;
+        }
+        .pl-cal-day.is-outside { color: var(--ink-muted); opacity: 0.4; }
+        .pl-cal-day.is-planned:not(.is-today):not(.is-selected) {
+          background: var(--sage-light); color: var(--sage); font-weight: 650;
+        }
+        .pl-cal-day.is-today {
+          background: var(--rust); color: white; font-weight: 700;
+        }
+        .pl-cal-day.is-selected:not(.is-today) {
+          background: var(--sage); color: white; font-weight: 700;
+        }
+        .pl-cal-day.is-selected.is-today {
+          box-shadow: 0 0 0 2px var(--cream), 0 0 0 3.5px var(--rust);
+        }
+        .pl-cal-day:hover:not(.is-today):not(.is-selected) { background: var(--parchment); }
 
         /* Day list — seven equal rows so the week fits one screen */
         .pl-days {
@@ -1458,6 +1575,7 @@ export default function PlannerClient() {
           display: flex; flex-direction: column;
           gap: 2px;
           overflow: hidden;
+          padding-top: 4.55rem;
         }
         .pl-day {
           flex: 1 1 0;
@@ -1723,7 +1841,7 @@ export default function PlannerClient() {
         .btn-magic-go:hover:not(:disabled) { background: var(--rust); }
         .btn-magic-go:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
+        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; padding-top: 6rem; }
 
         @media (min-width: 901px) {
           .pl-root { height: calc(100dvh - 6rem); }
@@ -1732,12 +1850,14 @@ export default function PlannerClient() {
         /* Mobile */
         @media (max-width: 600px) {
           .pl-root { height: calc(100dvh - var(--bottom-nav-height, 0px) - 1.25rem); }
-          .pl-title { font-size: 1.3rem; }
-          .pl-topbar { gap: 0.35rem; margin-bottom: 0.4rem; }
-          .pl-week-strip { gap: 0.15rem; margin-bottom: 0.35rem; }
-          .pl-chip { padding: 0.28rem 0.05rem 0.3rem; border-radius: 12px; }
-          .pl-chip-num { font-size: 0.82rem; }
-          .pl-chip.is-planned .pl-chip-num { width: 24px; height: 24px; }
+          .pl-nav { padding-bottom: 0.28rem; }
+          .pl-week-label { font-size: 0.88rem; }
+          .pl-chip { padding: 0.18rem 0.04rem; min-height: 28px; }
+          .pl-chip-wd { font-size: 0.56rem; }
+          .pl-chip-num { font-size: 0.72rem; }
+          .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
+          .pl-days { padding-top: 4.2rem; }
+          .pl-cal-day { max-height: 36px; font-size: 0.74rem; }
           .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
           .pl-recipe-name { font-size: 0.84rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }

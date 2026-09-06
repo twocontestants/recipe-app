@@ -58,6 +58,20 @@ export function weekChipClass(opts: {
   return parts.join(' ');
 }
 
+export function calendarDayClass(opts: {
+  inMonth: boolean;
+  planned?: boolean;
+  today?: boolean;
+  selected?: boolean;
+}): string {
+  const parts = ['pl-cal-day'];
+  if (!opts.inMonth) parts.push('is-outside');
+  if (opts.planned) parts.push('is-planned');
+  if (opts.today) parts.push('is-today');
+  if (opts.selected) parts.push('is-selected');
+  return parts.join(' ');
+}
+
 /** Days in the display week that already have a dinner. Caps at 7. */
 export function countPlannedDays(
   meals: Array<{
