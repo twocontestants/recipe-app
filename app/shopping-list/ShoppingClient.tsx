@@ -1274,8 +1274,8 @@ export default function ShoppingListClient() {
         .shop-checkbox svg { display: none; }
         .shop-item.is-checked .shop-checkbox svg { display: block; }
         .shop-item-name-wrap { flex: 1; min-width: 0; }
-        .recipe-source-line { display: inline-flex; align-items: center; gap: 3px; margin-top: 1px; padding: 0; border: none; background: none; font-family: var(--font-body); font-size: 0.72rem; font-weight: 500; color: #3B7CC4; line-height: 1.3; text-align: left; cursor: pointer; text-decoration: none; max-width: 100%; }
-        .recipe-source-line span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .recipe-source-line { display: flex; align-items: center; gap: 3px; margin-top: 2px; padding: 0; border: none; background: none; font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; color: #3B7CC4; line-height: 1.35; text-align: left; cursor: pointer; text-decoration: none; width: fit-content; max-width: 100%; }
+        .recipe-source-line span { min-width: 0; }
         .recipe-source-line:hover { color: #245A96; }
         .recipe-source-chevron { flex-shrink: 0; }
         .recipe-source-line.is-open .recipe-source-chevron { transform: rotate(90deg); }
