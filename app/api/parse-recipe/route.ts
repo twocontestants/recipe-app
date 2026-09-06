@@ -14,10 +14,10 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = parseRecipeText(text);
-    const auto = autoTag(parsed.title, parsed.ingredients);
+    const auto = autoTag(parsed.title, parsed.ingredients, [], parsed.steps);
     return NextResponse.json({
       ...parsed,
-      primary_protein: parsed.primary_protein || auto.primary_protein || '',
+      primary_protein: auto.primary_protein || parsed.primary_protein || '',
       tags: auto.tags,
     });
   } catch (error) {

@@ -28,6 +28,15 @@ export const EMPTY_RECIPE_FORM: RecipeFormState = {
   primary_protein: '',
 };
 
+export function emptyRecipeForm(): RecipeFormState {
+  return {
+    ...EMPTY_RECIPE_FORM,
+    ingredients: [{ amount: '', unit: '', name: '' }],
+    steps: [''],
+    tags: [],
+  };
+}
+
 export function recipeToForm(recipe: Recipe): RecipeFormState {
   return {
     title: recipe.title,

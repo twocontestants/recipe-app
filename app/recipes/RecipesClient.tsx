@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Recipe, Ingredient } from '@/lib/db';
+import type { Recipe } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
-import { PROTEIN_COLORS, PROTEIN_EMOJI, PROTEIN_OPTIONS } from '@/components/ProteinBadge';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
 import { fetchMealsForMonths, fetchMealsForWeeks } from '@/lib/loadPlannerMonth';
 import {
@@ -29,21 +28,8 @@ import {
   removeRecipeFromList,
   upsertRecipeInList,
 } from '@/lib/recipeList';
-
-
-const EMPTY_RECIPE = {
-  title: '',
-  description: '',
-  source_url: '',
-  image_url: '',
-  servings: 4,
-  prep_time: undefined as number | undefined,
-  cook_time: undefined as number | undefined,
-  ingredients: [{ amount: '', unit: '', name: '' }] as Ingredient[],
-  steps: [''] as string[],
-  tags: [] as string[],
-  primary_protein: '' as string,
-};
+import { RecipeFormModal } from '@/components/RecipeFormModal';
+import { emptyRecipeForm, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
 
 export default function RecipesPage() {
   const { user } = useAuth();
@@ -53,7 +39,7 @@ export default function RecipesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_RECIPE });
+  const [form, setForm] = useState<RecipeFormState>(emptyRecipeForm);
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [scraping, setScraping] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -151,21 +137,7 @@ export default function RecipesPage() {
 
   const applyEditForm = (full: Recipe) => {
     setEditingRecipe(full);
-    setForm({
-      title: full.title,
-      description: full.description || '',
-      source_url: full.source_url || '',
-      image_url: full.image_url || '',
-      servings: full.servings,
-      prep_time: full.prep_time,
-      cook_time: full.cook_time,
-      ingredients: (full.ingredients && full.ingredients.length > 0)
-        ? full.ingredients
-        : [{ amount: '', unit: '', name: '' }],
-      steps: (full.steps && full.steps.length > 0) ? full.steps : [''],
-      tags: full.tags,
-      primary_protein: full.primary_protein || '',
-    });
+    setForm(recipeToForm(full));
     setShowModal(true);
   };
 
@@ -186,7 +158,7 @@ export default function RecipesPage() {
   const openAddModal = () => {
     if (!user) { router.push('/login?next=/recipes'); return; }
     setEditingRecipe(null);
-    setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] });
+    setForm(emptyRecipeForm());
     setScrapeUrl('');
     setShowModal(true);
   };
@@ -322,11 +294,7 @@ export default function RecipesPage() {
     if (!form.title.trim()) { showToast('Title is required', 'error'); return; }
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        ingredients: form.ingredients.filter(i => i.name.trim()),
-        steps: form.steps.filter(s => s.trim()),
-      };
+      const payload = recipeFormPayload(form);
       const url = editingRecipe ? `/api/recipes/${editingRecipe.id}` : '/api/recipes';
       const method = editingRecipe ? 'PUT' : 'POST';
       const res = await fetch(url, {
@@ -371,33 +339,6 @@ export default function RecipesPage() {
       showToast(e instanceof Error ? e.message : 'Could not duplicate', 'error');
     }
   };
-
-  const updateIngredient = (i: number, field: keyof Ingredient, val: string) => {
-    setForm(prev => {
-      const ingredients = [...prev.ingredients];
-      ingredients[i] = { ...ingredients[i], [field]: val };
-      return { ...prev, ingredients };
-    });
-  };
-
-  const addIngredient = () => setForm(prev => ({
-    ...prev,
-    ingredients: [...prev.ingredients, { amount: '', unit: '', name: '' }],
-  }));
-
-  const removeIngredient = (i: number) => setForm(prev => ({
-    ...prev,
-    ingredients: prev.ingredients.filter((_, idx) => idx !== i),
-  }));
-
-  const updateStep = (i: number, val: string) => setForm(prev => {
-    const steps = [...prev.steps];
-    steps[i] = val;
-    return { ...prev, steps };
-  });
-
-  const addStep = () => setForm(prev => ({ ...prev, steps: [...prev.steps, ''] }));
-  const removeStep = (i: number) => setForm(prev => ({ ...prev, steps: prev.steps.filter((_, idx) => idx !== i) }));
 
   const filtered = recipes.filter(r =>
     !search || r.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -449,7 +390,7 @@ export default function RecipesPage() {
           />
           {user && (
             <>
-          <button className="btn btn-secondary" onClick={() => { setEditingRecipe(null); setForm({ ...EMPTY_RECIPE, ingredients: [{ amount: '', unit: '', name: '' }], steps: [''] }); setShowPasteModal(true); }}>
+          <button className="btn btn-secondary" onClick={() => { setEditingRecipe(null); setForm(emptyRecipeForm()); setShowPasteModal(true); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
             </svg>
@@ -532,133 +473,22 @@ export default function RecipesPage() {
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
-          <div className="modal" style={{ maxWidth: '780px' }}>
-            <div className="modal-header">
-              <h2 className="modal-title">{editingRecipe ? 'Edit Recipe' : 'Add Recipe'}</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M18 6L6 18M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-
-            {!editingRecipe && (
-              <div className="form-group">
-                <label>Import from URL</label>
-                <div className="url-input-group">
-                  <input type="url" placeholder="https://example.com/recipe…" value={scrapeUrl} onChange={e => setScrapeUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleScrape()} />
-                  <button className="btn btn-secondary" onClick={handleScrape} disabled={scraping || !scrapeUrl.trim()}>
-                    {scraping ? <span className="loading-dots"><span/><span/><span/></span> : 'Import'}
-                  </button>
-                </div>
-                <p className="scrape-hint">Works with AllRecipes, BBC Good Food, Serious Eats, NYT Cooking, and most recipe sites · <button className="link-btn" onClick={() => { setShowModal(false); setShowPasteModal(true); }}>Paste text instead →</button></p>
-              </div>
-            )}
-
-            {!editingRecipe && <div className="divider" style={{ margin: '1rem 0' }} />}
-
-            <div className="form-grid">
-              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Title *</label>
-                <input type="text" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Recipe name" />
-              </div>
-              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Description</label>
-                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Brief description…" rows={2} />
-              </div>
-              <div className="form-group">
-                <label>Servings</label>
-                <input type="number" value={form.servings} min={1} onChange={e => setForm(p => ({ ...p, servings: +e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label>Image URL</label>
-                <input type="url" value={form.image_url} onChange={e => setForm(p => ({ ...p, image_url: e.target.value }))} placeholder="https://…" />
-              </div>
-              <div className="form-group">
-                <label>Prep time (minutes)</label>
-                <input type="number" value={form.prep_time || ''} min={0} onChange={e => setForm(p => ({ ...p, prep_time: e.target.value ? +e.target.value : undefined }))} />
-              </div>
-              <div className="form-group">
-                <label>Cook time (minutes)</label>
-                <input type="number" value={form.cook_time || ''} min={0} onChange={e => setForm(p => ({ ...p, cook_time: e.target.value ? +e.target.value : undefined }))} />
-              </div>
-              <div className="form-group">
-                <label>Source URL</label>
-                <input type="url" value={form.source_url} onChange={e => setForm(p => ({ ...p, source_url: e.target.value }))} placeholder="https://…" />
-              </div>
-              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Primary Protein</label>
-                <div className="protein-picker">
-                  <button
-                    type="button"
-                    className={`protein-btn ${!form.primary_protein ? 'active none' : ''}`}
-                    onClick={() => setForm(p => ({ ...p, primary_protein: '' }))}
-                  >
-                    None / Veg
-                  </button>
-                  {PROTEIN_OPTIONS.map(p => (
-                    <button
-                      key={p}
-                      type="button"
-                      className={`protein-btn ${form.primary_protein === p ? 'active' : ''}`}
-                      style={form.primary_protein === p ? { background: PROTEIN_COLORS[p], borderColor: PROTEIN_COLORS[p], color: 'white' } : {}}
-                      onClick={() => setForm(prev => ({ ...prev, primary_protein: prev.primary_protein === p ? '' : p }))}
-                    >
-                      {PROTEIN_EMOJI[p]} {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Tags (comma separated)</label>
-                <input type="text" value={form.tags.join(', ')} onChange={e => setForm(p => ({ ...p, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }))} placeholder="italian, pasta, quick" />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label>Ingredients</label>
-              <div className="ingredient-row-header">
-                <span>Amount</span>
-                <span>Unit</span>
-                <span>Ingredient</span>
-                <span />
-              </div>
-              {form.ingredients.map((ing, i) => (
-                <div key={i} className="ingredient-row">
-                  <input type="text" value={ing.amount} onChange={e => updateIngredient(i, 'amount', e.target.value)} placeholder="2" />
-                  <input type="text" value={ing.unit} onChange={e => updateIngredient(i, 'unit', e.target.value)} placeholder="cups" />
-                  <input type="text" value={ing.name} onChange={e => updateIngredient(i, 'name', e.target.value)} placeholder="flour" />
-                  <button className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)' }} onClick={() => removeIngredient(i)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </button>
-                </div>
-              ))}
-              <button className="add-row-btn" onClick={addIngredient}>+ Add ingredient</button>
-            </div>
-
-            <div className="form-group">
-              <label>Steps</label>
-              {form.steps.map((step, i) => (
-                <div key={i} className="step-row">
-                  <div className="step-number">{i + 1}</div>
-                  <textarea value={step} onChange={e => updateStep(i, e.target.value)} placeholder={`Step ${i + 1}…`} rows={2} />
-                  <button className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)', marginTop: '0.65rem' }} onClick={() => removeStep(i)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                  </button>
-                </div>
-              ))}
-              <button className="add-row-btn" onClick={addStep}>+ Add step</button>
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? <span className="loading-dots"><span/><span/><span/></span> : (editingRecipe ? 'Save Changes' : 'Save Recipe')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RecipeFormModal
+          heading={editingRecipe ? 'Edit Recipe' : 'Add Recipe'}
+          form={form}
+          onChange={setForm}
+          saving={saving}
+          saveLabel={editingRecipe ? 'Save Changes' : 'Save Recipe'}
+          onSave={() => { void handleSave(); }}
+          onClose={() => setShowModal(false)}
+          importFromUrl={!editingRecipe ? {
+            url: scrapeUrl,
+            scraping,
+            onUrlChange: setScrapeUrl,
+            onScrape: () => { void handleScrape(); },
+            onPasteInstead: () => { setShowModal(false); setShowPasteModal(true); },
+          } : undefined}
+        />
       )}
 
       <style>{`

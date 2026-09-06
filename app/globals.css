@@ -566,6 +566,28 @@ select.settings-select {
 }
 .add-row-btn:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.03); }
 
+.form-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.form-section-head label { margin-bottom: 0; }
+.form-section-head .link-btn {
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.bulk-paste textarea { margin-bottom: 0.5rem; }
+.bulk-paste-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 /* ── Planner ──────────────────────────────── */
 .week-nav {
   display: flex;

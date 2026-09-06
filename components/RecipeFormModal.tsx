@@ -1,7 +1,19 @@
 'use client';
 
+import { useState, type ClipboardEvent } from 'react';
 import type { Ingredient } from '@/lib/db';
 import type { RecipeFormState } from '@/lib/recipeForm';
+import {
+  appendParsedIngredients,
+  appendParsedSteps,
+  ingredientPasteFromClipboard,
+  insertParsedIngredients,
+  insertParsedSteps,
+  parseIngredientBlock,
+  parseStepBlock,
+  retagRecipeForm,
+  stepPasteFromClipboard,
+} from '@/lib/recipeBulkPaste';
 import { PROTEIN_COLORS, PROTEIN_EMOJI, PROTEIN_OPTIONS } from './ProteinBadge';
 
 type Props = {
@@ -31,6 +43,8 @@ export function RecipeFormModal({
   onClose,
   importFromUrl,
 }: Props) {
+  const [ingredientDraft, setIngredientDraft] = useState<string | null>(null);
+  const [stepDraft, setStepDraft] = useState<string | null>(null);
   const update = (patch: Partial<RecipeFormState>) => onChange({ ...form, ...patch });
 
   const updateIngredient = (i: number, field: keyof Ingredient, val: string) => {
@@ -56,12 +70,62 @@ export function RecipeFormModal({
   const addStep = () => update({ steps: [...form.steps, ''] });
   const removeStep = (i: number) => update({ steps: form.steps.filter((_, idx) => idx !== i) });
 
+  const applyIngredientPaste = (index: number, parsed: Ingredient[]) => {
+    onChange(retagRecipeForm({
+      ...form,
+      ingredients: insertParsedIngredients(form.ingredients, index, parsed),
+    }));
+  };
+
+  const applyStepPaste = (index: number, parsed: string[]) => {
+    onChange(retagRecipeForm({
+      ...form,
+      steps: insertParsedSteps(form.steps, index, parsed),
+    }));
+  };
+
+  const onIngredientClipboard = (i: number, e: ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
+    const parsed = ingredientPasteFromClipboard(text, form.ingredients[i]);
+    if (!parsed) return;
+    e.preventDefault();
+    applyIngredientPaste(i, parsed);
+  };
+
+  const onStepClipboard = (i: number, e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
+    const parsed = stepPasteFromClipboard(text);
+    if (!parsed) return;
+    e.preventDefault();
+    applyStepPaste(i, parsed);
+  };
+
+  const commitIngredientDraft = () => {
+    const parsed = parseIngredientBlock(ingredientDraft || '');
+    if (parsed.length === 0) return;
+    onChange(retagRecipeForm({
+      ...form,
+      ingredients: appendParsedIngredients(form.ingredients, parsed),
+    }));
+    setIngredientDraft(null);
+  };
+
+  const commitStepDraft = () => {
+    const parsed = parseStepBlock(stepDraft || '', { forceSplit: true });
+    if (parsed.length === 0) return;
+    onChange(retagRecipeForm({
+      ...form,
+      steps: appendParsedSteps(form.steps, parsed),
+    }));
+    setStepDraft(null);
+  };
+
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" style={{ maxWidth: '780px' }}>
         <div className="modal-header">
           <h2 className="modal-title">{heading}</h2>
-          <button className="modal-close" onClick={onClose}>
+          <button type="button" className="modal-close" onClick={onClose}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
@@ -74,11 +138,11 @@ export function RecipeFormModal({
               <label>Import from URL</label>
               <div className="url-input-group">
                 <input type="url" placeholder="https://example.com/recipe…" value={importFromUrl.url} onChange={e => importFromUrl.onUrlChange(e.target.value)} onKeyDown={e => e.key === 'Enter' && importFromUrl.onScrape()} />
-                <button className="btn btn-secondary" onClick={importFromUrl.onScrape} disabled={importFromUrl.scraping || !importFromUrl.url.trim()}>
+                <button type="button" className="btn btn-secondary" onClick={importFromUrl.onScrape} disabled={importFromUrl.scraping || !importFromUrl.url.trim()}>
                   {importFromUrl.scraping ? <span className="loading-dots"><span/><span/><span/></span> : 'Import'}
                 </button>
               </div>
-              <p className="scrape-hint">Works with AllRecipes, BBC Good Food, Serious Eats, NYT Cooking, and most recipe sites · <button className="link-btn" onClick={importFromUrl.onPasteInstead}>Paste text instead →</button></p>
+              <p className="scrape-hint">Works with AllRecipes, BBC Good Food, Serious Eats, NYT Cooking, and most recipe sites · <button type="button" className="link-btn" onClick={importFromUrl.onPasteInstead}>Paste text instead →</button></p>
             </div>
             <div className="divider" style={{ margin: '1rem 0' }} />
           </>
@@ -138,12 +202,39 @@ export function RecipeFormModal({
           </div>
           <div className="form-group">
             <label>Tags (comma separated)</label>
-            <input type="text" value={form.tags.join(', ')} onChange={e => update({ tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) })} placeholder="italian, pasta, quick" />
+            <input type="text" value={form.tags.join(', ')} onChange={e => update({ tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) })} placeholder="spicy, oven, slow-cooker" />
           </div>
         </div>
 
         <div className="form-group">
-          <label>Ingredients</label>
+          <div className="form-section-head">
+            <label>Ingredients</label>
+            <button
+              type="button"
+              className="link-btn"
+              aria-label={ingredientDraft === null ? 'Paste ingredient list' : 'Close ingredient paste'}
+              onClick={() => setIngredientDraft(ingredientDraft === null ? '' : null)}
+            >
+              {ingredientDraft === null ? 'Paste list' : 'Close paste'}
+            </button>
+          </div>
+          {ingredientDraft !== null && (
+            <div className="bulk-paste">
+              <textarea
+                value={ingredientDraft}
+                onChange={e => setIngredientDraft(e.target.value)}
+                placeholder={'2 cups flour\n1 tsp salt\n3 eggs'}
+                rows={5}
+                aria-label="Paste ingredient list"
+              />
+              <div className="bulk-paste-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setIngredientDraft(null)}>Cancel</button>
+                <button type="button" className="btn btn-primary" onClick={commitIngredientDraft} disabled={!ingredientDraft.trim()}>
+                  Add to recipe
+                </button>
+              </div>
+            </div>
+          )}
           <div className="ingredient-row-header">
             <span>Amount</span>
             <span>Unit</span>
@@ -152,34 +243,61 @@ export function RecipeFormModal({
           </div>
           {form.ingredients.map((ing, i) => (
             <div key={i} className="ingredient-row">
-              <input type="text" value={ing.amount} onChange={e => updateIngredient(i, 'amount', e.target.value)} placeholder="2" />
-              <input type="text" value={ing.unit} onChange={e => updateIngredient(i, 'unit', e.target.value)} placeholder="cups" />
-              <input type="text" value={ing.name} onChange={e => updateIngredient(i, 'name', e.target.value)} placeholder="flour" />
-              <button className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)' }} onClick={() => removeIngredient(i)}>
+              <input type="text" value={ing.amount} onChange={e => updateIngredient(i, 'amount', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="2" />
+              <input type="text" value={ing.unit} onChange={e => updateIngredient(i, 'unit', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="cups" />
+              <input type="text" value={ing.name} onChange={e => updateIngredient(i, 'name', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="flour" />
+              <button type="button" className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)' }} onClick={() => removeIngredient(i)}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
           ))}
-          <button className="add-row-btn" onClick={addIngredient}>+ Add ingredient</button>
+          <button type="button" className="add-row-btn" onClick={addIngredient}>+ Add ingredient</button>
         </div>
 
         <div className="form-group">
-          <label>Steps</label>
+          <div className="form-section-head">
+            <label>Steps</label>
+            <button
+              type="button"
+              className="link-btn"
+              aria-label={stepDraft === null ? 'Paste step list' : 'Close step paste'}
+              onClick={() => setStepDraft(stepDraft === null ? '' : null)}
+            >
+              {stepDraft === null ? 'Paste list' : 'Close paste'}
+            </button>
+          </div>
+          {stepDraft !== null && (
+            <div className="bulk-paste">
+              <textarea
+                value={stepDraft}
+                onChange={e => setStepDraft(e.target.value)}
+                placeholder={'1. Preheat the oven to 180C.\n2. Season the chicken.\n3. Roast for 25 minutes.'}
+                rows={5}
+                aria-label="Paste step list"
+              />
+              <div className="bulk-paste-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setStepDraft(null)}>Cancel</button>
+                <button type="button" className="btn btn-primary" onClick={commitStepDraft} disabled={!stepDraft.trim()}>
+                  Add to recipe
+                </button>
+              </div>
+            </div>
+          )}
           {form.steps.map((step, i) => (
             <div key={i} className="step-row">
               <div className="step-number">{i + 1}</div>
-              <textarea value={step} onChange={e => updateStep(i, e.target.value)} placeholder={`Step ${i + 1}…`} rows={2} />
-              <button className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)', marginTop: '0.65rem' }} onClick={() => removeStep(i)}>
+              <textarea value={step} onChange={e => updateStep(i, e.target.value)} onPaste={e => onStepClipboard(i, e)} placeholder={`Step ${i + 1}…`} rows={2} />
+              <button type="button" className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)', marginTop: '0.65rem' }} onClick={() => removeStep(i)}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
           ))}
-          <button className="add-row-btn" onClick={addStep}>+ Add step</button>
+          <button type="button" className="add-row-btn" onClick={addStep}>+ Add step</button>
         </div>
 
         <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={onSave} disabled={saving}>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={onSave} disabled={saving}>
             {saving ? <span className="loading-dots"><span/><span/><span/></span> : saveLabel}
           </button>
         </div>

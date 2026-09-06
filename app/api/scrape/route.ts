@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     }
 
     const recipe = await scrapeRecipe(url);
-    const { primary_protein, tags } = autoTag(recipe.title, recipe.ingredients);
+    const { primary_protein, tags } = autoTag(recipe.title, recipe.ingredients, [], recipe.steps || []);
     return NextResponse.json({ ...recipe, source_url: url, primary_protein: primary_protein ?? '', tags });
   } catch (error) {
     console.error('Scrape error:', error);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Recipe } from './db';
-import { EMPTY_RECIPE_FORM, recipeFormPayload, recipeToForm } from './recipeForm';
+import { EMPTY_RECIPE_FORM, emptyRecipeForm, recipeFormPayload, recipeToForm } from './recipeForm';
 
 const recipe: Recipe = {
   id: 'r1',
@@ -43,5 +43,8 @@ describe('recipeForm', () => {
   it('starts a new recipe with one empty ingredient and step', () => {
     expect(EMPTY_RECIPE_FORM.ingredients).toHaveLength(1);
     expect(EMPTY_RECIPE_FORM.steps).toEqual(['']);
+    const fresh = emptyRecipeForm();
+    expect(fresh.ingredients).not.toBe(EMPTY_RECIPE_FORM.ingredients);
+    expect(fresh.steps).not.toBe(EMPTY_RECIPE_FORM.steps);
   });
 });
