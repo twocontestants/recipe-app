@@ -90,6 +90,12 @@ describe('PlannerClient planned-day count', () => {
     expect(monday.className).toContain('is-planned');
     expect(tuesday.className).toContain('is-empty');
     expect(tuesday.className).not.toContain('is-planned');
+
+    expect(screen.getAllByRole('tab')).toHaveLength(7);
+    expect(screen.getAllByRole('button', { name: /add dinner/i }).length).toBeGreaterThanOrEqual(4);
+    expect(screen.queryByPlaceholderText(/add a note/i)).toBeNull();
+    expect(screen.queryByText(/this week's suggestions/i)).toBeNull();
+    expect(screen.queryByText(/add another/i)).toBeNull();
   });
 
   it('opens the existing context menu from the three-dot button', async () => {

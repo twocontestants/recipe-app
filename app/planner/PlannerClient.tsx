@@ -93,16 +93,6 @@ function getDayDate(weekStart: Date, i: number): Date {
   const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
 
-// ── Suggestion logic ──────────────────────────────────────────────────────────
-
-function suggestForDay(recipes: Recipe[], usedProteins: (string|null|undefined)[], count = 3): Recipe[] {
-  if (!recipes.length) return [];
-  const used = new Set(usedProteins.filter(Boolean));
-  const fresh = recipes.filter(r => !used.has(r.primary_protein ?? ''));
-  const pool = fresh.length >= count ? fresh : [...fresh, ...recipes.filter(r => !fresh.includes(r))];
-  return [...pool].sort(() => Math.random() - 0.5).slice(0, count);
-}
-
 // ── Magic settings ────────────────────────────────────────────────────────────
 
 interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; preferTags: string; excludeTags: string; }
@@ -137,8 +127,6 @@ export default function PlannerClient() {
   const [magicSettings, setMagicSettings] = useState<MagicSettings>({ variety: 'medium', servings: 4, preferTags: '', excludeTags: '' });
   const [magicLoading, setMagicLoading] = useState(false);
 
-  const [suggestions, setSuggestions] = useState<Record<number, Recipe[]>>({});
-
   // Card action menu (view / edit / replace / move / delete)
   const [cardMenu, setCardMenu] = useState<{
     mealId: string;
@@ -154,7 +142,6 @@ export default function PlannerClient() {
   // Note save debounce timers
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
-  const todayRef = useRef<HTMLDivElement | null>(null);
   const dayEls = useRef<(HTMLDivElement | null)[]>([]);
   const railEls = useRef<(HTMLDivElement | null)[]>([]);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -308,25 +295,6 @@ export default function PlannerClient() {
     return () => { cancelled = true; };
   }, [picker, showMagic, recipes.length]);
 
-  useEffect(() => {
-    if (!recipes.length) {
-      setSuggestions({});
-      return;
-    }
-    const next: Record<number, Recipe[]> = {};
-    for (let d = 0; d < 7; d++) {
-      const dayIso = formatDate(getDayDate(weekStart, d));
-      const dayMeals = mealPlans.filter((m: MealPlan) =>
-        mealOnDate(m, dayIso) && m.meal_type === 'dinner',
-      );
-      if (!dayMeals.length) {
-        const otherProteins = mealPlans.filter((m: MealPlan) => !mealOnDate(m, dayIso)).map(m => m.recipe?.primary_protein);
-        next[d] = suggestForDay(recipes, otherProteins, 3);
-      }
-    }
-    setSuggestions(next);
-  }, [recipes, mealPlans, weekStart]);
-
   // Keep the recipe picker inside the visual viewport so the mobile keyboard
   // shrinks the sheet instead of pushing it off-screen.
   useLayoutEffect(() => {
@@ -411,12 +379,6 @@ export default function PlannerClient() {
       overlay.classList.remove('is-sheet');
     };
   }, [picker]);
-
-  useEffect(() => {
-    if (!loading && todayRef.current && viewingThisWeek) {
-      setTimeout(() => todayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-    }
-  }, [loading]);
 
   // ── Meal operations ─────────────────────────────────────────────────────────
 
@@ -1034,10 +996,7 @@ export default function PlannerClient() {
                 aria-selected={isSelected}
                 className={weekChipClass({ planned, today: isToday, selected: isSelected })}
                 aria-label={`${dayName} ${date.getDate()}, ${planned ? 'planned' : 'nothing planned'}`}
-                onClick={() => {
-                  setSelectedDayIndex(dayIndex);
-                  dayEls.current[dayIndex]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
+                onClick={() => setSelectedDayIndex(dayIndex)}
               >
                 <span className="pl-chip-wd">{short}</span>
                 <span className="pl-chip-num">{date.getDate()}</span>
@@ -1052,17 +1011,13 @@ export default function PlannerClient() {
             const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
             const isPast = viewingThisWeek && dayIndex < todayDisplayIdx;
             const dayMeals = getMealsForDay(dayIndex);
-            const daySuggestions = suggestions[dayIndex] ?? [];
             const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
             const dayNum = date.getDate();
 
             return (
               <div
                 key={dayIndex}
-                ref={el => {
-                  dayEls.current[dayIndex] = el;
-                  if (isToday) todayRef.current = el;
-                }}
+                ref={el => { dayEls.current[dayIndex] = el; }}
                 className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
               >
                 {dayMeals.length > 0 && (
@@ -1075,10 +1030,6 @@ export default function PlannerClient() {
                         prepTime: recipe?.prep_time,
                         servings: meal.servings || recipe?.servings,
                       });
-                      const tags = [
-                        recipe?.primary_protein,
-                        ...(recipe?.tags ?? []),
-                      ].filter((t, i, all): t is string => Boolean(t) && all.indexOf(t) === i).slice(0, 2);
                       return (
                         <div
                           key={meal.id}
@@ -1117,13 +1068,6 @@ export default function PlannerClient() {
                           <div className="pl-recipe-info">
                             <span className="pl-recipe-name">{recipe?.title}</span>
                             {meta && <div className="pl-recipe-meta">{meta}</div>}
-                            {tags.length > 0 && (
-                              <div className="pl-recipe-tags">
-                                {tags.map(t => (
-                                  <span key={t} className="pl-recipe-tag">{t}</span>
-                                ))}
-                              </div>
-                            )}
                           </div>
                           <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
                             <button
@@ -1144,12 +1088,6 @@ export default function PlannerClient() {
                         </div>
                       );
                     })}
-                    <button
-                      className="pl-add-another"
-                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
-                    >
-                      Add another
-                    </button>
                   </div>
                 )}
 
@@ -1168,34 +1106,22 @@ export default function PlannerClient() {
                         Add dinner
                       </span>
                     </button>
-                    {daySuggestions.length > 0 && (
-                      <div className="pl-suggestions">
-                        <span className="pl-suggestions-label">This week's suggestions</span>
-                        <div className="pl-suggestion-pills">
-                          {daySuggestions.map(r => (
-                            <button key={r.id} className="pl-suggestion-pill" onClick={() => addMeal(dayIndex, r.id)} title={r.title}>
-                              {r.primary_protein && <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: PROTEIN_COLORS[r.primary_protein] || '#ccc', display: 'inline-block' }} />}
-                              {r.title}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                <textarea
-                  className="pl-day-note"
-                  placeholder="Add a note… (e.g. out for dinner, use leftovers)"
-                  value={notes[dayIndex] ?? ''}
-                  onChange={e => handleNoteChange(dayIndex, e.target.value)}
-                  rows={1}
-                  onInput={e => {
-                    const el = e.currentTarget;
-                    el.style.height = 'auto';
-                    el.style.height = el.scrollHeight + 'px';
-                  }}
-                />
+                {notes[dayIndex] ? (
+                  <textarea
+                    className="pl-day-note"
+                    value={notes[dayIndex]}
+                    onChange={e => handleNoteChange(dayIndex, e.target.value)}
+                    rows={1}
+                    onInput={e => {
+                      const el = e.currentTarget;
+                      el.style.height = 'auto';
+                      el.style.height = el.scrollHeight + 'px';
+                    }}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -1478,11 +1404,16 @@ export default function PlannerClient() {
       )}
 
       <style>{`
-        .pl-root { max-width: 680px; }
+        .pl-root {
+          max-width: 680px;
+          display: flex; flex-direction: column;
+          height: calc(100dvh - var(--bottom-nav-height, 0px) - 2rem);
+          min-height: 0;
+        }
 
         /* Top bar */
-        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.25rem; }
-        .pl-title { font-family: var(--font-body); font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-bottom: 0.35rem; letter-spacing: -0.02em; }
+        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.55rem; flex-shrink: 0; }
+        .pl-title { font-family: var(--font-body); font-size: 1.45rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-bottom: 0.15rem; letter-spacing: -0.02em; }
         .pl-week-nav { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
         .pl-nav-btn { background: none; border: none; border-radius: 8px; padding: 0.3rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
         .pl-nav-btn:hover { background: var(--parchment); color: var(--ink); }
@@ -1498,7 +1429,7 @@ export default function PlannerClient() {
         .pl-jump-date { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
         /* Week strip */
-        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.35rem; margin-bottom: 1.25rem; }
+        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; margin-bottom: 0.45rem; flex-shrink: 0; }
         .pl-chip {
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           gap: 2px; padding: 0.45rem 0.15rem 0.5rem; border: none; background: transparent;
@@ -1520,9 +1451,20 @@ export default function PlannerClient() {
         .pl-chip.is-selected.is-planned .pl-chip-num { background: rgba(255,255,255,0.18); color: white; }
         .pl-chip:hover:not(.is-selected) { background: var(--parchment); }
 
-        /* Day list */
-        .pl-days { display: flex; flex-direction: column; gap: 0.15rem; }
-        .pl-day { padding-block: 0.15rem; }
+        /* Day list — seven equal rows so the week fits one screen */
+        .pl-days {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex; flex-direction: column;
+          gap: 2px;
+          overflow: hidden;
+        }
+        .pl-day {
+          flex: 1 1 0;
+          min-height: 0;
+          display: flex; flex-direction: column; justify-content: center;
+          padding-block: 0;
+        }
         .pl-day.is-past { opacity: 0.55; }
         .pl-day.is-drop-target {
           outline: 2px solid var(--sage);
@@ -1533,13 +1475,17 @@ export default function PlannerClient() {
         .pl-days.is-dragging { user-select: none; cursor: grabbing; }
 
         /* Recipe stack */
-        .pl-meal-stack { display: flex; flex-direction: column; gap: 0.15rem; }
+        .pl-meal-stack {
+          display: flex; flex-direction: column; gap: 2px;
+          min-height: 0; flex: 1; justify-content: center;
+        }
 
         /* Recipe card */
         .pl-recipe-card {
-          display: flex; align-items: center; gap: 0.75rem;
-          background: white; border: none; border-radius: 16px;
-          padding: 0.7rem 0.65rem; cursor: pointer;
+          display: flex; align-items: center; gap: 0.55rem;
+          background: white; border: none; border-radius: 12px;
+          padding: 0.3rem 0.45rem; cursor: pointer;
+          min-height: 0; flex: 1 1 0;
           transition: background 0.15s, box-shadow 0.15s;
         }
         .pl-recipe-card:hover { background: #fff; box-shadow: 0 2px 14px rgba(26,22,18,0.06); }
@@ -1630,67 +1576,53 @@ export default function PlannerClient() {
         .pl-card-wd { font-size: 0.68rem; font-weight: 600; color: var(--ink-muted); }
         .pl-card-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.15; }
         .pl-recipe-img {
-          width: 64px; height: 64px; flex-shrink: 0; border-radius: 12px;
+          width: 42px; height: 42px; flex-shrink: 0; border-radius: 10px;
           overflow: hidden; background: var(--parchment);
           display: flex; align-items: center; justify-content: center;
         }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
         .pl-recipe-img-fallback { font-size: 1.4rem; line-height: 1; }
         .pl-recipe-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
-        .pl-recipe-name { font-size: 0.95rem; color: var(--ink); font-weight: 700; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
-        .pl-recipe-meta { font-size: 0.75rem; color: var(--ink-muted); }
-        .pl-recipe-tags { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-top: 2px; }
-        .pl-recipe-tag {
-          background: var(--sage-light); border: none; border-radius: 99px;
-          padding: 2px 8px; font-size: 0.68rem; font-weight: 600; color: var(--sage);
-          text-transform: capitalize;
+        .pl-recipe-name {
+          font-size: 0.88rem; color: var(--ink); font-weight: 700; line-height: 1.2;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .pl-recipe-meta { font-size: 0.7rem; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .pl-card-actions { display: flex; align-items: center; flex-shrink: 0; }
         .pl-card-btn {
-          background: none; border: none; border-radius: 50%; width: 36px; height: 36px; min-width: 36px;
+          background: none; border: none; border-radius: 50%; width: 32px; height: 32px; min-width: 32px;
           display: flex; align-items: center; justify-content: center; cursor: pointer;
           color: var(--ink-muted); transition: background 0.15s, color 0.15s; padding: 0;
         }
         .pl-card-btn:hover, .pl-card-btn.is-open { background: var(--parchment); color: var(--ink); }
-        .pl-add-another {
-          align-self: flex-start; margin: 0 0 0.25rem 114px; padding: 0.15rem 0;
-          background: none; border: none; font-size: 0.75rem; color: var(--sage);
-          font-family: var(--font-body); cursor: pointer; font-weight: 600;
-        }
-        .pl-add-another:hover { text-decoration: underline; }
 
         /* Empty slot */
-        .pl-empty-slot { margin-bottom: 0.15rem; }
+        .pl-empty-slot { min-height: 0; height: 100%; display: flex; align-items: center; }
         .pl-empty-card {
-          display: flex; align-items: center; gap: 0.75rem; width: 100%;
-          background: none; border: none; padding: 0.55rem 0.65rem; border-radius: 16px;
+          display: flex; align-items: center; gap: 0.55rem; width: 100%; height: 100%;
+          background: none; border: none; padding: 0.25rem 0.45rem; border-radius: 12px;
           cursor: pointer; font-family: var(--font-body); text-align: left;
         }
         .pl-empty-card:hover { background: rgba(255,255,255,0.55); }
         .pl-empty-card .pl-card-date { cursor: pointer; }
         .pl-add-dinner-pill {
-          display: flex; align-items: center; justify-content: center; gap: 0.45rem;
-          flex: 1; padding: 0.85rem 1rem;
+          display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+          flex: 1; padding: 0.4rem 0.7rem;
           background: none; border: 1.5px dashed var(--border);
-          border-radius: 14px; font-size: 0.82rem; color: var(--ink-muted);
+          border-radius: 10px; font-size: 0.78rem; color: var(--ink-muted);
           font-family: var(--font-body);
         }
         .pl-empty-card:hover .pl-add-dinner-pill { border-color: var(--sage); color: var(--sage); }
-        .pl-suggestions { margin-top: 0.6rem; }
-        .pl-suggestions-label { font-size: 0.65rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem; }
-        .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-        .pl-suggestion-pill { display: inline-flex; align-items: center; gap: 5px; padding: 0.28rem 0.65rem; background: white; border: 1px solid var(--border); border-radius: 99px; font-size: 0.73rem; color: var(--ink-soft); font-family: var(--font-body); cursor: pointer; transition: all 0.15s; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pl-suggestion-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.03); }
 
         /* Day note textarea */
         .pl-day-note {
           width: 100%; box-sizing: border-box;
           border: none;
           background: transparent; resize: none; overflow: hidden;
-          font-size: 0.82rem; font-family: var(--font-body); color: var(--ink-soft);
-          line-height: 1.5; padding: 0; margin-top: 4px;
+          font-size: 0.72rem; font-family: var(--font-body); color: var(--ink-soft);
+          line-height: 1.3; padding: 0; margin-top: 0;
           outline: none; transition: color 0.15s;
-          min-height: 30px;
+          min-height: 0; flex-shrink: 0;
         }
         .pl-day-note::placeholder { color: var(--ink-muted); font-style: italic; }
         .pl-day-note:focus { color: var(--ink); }
@@ -1793,17 +1725,21 @@ export default function PlannerClient() {
 
         .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
 
+        @media (min-width: 901px) {
+          .pl-root { height: calc(100dvh - 6rem); }
+        }
+
         /* Mobile */
         @media (max-width: 600px) {
-          .pl-title { font-size: 1.45rem; }
-          .pl-topbar { gap: 0.6rem; margin-bottom: 0.9rem; }
-          .pl-week-strip { gap: 0.2rem; margin-bottom: 0.85rem; }
-          .pl-chip { padding: 0.35rem 0.05rem 0.4rem; border-radius: 14px; }
-          .pl-chip-num { font-size: 0.88rem; }
-          .pl-chip.is-planned .pl-chip-num { width: 26px; height: 26px; }
-          .pl-recipe-img { width: 56px; height: 56px; border-radius: 10px; }
-          .pl-recipe-name { font-size: 0.88rem; }
-          .pl-add-another { margin-left: 98px; }
+          .pl-root { height: calc(100dvh - var(--bottom-nav-height, 0px) - 1.25rem); }
+          .pl-title { font-size: 1.3rem; }
+          .pl-topbar { gap: 0.35rem; margin-bottom: 0.4rem; }
+          .pl-week-strip { gap: 0.15rem; margin-bottom: 0.35rem; }
+          .pl-chip { padding: 0.28rem 0.05rem 0.3rem; border-radius: 12px; }
+          .pl-chip-num { font-size: 0.82rem; }
+          .pl-chip.is-planned .pl-chip-num { width: 24px; height: 24px; }
+          .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
+          .pl-recipe-name { font-size: 0.84rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }
