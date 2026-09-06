@@ -13,7 +13,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, mergePlannerMeals } from '@/lib/loadPlannerMonth';
-import { displayWeekDateRange, notesByDisplayIndex, sameDisplayWeek } from '@/lib/plannerLoad';
+import { countPlannedDays, displayWeekDateRange, notesByDisplayIndex, sameDisplayWeek } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -943,7 +943,7 @@ export default function PlannerClient() {
     return !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()));
   });
 
-  const totalMeals = mealPlans.length;
+  const totalMeals = countPlannedDays(mealPlans, weekStartIso);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
