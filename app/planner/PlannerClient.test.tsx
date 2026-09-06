@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
 
 vi.mock('@/components/AuthProvider', () => ({
@@ -32,7 +32,13 @@ function dinner(id: string, plannedOn: string) {
     day_of_week: 0,
     meal_type: 'dinner',
     servings: 4,
-    recipe: { title: `Meal ${id}`, primary_protein: 'chicken' },
+    recipe: {
+      title: `Meal ${id}`,
+      primary_protein: 'chicken',
+      cook_time: 30,
+      servings: 4,
+      tags: ['High Protein'],
+    },
   };
 }
 
@@ -78,5 +84,41 @@ describe('PlannerClient planned-day count', () => {
     });
     expect(screen.queryByText(/[3-9]\d* of 7 planned/)).toBeNull();
     expect(screen.queryByText('6 of 7 planned')).toBeNull();
+
+    const monday = screen.getByRole('tab', { name: /monday .* planned/i });
+    const tuesday = screen.getByRole('tab', { name: /tuesday .* nothing planned/i });
+    expect(monday.className).toContain('is-planned');
+    expect(tuesday.className).toContain('is-empty');
+    expect(tuesday.className).not.toContain('is-planned');
+  });
+
+  it('opens the existing context menu from the three-dot button', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return { ok: true, json: async () => [dinner('this-mon-a', mon)] };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    const menuBtn = await screen.findByRole('button', { name: 'Meal options' });
+    fireEvent.click(menuBtn);
+    expect(screen.getByRole('menuitem', { name: 'View recipe' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Edit recipe' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Replace' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /move to/i })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
   });
 });

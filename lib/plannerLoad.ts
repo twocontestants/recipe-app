@@ -29,6 +29,35 @@ export function hasMealRecipeMethod(meal: { recipe?: { ingredients?: unknown; st
   return Array.isArray(meal.recipe?.ingredients) && Array.isArray(meal.recipe?.steps);
 }
 
+export function recipeCardMeta(input: {
+  cookTime?: number | null;
+  prepTime?: number | null;
+  servings?: number | null;
+}): string {
+  const mins = input.cookTime && input.cookTime > 0
+    ? input.cookTime
+    : input.prepTime && input.prepTime > 0
+      ? input.prepTime
+      : null;
+  const servings = input.servings && input.servings > 0 ? input.servings : null;
+  const parts: string[] = [];
+  if (mins) parts.push(`${mins} mins`);
+  if (servings) parts.push(`${servings} serving${servings === 1 ? '' : 's'}`);
+  return parts.join(' • ');
+}
+
+export function weekChipClass(opts: {
+  planned: boolean;
+  today?: boolean;
+  selected?: boolean;
+}): string {
+  const parts = ['pl-chip'];
+  parts.push(opts.planned ? 'is-planned' : 'is-empty');
+  if (opts.today) parts.push('is-today');
+  if (opts.selected) parts.push('is-selected');
+  return parts.join(' ');
+}
+
 /** Days in the display week that already have a dinner. Caps at 7. */
 export function countPlannedDays(
   meals: Array<{

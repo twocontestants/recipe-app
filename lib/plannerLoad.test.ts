@@ -4,7 +4,9 @@ import {
   displayWeekDateRange,
   hasMealRecipeMethod,
   notesByDisplayIndex,
+  recipeCardMeta,
   sameDisplayWeek,
+  weekChipClass,
 } from './plannerLoad';
 
 describe('sameDisplayWeek', () => {
@@ -33,6 +35,23 @@ describe('hasMealRecipeMethod', () => {
   it('treats missing method arrays as a card', () => {
     expect(hasMealRecipeMethod({ recipe: {} })).toBe(false);
     expect(hasMealRecipeMethod({ recipe: { ingredients: [], steps: [] } })).toBe(true);
+  });
+});
+
+describe('recipeCardMeta', () => {
+  it('joins time and servings the way the card line reads', () => {
+    expect(recipeCardMeta({ cookTime: 45, servings: 4 })).toBe('45 mins • 4 servings');
+    expect(recipeCardMeta({ prepTime: 15, servings: 1 })).toBe('15 mins • 1 serving');
+    expect(recipeCardMeta({})).toBe('');
+  });
+});
+
+describe('weekChipClass', () => {
+  it('marks planned vs empty so the strip can be colour-coded', () => {
+    expect(weekChipClass({ planned: true })).toBe('pl-chip is-planned');
+    expect(weekChipClass({ planned: false, today: true })).toBe('pl-chip is-empty is-today');
+    expect(weekChipClass({ planned: true, selected: true, today: true }))
+      .toBe('pl-chip is-planned is-today is-selected');
   });
 });
 
