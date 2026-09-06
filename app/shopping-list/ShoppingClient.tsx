@@ -859,18 +859,6 @@ export default function ShoppingListClient() {
     } catch { showToast('Failed to delete', 'error'); }
   };
 
-  const handleCopy = async () => {
-    const lines: string[] = [];
-    for (const cat of orderedCats) {
-      const catItems = getItemsForCat(cat).filter(i => !itemIsChecked(i));
-      if (!catItems.length) continue;
-      lines.push(`\n${getCatLabel(cat)}`);
-      catItems.forEach(i => lines.push(`  □ ${i.displayName}${i.displayAmount ? ' — ' + i.displayAmount : ''}`));
-    }
-    await navigator.clipboard.writeText(lines.join('\n').trim());
-    showToast('Copied!', 'success');
-  };
-
   const isEmpty = !loadingItems && serverItems.length === 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -886,8 +874,6 @@ export default function ShoppingListClient() {
             <span className="socket-dot" />
             {connected ? `Live · ${activeShoppers}` : 'Offline'}
           </div>
-          {activeId && <button className="btn btn-secondary btn-sm no-print" onClick={handleCopy}>Copy</button>}
-          {activeId && <button className="btn btn-secondary btn-sm no-print" onClick={() => window.print()}>Print</button>}
           {checkedCount > 0 && <button className={`btn btn-ghost btn-sm no-print ${hideChecked ? 'toggle-on' : ''}`} onClick={() => setHideChecked(v => !v)}>{hideChecked ? 'Show checked' : 'Hide checked'}</button>}
           {checkedCount > 0 && <button className="btn btn-ghost btn-sm no-print" onClick={clearAll}>Uncheck all</button>}
           <button className="btn btn-primary btn-sm no-print" onClick={() => setShowGenerate(true)}>

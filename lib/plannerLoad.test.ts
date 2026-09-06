@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countPlannedDays,
   displayWeekDateRange,
   hasMealRecipeMethod,
   notesByDisplayIndex,
+  recipeCardMeta,
   sameDisplayWeek,
+  weekChipClass,
 } from './plannerLoad';
 
 describe('sameDisplayWeek', () => {
@@ -32,5 +35,63 @@ describe('hasMealRecipeMethod', () => {
   it('treats missing method arrays as a card', () => {
     expect(hasMealRecipeMethod({ recipe: {} })).toBe(false);
     expect(hasMealRecipeMethod({ recipe: { ingredients: [], steps: [] } })).toBe(true);
+  });
+});
+
+describe('recipeCardMeta', () => {
+  it('joins time and servings the way the card line reads', () => {
+    expect(recipeCardMeta({ cookTime: 45, servings: 4 })).toBe('45 mins • 4 servings');
+    expect(recipeCardMeta({ prepTime: 15, servings: 1 })).toBe('15 mins • 1 serving');
+    expect(recipeCardMeta({})).toBe('');
+  });
+});
+
+describe('weekChipClass', () => {
+  it('marks planned vs empty so the strip can be colour-coded', () => {
+    expect(weekChipClass({ planned: true })).toBe('pl-chip is-planned');
+    expect(weekChipClass({ planned: false, today: true })).toBe('pl-chip is-empty is-today');
+    expect(weekChipClass({ planned: true, selected: true, today: true }))
+      .toBe('pl-chip is-planned is-today is-selected');
+  });
+});
+
+describe('countPlannedDays', () => {
+  const weekStart = '2026-08-24';
+
+  it('is 0 when nothing is planned this week', () => {
+    expect(countPlannedDays([], weekStart)).toBe(0);
+    expect(countPlannedDays(
+      [{ planned_on: '2026-08-20', meal_type: 'dinner' }],
+      weekStart,
+    )).toBe(0);
+  });
+
+  it('counts unique days, not meals, so two dinners on Monday stay 1 of 7', () => {
+    expect(countPlannedDays([
+      { planned_on: '2026-08-24', meal_type: 'dinner' },
+      { planned_on: '2026-08-24', meal_type: 'dinner' },
+      { planned_on: '2026-08-26', meal_type: 'dinner' },
+    ], weekStart)).toBe(2);
+  });
+
+  it('ignores meals outside the display week so the counter cannot exceed 7', () => {
+    const thisWeek = Array.from({ length: 7 }, (_, i) => ({
+      planned_on: `2026-08-${24 + i}`,
+      meal_type: 'dinner' as const,
+    }));
+    const extras = [
+      { planned_on: '2026-08-17', meal_type: 'dinner' },
+      { planned_on: '2026-08-23', meal_type: 'dinner' },
+      { planned_on: '2026-08-31', meal_type: 'dinner' },
+      { planned_on: '2026-09-02', meal_type: 'dinner' },
+    ];
+    expect(countPlannedDays([...thisWeek, ...extras], weekStart)).toBe(7);
+  });
+
+  it('does not count non-dinner meals', () => {
+    expect(countPlannedDays([
+      { planned_on: '2026-08-24', meal_type: 'lunch' },
+      { planned_on: '2026-08-25', meal_type: 'dinner' },
+    ], weekStart)).toBe(1);
   });
 });
