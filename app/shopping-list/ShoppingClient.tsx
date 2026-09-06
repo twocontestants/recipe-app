@@ -14,6 +14,7 @@ import {
   shouldAdoptCheckedState,
   type ShoppingListMeta,
 } from '@/lib/shoppingList';
+import { categoryTheme, formatRecipeSourceLabel, progressBarInset, shoppingProgress } from '@/lib/shoppingUi';
 import { showToast } from '@/components/Toast';
 import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
@@ -59,13 +60,23 @@ interface ItemRowProps {
   onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void;
   onDragOverItem: (e: React.DragEvent) => void; onDropOnItem: (e: React.DragEvent) => void;
   onEnterAtEnd: () => void; recipes?: string[]; recipeLinks?: Record<string, string>;
+  allRecipes?: string[];
   onSubDragStart?: (e: React.DragEvent, contribId: string) => void; onSubDragEnd?: () => void;
   onMoveClick?: (e: React.MouseEvent) => void; onSubMoveClick?: (e: React.MouseEvent, contribId: string) => void;
 }
 
-function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, onSubDragStart, onSubDragEnd, onMoveClick, onSubMoveClick }: ItemRowProps) {
+function RecipeChevron() {
+  return (
+    <svg className="recipe-source-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6"/>
+    </svg>
+  );
+}
+
+function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onToggle, onDelete, onNameChange, onAmountChange, onDragStart, onDragEnd, onDragOverItem, onDropOnItem, onEnterAtEnd, recipes, recipeLinks, allRecipes, onSubDragStart, onSubDragEnd, onMoveClick, onSubMoveClick }: ItemRowProps) {
   const nameRef = useRef<HTMLSpanElement>(null);
   const amountRef = useRef<HTMLSpanElement>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => { if (nameRef.current && nameRef.current.textContent !== item.displayName) nameRef.current.textContent = item.displayName; }, [item.displayName]);
   useEffect(() => { if (amountRef.current && amountRef.current.textContent !== item.displayAmount) amountRef.current.textContent = item.displayAmount; }, [item.displayAmount]);
@@ -95,31 +106,44 @@ function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onTog
   const fmtContribAmount = (c: ShoppingContribution) =>
     `${c.amount}${c.unit ? ' ' + c.unit : ''}`.trim();
 
+  const recipeLabel = formatRecipeSourceLabel(recipes ?? [], allRecipes ?? []);
+  const singleRecipe = (recipes ?? []).find(Boolean);
+  const singleRecipeUrl = !isGrouped && singleRecipe ? recipeLinks?.[singleRecipe] : undefined;
+
   return (
     <div className={`shop-item-wrap ${isDragging ? 'item-dragging' : ''} ${isDropBefore ? 'drop-before-item' : ''} ${isDropAfter ? 'drop-after-item' : ''}`} onDragOver={onDragOverItem} onDrop={onDropOnItem}>
       <div className={`shop-item ${isChecked ? 'is-checked' : ''}`}>
-        <div className="item-drag-handle no-print" draggable onDragStart={onDragStart} onDragEnd={onDragEnd}><DragHandle size={11} /></div>
         <div className="shop-checkbox" role="checkbox" aria-checked={isChecked} onClick={onToggle}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <div className="shop-item-name-wrap">
-          {!isGrouped && recipes && recipes.length > 0 && (
-            <div className="recipe-source-bar" title={recipes.join(', ')}>
-              {recipes.map((r, i) => {
-                const url = recipeLinks?.[r];
-                return url ? (
-                  <a key={i} className="recipe-source-pip recipe-source-link" href={url} target="_blank" rel="noopener noreferrer"
-                     onClick={e => e.stopPropagation()} title={`Open original recipe: ${r}`}>
-                    {r}
-                  </a>
-                ) : (
-                  <span key={i} className="recipe-source-pip">{r}</span>
-                );
-              })}
-            </div>
-          )}
-          <span ref={nameRef} className={`shop-item-name ${isChecked ? 'checked-text' : ''}`} contentEditable={!isChecked} suppressContentEditableWarning onBlur={e => onNameChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleNameKeyDown} spellCheck={false} />
-        </div>
         <div className="shop-item-amount-wrap">
           <span ref={amountRef} className="shop-item-amount" contentEditable={!isChecked} suppressContentEditableWarning data-placeholder="qty" onBlur={e => onAmountChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleAmountKeyDown} spellCheck={false} />
+        </div>
+        <div className="shop-item-name-wrap">
+          <span ref={nameRef} className={`shop-item-name ${isChecked ? 'checked-text' : ''}`} contentEditable={!isChecked} suppressContentEditableWarning onBlur={e => onNameChange(e.currentTarget.textContent?.trim() ?? '')} onKeyDown={handleNameKeyDown} spellCheck={false} />
+          {recipeLabel && (isGrouped ? (
+            <button
+              type="button"
+              className={`recipe-source-line ${detailsOpen ? 'is-open' : ''}`}
+              onClick={() => setDetailsOpen(v => !v)}
+              aria-expanded={detailsOpen}
+            >
+              <span>{recipeLabel}</span>
+              <RecipeChevron />
+            </button>
+          ) : singleRecipeUrl ? (
+            <a
+              className="recipe-source-line"
+              href={singleRecipeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title={`Open original recipe: ${singleRecipe}`}
+            >
+              <span>{recipeLabel}</span>
+              <RecipeChevron />
+            </a>
+          ) : (
+            <span className="recipe-source-line"><span>{recipeLabel}</span></span>
+          ))}
         </div>
         {onMoveClick && !isChecked && (
           <button className="item-move-btn no-print" onClick={onMoveClick} title="Move to another aisle">
@@ -127,8 +151,9 @@ function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onTog
           </button>
         )}
         <button className="item-delete-btn no-print" onClick={onDelete}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <div className="item-drag-handle no-print" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title="Drag to reorder"><GripLines /></div>
       </div>
-      {isGrouped && (
+      {isGrouped && detailsOpen && (
         <div className={`shop-subitems ${isChecked ? 'is-checked' : ''}`}>
           {contributions.map((c, i) => {
             const url = c.recipe ? recipeLinks?.[c.recipe] : undefined;
@@ -198,6 +223,8 @@ export default function ShoppingListClient() {
   // title → original source URL, for linking recipe pills to the real recipe
   const [recipeSources, setRecipeSources] = useState<Record<string, string>>({});
   const [hideChecked, setHideChecked] = useState(false);
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
+  const [viewportW, setViewportW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
 
   const [editingCat, setEditingCat] = useState<string | null>(null);
   const [editingCatValue, setEditingCatValue] = useState('');
@@ -519,6 +546,12 @@ export default function ShoppingListClient() {
     if (editingCat && catInputRef.current) { catInputRef.current.focus(); catInputRef.current.select(); }
   }, [editingCat]);
 
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const getResolvedItems = (): ResolvedItem[] => {
@@ -610,7 +643,9 @@ export default function ShoppingListClient() {
   const itemIsChecked = (item: ResolvedItem) => rowIsChecked(item.key, checked, item.checked);
   const checkedCount = resolvedItems.filter(itemIsChecked).length;
   const totalCount = allItemKeys.length;
-  const progress = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
+  const progress = shoppingProgress(checkedCount, totalCount);
+  const allRecipeTitles = [...new Set(resolvedItems.flatMap(i => i.recipes ?? []).filter(Boolean))];
+  const progressInset = progressBarInset(viewportW);
 
   // ── Toggle ────────────────────────────────────────────────────────────────
 
@@ -865,6 +900,23 @@ export default function ShoppingListClient() {
 
   return (
     <>
+      {totalCount > 0 && (
+        <div
+          className="shop-progress-fixed no-print"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress.percent}
+          aria-label={progress.label}
+          style={{ position: 'fixed', top: progressInset.top, left: progressInset.left, right: 0 }}
+        >
+          <div className="shop-progress-track">
+            <div className="shop-progress-fill" style={{ width: `${progress.percent}%` }} />
+          </div>
+          <span className="shop-progress-count">{progress.label}</span>
+        </div>
+      )}
+      <div className={`shop-page ${totalCount > 0 ? 'has-progress' : ''}`}>
       <div className="page-header">
         <div>
           <h1 className="page-title">Shopping <em>List</em></h1>
@@ -951,11 +1003,7 @@ export default function ShoppingListClient() {
           <p>Add items below or generate a new list from your meal plan.</p>
         </div>
       ) : (
-        <div style={{ maxWidth: '700px' }}>
-          <div className="progress-bar-wrap no-print">
-            <div className="progress-bar-labels"><span>{checkedCount} of {totalCount} items</span><span>{progress}%</span></div>
-            <div className="progress-bar-track"><div className="progress-bar-fill" style={{ width: `${progress}%` }} /></div>
-          </div>
+        <div className="shop-list">
           {recentActivity && <div className="activity-toast no-print">{recentActivity}</div>}
           <p className="edit-hint no-print">Click to edit · <kbd>Enter</kbd> adds item · <kbd>Tab</kbd> jumps to qty · Drag to reorder · Use the <kbd>›</kbd> button (or drag) to move an item to another aisle</p>
 
@@ -978,16 +1026,19 @@ export default function ShoppingListClient() {
           {orderedCats.map(cat => {
             const catItems = getItemsForCat(cat);
             if (!catItems.length && insertingIn?.cat !== cat) return null;
-            const checkedCat = catItems.filter(itemIsChecked);
             const visibleItems = hideChecked ? catItems.filter(i => !itemIsChecked(i)) : catItems;
             // When hiding checked items, drop categories that have nothing left to show.
             if (hideChecked && !visibleItems.length && insertingIn?.cat !== cat) return null;
             const isCatDragging = dragCat === cat;
             const isDropTarget = dropCat?.key === cat;
+            const theme = categoryTheme(cat);
+            const isCollapsed = collapsedCats[cat] === true;
 
             return (
               <div key={cat}
-                className={`shop-category ${isCatDragging ? 'cat-dragging' : ''} ${isDropTarget ? `drop-${dropCat?.position}` : ''}`}
+                className={`shop-category shop-category-card ${isCatDragging ? 'cat-dragging' : ''} ${isDropTarget ? `drop-${dropCat?.position}` : ''} ${isCollapsed ? 'is-collapsed' : ''}`}
+                data-theme={theme.key}
+                style={{ '--cat-bg': theme.headerBg, '--cat-fg': theme.headerFg } as React.CSSProperties}
                 onDragOver={e => { if (dragCat) handleCatDragOver(e, cat); else if (dragItem) { e.preventDefault(); setDropItemCat(cat); setDropItemTarget(null); } }}
                 onDrop={e => { if (dragCat) handleCatDrop(e, cat); else if (dragItem) handleItemDropOnCat(e, cat); }}
                 onDragLeave={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) { setDropCat(null); setDropItemCat(null); } }}
@@ -1003,12 +1054,23 @@ export default function ShoppingListClient() {
                       <svg className="edit-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>
                   )}
-                  <span className="shop-category-count">{checkedCat.length > 0 && `${checkedCat.length}/`}{catItems.length}</span>
-                  <button className="category-add-btn no-print" onClick={() => setInsertingIn({ cat, afterKey: null })}>
+                  <button className="category-add-btn no-print" onClick={() => { setCollapsedCats(prev => ({ ...prev, [cat]: false })); setInsertingIn({ cat, afterKey: null }); }}>
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                    Add
+                    Add item
+                  </button>
+                  <button
+                    type="button"
+                    className="category-toggle-btn no-print"
+                    aria-expanded={!isCollapsed}
+                    aria-label={isCollapsed ? `Expand ${getCatLabel(cat)}` : `Collapse ${getCatLabel(cat)}`}
+                    onClick={() => setCollapsedCats(prev => ({ ...prev, [cat]: !prev[cat] }))}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ transform: isCollapsed ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
                   </button>
                 </div>
+                {!isCollapsed && (
                 <div className="shop-items">
                   {visibleItems.map(item => (
                     <div key={item.key}>
@@ -1025,6 +1087,7 @@ export default function ShoppingListClient() {
                         onEnterAtEnd={() => setInsertingIn({ cat, afterKey: item.key })}
                         recipes={item.recipes}
                         recipeLinks={recipeSources}
+                        allRecipes={allRecipeTitles}
                         onSubDragStart={handleSubDragStart}
                         onSubDragEnd={resetDrag}
                         onMoveClick={e => openMoveMenu(e, item.key, false, cat)}
@@ -1039,6 +1102,7 @@ export default function ShoppingListClient() {
                     <NewShoppingItemRow autoFocus catalog={addCatalog} onCommit={(n, a) => { addItem(cat, n, a, null); setInsertingIn(null); }} onCancel={() => setInsertingIn(null)} />
                   )}
                 </div>
+                )}
               </div>
             );
           })}
@@ -1073,6 +1137,7 @@ export default function ShoppingListClient() {
           </div>
         </div>
       )}
+      </div>
 
       {showGenerate && (
         <GenerateListModal
@@ -1148,57 +1213,79 @@ export default function ShoppingListClient() {
         .sl-subtitle-input::placeholder { color: var(--ink-muted); }
         .sl-subtitle-input:focus { color: var(--ink); }
 
-        .progress-bar-wrap { margin-bottom: 1.5rem; }
-        .progress-bar-labels { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--ink-muted); margin-bottom: 0.4rem; }
-        .progress-bar-track { height: 5px; background: var(--parchment); border-radius: 3px; overflow: hidden; }
-        .progress-bar-fill { height: 100%; background: var(--sage); border-radius: 3px; transition: width 0.4s ease; }
+        .shop-page { padding-top: 3rem; }
+        .shop-page.has-progress { padding-top: 52px; }
+        .shop-page .page-header { margin-bottom: 1.25rem; padding-bottom: 1rem; }
+        .shop-progress-fixed {
+          z-index: 90;
+          display: flex;
+          align-items: center;
+          gap: 0.85rem;
+          background: rgba(247, 243, 238, 0.94);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          padding: calc(0.55rem + env(safe-area-inset-top, 0px)) 3.5rem 0.55rem;
+          border-bottom: 1px solid var(--border);
+          box-sizing: border-box;
+        }
+        .shop-progress-track { flex: 1; height: 7px; background: #E4DED4; border-radius: 99px; overflow: hidden; }
+        .shop-progress-fill { height: 100%; background: #3D8B6E; border-radius: 99px; transition: width 0.35s ease; }
+        .shop-progress-count { font-size: 0.8rem; font-weight: 500; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; }
+        .shop-list { max-width: 700px; }
 
         .activity-toast { background: var(--ink); color: var(--cream); font-size: 0.78rem; padding: 0.55rem 0.85rem; border-radius: 6px; margin-bottom: 1rem; }
         .shopper-label { font-size: 0.75rem; color: var(--ink-muted); margin-bottom: 0.5rem; }
-        .edit-hint { font-size: 0.72rem; color: var(--ink-muted); margin-bottom: 1.5rem; display: flex; align-items: center; gap: 5px; font-style: italic; flex-wrap: wrap; }
+        .edit-hint { font-size: 0.72rem; color: var(--ink-muted); margin-bottom: 1rem; display: flex; align-items: center; gap: 5px; font-style: italic; flex-wrap: wrap; }
         .edit-hint kbd { font-style: normal; background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 0.68rem; font-family: var(--font-body); color: var(--ink-soft); }
 
-        .shop-category { margin-bottom: 1.75rem; transition: opacity 0.15s; position: relative; }
+        .shop-category { margin-bottom: 0.75rem; transition: opacity 0.15s; position: relative; }
+        .shop-category-card { background: #fff; border-radius: 14px; box-shadow: 0 1px 6px rgba(26,22,18,0.06); overflow: hidden; }
         .shop-category.cat-dragging { opacity: 0.4; }
-        .shop-category.drop-before { border-top: 2px solid var(--rust); padding-top: 4px; }
-        .shop-category.drop-after { border-bottom: 2px solid var(--rust); padding-bottom: 4px; }
-        .shop-category-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; border-bottom: 1.5px solid var(--border); transition: background 0.15s; border-radius: 4px 4px 0 0; padding: 0.3rem 0.35rem 0.45rem; }
-        .shop-category-header.item-drop-target { background: rgba(181,69,27,0.06); border-bottom-color: var(--rust); border-bottom-width: 2px; }
-        .cat-drag-handle { cursor: grab; color: var(--border); display: flex; align-items: center; padding: 2px; border-radius: 3px; transition: color 0.15s; flex-shrink: 0; }
-        .cat-drag-handle:hover { color: var(--ink-muted); }
-        .shop-category-emoji { font-size: 15px; flex-shrink: 0; }
-        .shop-category-name-btn { display: inline-flex; align-items: center; gap: 5px; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-soft); font-weight: 400; flex: 1; font-family: var(--font-body); transition: color 0.15s; }
-        .shop-category-name-btn:hover { color: var(--rust); }
+        .shop-category.drop-before { box-shadow: 0 -2px 0 var(--rust); }
+        .shop-category.drop-after { box-shadow: 0 2px 0 var(--rust); }
+        .shop-category-header { display: flex; align-items: center; gap: 0.5rem; background: var(--cat-bg, var(--parchment)); color: var(--cat-fg, var(--ink-soft)); padding: 0.65rem 0.85rem; transition: filter 0.15s; }
+        .shop-category-header.item-drop-target { filter: brightness(0.96); }
+        .cat-drag-handle { cursor: grab; color: currentColor; opacity: 0.35; display: flex; align-items: center; padding: 2px; border-radius: 3px; transition: opacity 0.15s; flex-shrink: 0; }
+        .cat-drag-handle:hover { opacity: 0.7; }
+        .shop-category-emoji { font-size: 16px; flex-shrink: 0; }
+        .shop-category-name-btn { display: inline-flex; align-items: center; gap: 5px; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.95rem; color: var(--cat-fg, var(--ink)); font-weight: 600; flex: 1; font-family: var(--font-body); text-align: left; }
+        .shop-category-name-btn:hover { opacity: 0.8; }
         .edit-icon { opacity: 0; transition: opacity 0.15s; }
-        .shop-category-name-btn:hover .edit-icon { opacity: 1; }
-        .category-edit-input { flex: 1; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink); font-family: var(--font-body); border: none; border-bottom: 1.5px solid var(--rust); outline: none; background: transparent; padding: 0 0 2px; min-width: 0; }
-        .shop-category-count { font-size: 0.7rem; color: var(--ink-muted); flex-shrink: 0; }
-        .category-add-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0.2rem 0.55rem; background: none; border: 1px dashed var(--border); border-radius: 99px; font-size: 0.68rem; color: var(--ink-muted); cursor: pointer; font-family: var(--font-body); transition: all 0.15s; white-space: nowrap; }
-        .category-add-btn:hover { border-color: var(--rust); color: var(--rust); }
+        .shop-category-name-btn:hover .edit-icon { opacity: 0.7; }
+        .category-edit-input { flex: 1; font-size: 0.95rem; font-weight: 600; color: var(--cat-fg, var(--ink)); font-family: var(--font-body); border: none; border-bottom: 1.5px solid currentColor; outline: none; background: transparent; padding: 0 0 2px; min-width: 0; }
+        .category-add-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0.22rem 0.55rem; background: rgba(255,255,255,0.55); border: none; border-radius: 99px; font-size: 0.72rem; font-weight: 500; color: var(--cat-fg, var(--ink-muted)); cursor: pointer; font-family: var(--font-body); transition: background 0.15s; white-space: nowrap; }
+        .category-add-btn:hover { background: rgba(255,255,255,0.9); }
+        .category-toggle-btn { background: none; border: none; color: var(--cat-fg, var(--ink-muted)); cursor: pointer; display: flex; align-items: center; padding: 2px; border-radius: 4px; opacity: 0.7; }
+        .category-toggle-btn:hover { opacity: 1; }
 
         .shop-items { display: flex; flex-direction: column; }
         .shop-item-wrap { position: relative; }
         .shop-item-wrap.item-dragging { opacity: 0.35; }
-        .shop-item-wrap.drop-before-item::before { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; margin-bottom:1px; }
-        .shop-item-wrap.drop-after-item::after { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; margin-top:1px; }
-        .shop-item { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0.35rem; border-radius: 5px; border-bottom: 1px solid var(--parchment); transition: background 0.1s; }
-        .shop-item:hover { background: var(--parchment); }
-        .shop-item.is-checked { opacity: 0.42; }
-        .item-drag-handle { cursor: grab; color: var(--border); display: flex; align-items: center; flex-shrink: 0; padding: 2px; margin-top: 4px; border-radius: 3px; transition: color 0.15s; }
+        .shop-item-wrap.drop-before-item::before { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; }
+        .shop-item-wrap.drop-after-item::after { content:''; display:block; height:2px; background:var(--rust); border-radius:2px; }
+        .shop-item { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.42rem 0.85rem; border-bottom: 1px solid #F0EBE3; transition: background 0.1s; }
+        .shop-item-wrap:last-child .shop-item { border-bottom: none; }
+        .shop-item:hover { background: #FAF7F2; }
+        .shop-item.is-checked { opacity: 0.45; }
+        .item-drag-handle { cursor: grab; color: #C8BDB0; display: flex; align-items: center; flex-shrink: 0; padding: 2px; margin-top: 6px; border-radius: 3px; transition: color 0.15s; }
         .item-drag-handle:hover { color: var(--ink-muted); }
-        .shop-checkbox { width: 20px; height: 20px; border: 1.5px solid var(--border); border-radius: 5px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; background: white; cursor: pointer; margin-top: 2px; }
-        .shop-item.is-checked .shop-checkbox { background: var(--sage); border-color: var(--sage); }
+        .shop-checkbox { width: 20px; height: 20px; border: 1.5px solid #D5CBBF; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; background: white; cursor: pointer; margin-top: 3px; }
+        .shop-item.is-checked .shop-checkbox { background: #3D8B6E; border-color: #3D8B6E; }
         .shop-checkbox svg { display: none; }
         .shop-item.is-checked .shop-checkbox svg { display: block; }
         .shop-item-name-wrap { flex: 1; min-width: 0; }
-        .recipe-source-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 3px; margin-bottom: 2px; }
+        .recipe-source-line { display: inline-flex; align-items: center; gap: 3px; margin-top: 1px; padding: 0; border: none; background: none; font-family: var(--font-body); font-size: 0.72rem; font-weight: 500; color: #3B7CC4; line-height: 1.3; text-align: left; cursor: pointer; text-decoration: none; max-width: 100%; }
+        .recipe-source-line span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .recipe-source-line:hover { color: #245A96; }
+        .recipe-source-chevron { flex-shrink: 0; }
+        .recipe-source-line.is-open .recipe-source-chevron { transform: rotate(90deg); }
         .recipe-source-pip { box-sizing: border-box; display: inline-block; width: fit-content; max-width: 100%; font-size: 0.58rem; color: var(--ink-muted); background: var(--parchment); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; font-style: italic; }
         a.recipe-source-link { display: inline-block; text-decoration: none; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }
         a.recipe-source-link:hover { color: var(--rust); border-color: var(--rust); background: rgba(181,69,27,0.06); }
 
         /* Merged-item sub-lines: recipe pill above the original wording,
            indented to line up under the item name. Kept deliberately quiet. */
-        .shop-subitems { display: flex; flex-direction: column; gap: 4px; padding: 1px 0 5px calc(0.35rem + 11px + 0.5rem + 20px); }
+        .shop-subitems { display: flex; flex-direction: column; gap: 4px; padding: 2px 0.85rem 8px calc(0.85rem + 20px + 0.55rem + 3.4rem); }
         .shop-subitems.is-checked { opacity: 0.42; }
         .shop-subitem { display: flex; align-items: flex-start; gap: 0.45rem; padding: 1px 0; line-height: 1.4; }
         .shop-subitem-handle { display: flex; align-items: center; color: var(--ink-muted); opacity: 0; cursor: grab; flex-shrink: 0; transition: opacity 0.12s; touch-action: none; margin-top: 2px; }
@@ -1223,12 +1310,12 @@ export default function ShoppingListClient() {
         .all-done { display: flex; align-items: center; gap: 0.75rem; padding: 1.25rem; background: var(--sage-light); border: 1px solid #cdd6c3; border-radius: 10px; margin: 1rem 0; }
         .all-done-emoji { font-size: 1.5rem; }
         .all-done strong { display: block; color: var(--sage); font-size: 0.95rem; margin-bottom: 2px; }
-        .shop-item-name { font-size: clamp(16px, 0.9rem, 18px); color: var(--ink); display: block; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; outline: none; transition: background 0.12s, box-shadow 0.12s; cursor: text; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.35; }
+        .shop-item-name { font-size: 16px; font-weight: 600; color: var(--ink); display: block; border-radius: 3px; padding: 1px 2px; margin: -1px -2px; outline: none; transition: background 0.12s, box-shadow 0.12s; cursor: text; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.3; }
         .shop-item-name.checked-text { text-decoration: line-through; }
         .shop-item-name[contenteditable="true"]:hover { background: rgba(181,69,27,0.06); }
         .shop-item-name[contenteditable="true"]:focus { background: white; box-shadow: 0 0 0 1.5px var(--rust); }
-        .shop-item-amount-wrap { flex-shrink: 0; padding-top: 1px; }
-        .shop-item-amount { font-family: var(--font-display); font-size: clamp(16px, 0.95rem, 18px); color: var(--rust); white-space: nowrap; display: block; border-radius: 3px; padding: 2px 5px; margin: -2px -5px; outline: none; min-width: 28px; text-align: right; transition: background 0.12s, box-shadow 0.12s; cursor: text; }
+        .shop-item-amount-wrap { flex: 0 0 3.4rem; width: 3.4rem; padding-top: 3px; }
+        .shop-item-amount { font-family: var(--font-body); font-size: 16px; font-weight: 500; color: var(--ink-muted); white-space: nowrap; display: block; border-radius: 3px; padding: 1px 2px; margin: -1px -2px; outline: none; min-width: 0; text-align: left; transition: background 0.12s, box-shadow 0.12s; cursor: text; }
         .shop-item-amount[contenteditable="true"]:empty::before { content: attr(data-placeholder); color: var(--border); font-family: var(--font-body); font-size: 0.78rem; }
         .shop-item-amount[contenteditable="true"]:hover { background: rgba(181,69,27,0.06); }
         .shop-item-amount[contenteditable="true"]:focus { background: white; box-shadow: 0 0 0 1.5px var(--rust); }
@@ -1280,12 +1367,19 @@ export default function ShoppingListClient() {
         .shop-item-name[contenteditable="true"]:focus { word-break: break-word; }
 
         /* Mobile */
+        @media (max-width: 900px) {
+          .shop-progress-fixed { padding: 0.5rem 1.5rem; }
+          .shop-page { padding-top: 1.5rem; }
+          .shop-page.has-progress { padding-top: 48px; }
+        }
         @media (max-width: 600px) {
           .sl-selector-row { margin-bottom: 0.4rem; }
-          .shop-item { padding: 0.4rem 0.2rem; gap: 0.35rem; }
-          .shop-item-name { font-size: 0.82rem; }
-          .shop-item-amount { font-size: 0.85rem; }
-          .shop-category-header { padding: 0.25rem 0.2rem 0.4rem; }
+          .shop-progress-fixed { padding: calc(0.45rem + env(safe-area-inset-top, 0px)) 0.9rem 0.45rem; }
+          .shop-page { padding-top: 1rem; }
+          .shop-page.has-progress { padding-top: 44px; }
+          .shop-item { padding: 0.38rem 0.7rem; gap: 0.4rem; }
+          .shop-item-amount-wrap { flex-basis: 3rem; width: 3rem; }
+          .shop-category-header { padding: 0.55rem 0.7rem; }
           .edit-hint { display: none; }
         }
 
@@ -1305,6 +1399,14 @@ function DragHandle({ size = 12 }: { size?: number }) {
       <circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/>
       <circle cx="3" cy="9" r="1.5"/><circle cx="9" cy="9" r="1.5"/>
       <circle cx="3" cy="15" r="1.5"/><circle cx="9" cy="15" r="1.5"/>
+    </svg>
+  );
+}
+
+function GripLines() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M4 8h16M4 12h16M4 16h16"/>
     </svg>
   );
 }

@@ -132,6 +132,12 @@ body {
   width: 100%;
 }
 
+/* Shopping pins a progress bar to the viewport; drop the usual top pad so
+   the bar can sit flush with the top of the column. */
+.app-shell.is-shopping .main-content {
+  padding-top: 0;
+}
+
 /* Planner fills the visible viewport so the week cannot scroll the document
    and so day-row heights stay still when the mobile URL bar shows or hides. */
 html:has(.app-shell.is-planner),
@@ -1129,6 +1135,9 @@ select.settings-select {
   .main-content {
     padding: 1.5rem;
   }
+  .app-shell.is-shopping .main-content {
+    padding-top: 0;
+  }
   .main-content.is-planner {
     padding: 0.85rem 1.25rem 0.85rem;
   }
@@ -1246,6 +1255,9 @@ select.settings-select {
     padding: 1rem 0.9rem;
     padding-bottom: var(--bottom-nav-height);
   }
+  .app-shell.is-shopping .main-content {
+    padding-top: 0;
+  }
   .main-content.is-planner {
     padding: 0.45rem 0.75rem var(--bottom-nav-height);
   }
@@ -1311,10 +1323,8 @@ select.settings-select {
   .week-nav .btn { padding: 0.35rem 0.6rem; font-size: 0.75rem; }
 
   /* Shopping list */
-  .shop-item { padding: 0.4rem 0.25rem; gap: 0.35rem; }
-  .shop-item-name { font-size: 0.82rem; }
-  .shop-item-amount { font-size: 0.85rem; }
-  .shop-category-header { padding: 0.25rem 0.2rem 0.4rem; }
+  .shop-item { padding: 0.38rem 0.7rem; gap: 0.4rem; }
+  .shop-category-header { padding: 0.55rem 0.7rem; }
 
   /* Forms — stack & prevent iOS focus-zoom (<16px inputs zoom the page) */
   .form-grid { grid-template-columns: 1fr; }
@@ -1367,6 +1377,9 @@ select.settings-select {
   .main-content {
     padding: 0.75rem;
     padding-bottom: var(--bottom-nav-height);
+  }
+  .app-shell.is-shopping .main-content {
+    padding-top: 0;
   }
   .main-content.is-planner {
     padding: 0.35rem 0.65rem var(--bottom-nav-height);
