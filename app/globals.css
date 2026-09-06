@@ -143,6 +143,7 @@ body:has(.app-shell.is-planner) {
   height: 100svh;
   min-height: 0;
   overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
 }
 .main-content.is-planner {
   display: flex;
@@ -1161,6 +1162,15 @@ select.settings-select {
   .page-header-leading .page-title {
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .app-shell.is-planner {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .app-shell.is-planner > .main-content {
+    grid-area: 1 / 1;
+    height: 100%;
+    min-height: 0;
   }
 
   .recipe-grid {

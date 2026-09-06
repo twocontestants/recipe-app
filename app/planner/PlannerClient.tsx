@@ -1499,8 +1499,9 @@ export default function PlannerClient() {
         .pl-cal-tab:hover { color: var(--ink); }
         .pl-cal-tab:hover .pl-cal-tab-handle { background: var(--ink-muted); }
         .pl-nav-btn {
-          background: none; border: none; border-radius: 8px; padding: 0.28rem;
+          background: none; border: none; border-radius: 8px; padding: 0.35rem 0.2rem;
           cursor: pointer; color: var(--ink-muted); display: flex; align-items: center;
+          justify-content: center; min-width: 28px; min-height: 32px;
           transition: all 0.15s;
         }
         .pl-nav-btn:hover { background: var(--parchment); color: var(--ink); }
