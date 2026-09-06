@@ -1799,13 +1799,15 @@ export default function PlannerClient() {
         .pl-week-shift {
           display: flex; align-items: center; justify-content: center; gap: 0.4rem;
           flex-shrink: 0; width: 100%;
-          margin: 0; padding: 0.45rem 0.7rem;
-          border: none; border-radius: 10px;
-          background: none; color: var(--ink-muted);
+          margin: 0.1rem 0; padding: 0.5rem 0.75rem;
+          border: 1px solid var(--border); border-radius: 99px;
+          background: rgba(255,255,255,0.55); color: var(--ink-soft);
           font-family: var(--font-body); font-size: 0.78rem; font-weight: 600;
-          cursor: pointer; transition: background 0.15s, color 0.15s;
+          cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
         }
-        .pl-week-shift:hover:not(:disabled) { background: var(--parchment); color: var(--ink); }
+        .pl-week-shift:hover:not(:disabled) {
+          background: var(--parchment); color: var(--ink); border-color: var(--ink-muted);
+        }
         .pl-week-shift:disabled { opacity: 0.55; cursor: wait; }
         .pl-day {
           flex: 1 1 0;
