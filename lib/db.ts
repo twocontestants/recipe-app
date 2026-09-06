@@ -613,7 +613,7 @@ export async function createRecipe(
   // Auto-tag on save: infer the primary protein when the caller didn't set one,
   // and enrich tags. This is the universal chokepoint, so every recipe — scraped,
   // pasted, or hand-entered — gets tagged even if the client sent nothing.
-  const auto = autoTag(data.title, data.ingredients || [], data.tags || []);
+  const auto = autoTag(data.title, data.ingredients || [], data.tags || [], data.steps || []);
   const primaryProtein = data.primary_protein || auto.primary_protein || null;
   const tags = auto.tags;
   const visibility = parseVisibility(data.visibility);

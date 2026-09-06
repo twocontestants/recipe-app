@@ -14,6 +14,7 @@
  */
 
 import type { Ingredient } from './db';
+import { inferProtein } from './autotag';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -81,20 +82,6 @@ const VULGAR: Record<string, number> = {
   '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875,
 };
 
-// Protein keywords for auto-tagging
-const PROTEIN_KEYWORDS: Record<string, string[]> = {
-  chicken:  ['chicken', 'hen', 'poultry'],
-  beef:     ['beef', 'steak', 'mince', 'brisket', 'ribeye', 'sirloin'],
-  pork:     ['pork', 'bacon', 'ham', 'pancetta', 'prosciutto', 'chorizo', 'sausage'],
-  lamb:     ['lamb', 'mutton'],
-  fish:     ['salmon', 'tuna', 'cod', 'snapper', 'barramundi', 'tilapia', 'trout', 'fish', 'flathead', 'bream', 'whiting'],
-  seafood:  ['prawn', 'shrimp', 'crab', 'lobster', 'scallop', 'mussel', 'squid', 'calamari', 'oyster', 'clam', 'seafood'],
-  tofu:     ['tofu', 'tempeh'],
-  eggs:     ['egg', 'eggs'],
-  legumes:  ['lentil', 'chickpea', 'kidney bean', 'black bean', 'split pea'],
-  dairy:    ['ricotta', 'halloumi', 'haloumi', 'paneer'],
-};
-
 // Section header patterns
 const INGREDIENT_HEADERS = /^(ingredients?|what you'?ll? need|shopping list|you(?:'ll)? need|for the \w+):?\s*$/i;
 const METHOD_HEADERS     = /^(method|steps?|instructions?|directions?|preparation|how to(?: make)?|to make):?\s*$/i;
@@ -131,8 +118,8 @@ export function parseRecipeText(raw: string): ParsedRecipe {
   // ── 6. Parse steps ──
   const steps = parseSteps(sections.methodLines);
 
-  // ── 7. Detect primary protein ──
-  const primary_protein = detectProtein(ingredients);
+  // ── 7. Detect primary protein from title, ingredients, and method ──
+  const primary_protein = inferProtein(title, ingredients, steps) ?? null;
 
   return {
     title,
@@ -509,18 +496,6 @@ function parseSteps(lines: string[]): string[] {
   }
 
   return merged;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Protein detection
-// ─────────────────────────────────────────────────────────────────────────────
-
-function detectProtein(ingredients: Ingredient[]): string | null {
-  const text = ingredients.map(i => i.name.toLowerCase()).join(' ');
-  for (const [protein, keywords] of Object.entries(PROTEIN_KEYWORDS)) {
-    if (keywords.some(kw => text.includes(kw))) return protein;
-  }
-  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

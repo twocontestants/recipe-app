@@ -612,7 +612,7 @@ export default function RecipesPage() {
               </div>
               <div className="form-group">
                 <label>Tags (comma separated)</label>
-                <input type="text" value={form.tags.join(', ')} onChange={e => setForm(p => ({ ...p, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }))} placeholder="italian, pasta, quick" />
+                <input type="text" value={form.tags.join(', ')} onChange={e => setForm(p => ({ ...p, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }))} placeholder="spicy, oven, slow-cooker" />
               </div>
             </div>
 
