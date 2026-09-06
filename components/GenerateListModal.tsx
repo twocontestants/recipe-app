@@ -22,6 +22,11 @@ interface MealEntry {
   recipe_title: string;
   day_of_week: number;
   week_start: string;
+  planned_on: string;
+}
+
+function mealKey(m: { planned_on: string; recipe_id: string }): string {
+  return `${m.planned_on}::${m.recipe_id}`;
 }
 
 interface Props {
@@ -81,6 +86,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
               recipe_title: p.recipe?.title ?? 'Unknown',
               day_of_week: storedDay ?? coords.dayOfWeek,
               week_start: coords.weekStart,
+              planned_on: iso,
             });
           }
         }
@@ -90,7 +96,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       // Default-select all meals from the defaultWeekStart (or this week)
       const defaultWk = defaultWeekStart ?? thisWeek;
       const defaultSelected = new Set<string>(
-        (map[defaultWk] ?? []).map(m => `${m.week_start}::${m.recipe_id}::${m.day_of_week}`)
+        (map[defaultWk] ?? []).map(m => mealKey(m))
       );
       setSelected(defaultSelected);
       setLoading(false);
@@ -107,7 +113,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
   };
 
   const toggleWeek = (wk: string) => {
-    const wkMeals = (meals[wk] ?? []).map(m => `${m.week_start}::${m.recipe_id}::${m.day_of_week}`);
+    const wkMeals = (meals[wk] ?? []).map(m => mealKey(m));
     const allSelected = wkMeals.every(k => selected.has(k));
     setSelected(prev => {
       const next = new Set(prev);
@@ -127,12 +133,18 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       const selectedMeals: MealEntry[] = [];
       for (const wk of weeks) {
         for (const m of meals[wk] ?? []) {
-          const key = `${m.week_start}::${m.recipe_id}::${m.day_of_week}`;
+          const key = mealKey(m);
           if (selected.has(key)) selectedMeals.push(m);
         }
       }
       const recipe_ids = [...new Set(selectedMeals.map(m => m.recipe_id))];
       const week_starts = [...new Set(selectedMeals.map(m => m.week_start))];
+      const mealsPayload = selectedMeals.map(m => ({
+        recipe_id: m.recipe_id,
+        planned_on: m.planned_on,
+        week_start: m.week_start,
+        day_of_week: m.day_of_week,
+      }));
 
       // Name: "Week of X" or "Multiple weeks" + time
       const now = new Date();
@@ -144,7 +156,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
 
       const res = await fetch('/api/shopping-lists', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, subtitle, week_starts, recipe_ids }),
+        body: JSON.stringify({ name, subtitle, week_starts, recipe_ids, meals: mealsPayload }),
       });
       if (!res.ok) throw new Error();
       const list = await res.json();
@@ -223,7 +235,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
               <>
                 {weeks.map(wk => {
                   const wkMeals = meals[wk] ?? [];
-                  const wkKeys = wkMeals.map(m => `${m.week_start}::${m.recipe_id}::${m.day_of_week}`);
+                  const wkKeys = wkMeals.map(m => mealKey(m));
                   const allSel = wkKeys.length > 0 && wkKeys.every(k => selected.has(k));
                   return (
                     <div key={wk} className="glm-week-section">
@@ -238,7 +250,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
                       {wkMeals.length === 0 ? (
                         <p className="glm-empty">Nothing planned for this week</p>
                       ) : wkMeals.map(m => {
-                        const key = `${m.week_start}::${m.recipe_id}::${m.day_of_week}`;
+                        const key = mealKey(m);
                         const isSel = selected.has(key);
                         return (
                           <div key={key} className={`glm-meal-row ${isSel ? 'is-selected' : ''}`} onClick={() => toggleMeal(key)}>

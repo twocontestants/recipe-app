@@ -1,4 +1,5 @@
 import type { MealPlan } from './db';
+import { plannedOnOf } from './plannerDate';
 
 // A single recipe's original contribution to a merged shopping item. `name` is
 // exactly what that recipe wrote ("Large onion, diced"); the merged item keeps
@@ -218,6 +219,59 @@ export function aggregateContributions(contributions: { amount: string; unit: st
   if (totalG !== undefined) return { totalAmount: formatWeight(totalG), unit: totalG >= 1000 ? 'kg' : 'g' };
   if (totalMl !== undefined) return { totalAmount: formatVolume(totalMl), unit: totalMl >= 1000 ? 'L' : 'ml' };
   return { totalAmount: totalCount ? formatDecimal(totalCount) : '', unit: countUnit || '' };
+}
+
+/** One ticked dinner from the generate-list UI (calendar day + recipe). */
+export type ShoppingDinnerPick = {
+  recipe_id: string;
+  planned_on?: string | Date | null;
+  week_start?: string | Date | null;
+  day_of_week?: unknown;
+};
+
+function dinnerPickKey(pick: ShoppingDinnerPick): string {
+  if (!pick.recipe_id) return '';
+  const on = plannedOnOf(pick);
+  return on ? `${on}::${pick.recipe_id}` : '';
+}
+
+/**
+ * Keep only the dinners the cook ticked.
+ * `recipe_ids` + whole weeks is too coarse: the same recipe last week (or later
+ * in the same storage week) would otherwise be counted again.
+ */
+export function mealPlansForSelectedDinners<T extends ShoppingDinnerPick>(
+  plans: T[],
+  picks: ShoppingDinnerPick[],
+): T[] {
+  const wanted = new Set<string>();
+  for (const pick of picks) {
+    const key = dinnerPickKey(pick);
+    if (key) wanted.add(key);
+  }
+  if (!wanted.size) return [];
+  return plans.filter(plan => wanted.has(dinnerPickKey(plan)));
+}
+
+export function parseShoppingDinnerPicks(raw: unknown): ShoppingDinnerPick[] {
+  if (!Array.isArray(raw)) return [];
+  const picks: ShoppingDinnerPick[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as {
+      recipe_id?: unknown;
+      planned_on?: unknown;
+      week_start?: unknown;
+      day_of_week?: unknown;
+    };
+    if (typeof row.recipe_id !== 'string' || !row.recipe_id) continue;
+    const pick: ShoppingDinnerPick = { recipe_id: row.recipe_id };
+    if (typeof row.planned_on === 'string' && row.planned_on) pick.planned_on = row.planned_on;
+    if (typeof row.week_start === 'string' && row.week_start) pick.week_start = row.week_start;
+    if (row.day_of_week !== undefined) pick.day_of_week = row.day_of_week;
+    picks.push(pick);
+  }
+  return picks;
 }
 
 export function generateShoppingList(mealPlans: MealPlan[], categoryOverrides?: Record<string, string>): ShoppingItem[] {

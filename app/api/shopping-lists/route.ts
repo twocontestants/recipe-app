@@ -5,7 +5,7 @@ import {
   getCategoryDictionary
 } from '@/lib/db';
 import { migrateShoppingListShape } from '@/lib/shoppingList';
-import { generateShoppingList } from '@/lib/shopping';
+import { generateShoppingList, mealPlansForSelectedDinners, parseShoppingDinnerPicks } from '@/lib/shopping';
 import type { ShoppingOp } from '@/lib/shoppingOps';
 import { isAuthUser, requireUser } from '@/lib/session';
 
@@ -36,13 +36,18 @@ export async function POST(req: NextRequest) {
     const user = await requireUser(req);
     if (!isAuthUser(user)) return user;
     const body = await req.json();
-    const { name, subtitle, week_starts, recipe_ids } = body;
+    const { name, subtitle, week_starts, recipe_ids, meals } = body;
     if (!name || !recipe_ids?.length) {
       return NextResponse.json({ error: 'name and recipe_ids required' }, { status: 400 });
     }
 
     const allPlans = await getMealPlansForWeeks(week_starts ?? [], user.id, { includeMethod: true });
-    const filtered = allPlans.filter(p => recipe_ids.includes(p.recipe_id));
+    const picks = parseShoppingDinnerPicks(meals);
+    // Prefer the ticked dinners. Filtering the week(s) by recipe_id alone would
+    // also pull the same recipe from last week (or another day in the storage week).
+    const filtered = picks.length
+      ? mealPlansForSelectedDinners(allPlans, picks)
+      : allPlans.filter(p => recipe_ids.includes(p.recipe_id));
     const categoryDict = await getCategoryDictionary(user.id);
     const items = generateShoppingList(filtered, categoryDict);
 

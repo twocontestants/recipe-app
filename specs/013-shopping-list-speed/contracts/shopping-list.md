@@ -12,7 +12,7 @@ No query `id`: JSON array of meta objects `{ id, name, subtitle, generated_at, r
 
 ## POST /api/shopping-lists
 
-Unchanged request body (`name`, `subtitle`, `week_starts`, `recipe_ids`). Server-side meal read MUST be one query for all `week_starts` and MUST include ingredients and steps. Generated contributions SHOULD include `source_url` when the recipe has one.
+Request body: `name`, `subtitle`, `week_starts`, `recipe_ids`, and `meals` (ticked dinners: `{ recipe_id, planned_on }`). Server-side meal read MUST be one query for all `week_starts` and MUST include ingredients and steps. Generation MUST count only the ticked dinners, not every planned instance of those recipes in the fetched weeks. Generated contributions SHOULD include `source_url` when the recipe has one.
 
 ## PUT / PATCH / DELETE /api/shopping-lists?id=
 
