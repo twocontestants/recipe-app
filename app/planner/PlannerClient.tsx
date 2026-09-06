@@ -3,26 +3,28 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
-import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import PlannerCardMenu from '@/components/PlannerCardMenu';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
-import HiddenDatePicker, { openNativeDatePicker } from '@/components/HiddenDatePicker';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, mergePlannerMeals } from '@/lib/loadPlannerMonth';
-import { countPlannedDays, displayWeekDateRange, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
+import { calendarDayClass, displayWeekDateRange, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
+  monthCalendarCells,
   monthKeyOf,
   monthRange,
+  monthTitle,
   monthsForDisplayWeek,
+  shiftMonthKey,
 } from '@/lib/plannerMonth';
 import {
+  DAY_SHORT,
   dayDateOf,
   displayDayIndex,
   displayDays,
@@ -93,16 +95,6 @@ function getDayDate(weekStart: Date, i: number): Date {
   const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d;
 }
 
-// ── Suggestion logic ──────────────────────────────────────────────────────────
-
-function suggestForDay(recipes: Recipe[], usedProteins: (string|null|undefined)[], count = 3): Recipe[] {
-  if (!recipes.length) return [];
-  const used = new Set(usedProteins.filter(Boolean));
-  const fresh = recipes.filter(r => !used.has(r.primary_protein ?? ''));
-  const pool = fresh.length >= count ? fresh : [...fresh, ...recipes.filter(r => !fresh.includes(r))];
-  return [...pool].sort(() => Math.random() - 0.5).slice(0, count);
-}
-
 // ── Magic settings ────────────────────────────────────────────────────────────
 
 interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; preferTags: string; excludeTags: string; }
@@ -116,14 +108,14 @@ export default function PlannerClient() {
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   const [weekStart, setWeekStart] = useState<Date>(() => startOfDisplayWeek(new Date(), 'monday'));
   const [selectedDayIndex, setSelectedDayIndex] = useState(() => displayDayIndex(new Date(), 'monday'));
-  const jumpDateRef = useRef<HTMLInputElement>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarMonthKey, setCalendarMonthKey] = useState(() => monthKeyOf(localDateIso(new Date())));
   const dayKeys = displayDays(weekStartsOn);
   const DAYS = dayKeys.map(k => k.charAt(0).toUpperCase() + k.slice(1));
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
-  const [showGenerateList, setShowGenerateList] = useState(false);
 
   // Picker
   const [picker, setPicker] = useState<{ dayIndex: number; replacingId?: string } | null>(null);
@@ -136,8 +128,6 @@ export default function PlannerClient() {
   const [showMagic, setShowMagic] = useState(false);
   const [magicSettings, setMagicSettings] = useState<MagicSettings>({ variety: 'medium', servings: 4, preferTags: '', excludeTags: '' });
   const [magicLoading, setMagicLoading] = useState(false);
-
-  const [suggestions, setSuggestions] = useState<Record<number, Recipe[]>>({});
 
   // Card action menu (view / edit / replace / move / delete)
   const [cardMenu, setCardMenu] = useState<{
@@ -154,7 +144,6 @@ export default function PlannerClient() {
   // Note save debounce timers
   const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
-  const todayRef = useRef<HTMLDivElement | null>(null);
   const dayEls = useRef<(HTMLDivElement | null)[]>([]);
   const railEls = useRef<(HTMLDivElement | null)[]>([]);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -308,25 +297,6 @@ export default function PlannerClient() {
     return () => { cancelled = true; };
   }, [picker, showMagic, recipes.length]);
 
-  useEffect(() => {
-    if (!recipes.length) {
-      setSuggestions({});
-      return;
-    }
-    const next: Record<number, Recipe[]> = {};
-    for (let d = 0; d < 7; d++) {
-      const dayIso = formatDate(getDayDate(weekStart, d));
-      const dayMeals = mealPlans.filter((m: MealPlan) =>
-        mealOnDate(m, dayIso) && m.meal_type === 'dinner',
-      );
-      if (!dayMeals.length) {
-        const otherProteins = mealPlans.filter((m: MealPlan) => !mealOnDate(m, dayIso)).map(m => m.recipe?.primary_protein);
-        next[d] = suggestForDay(recipes, otherProteins, 3);
-      }
-    }
-    setSuggestions(next);
-  }, [recipes, mealPlans, weekStart]);
-
   // Keep the recipe picker inside the visual viewport so the mobile keyboard
   // shrinks the sheet instead of pushing it off-screen.
   useLayoutEffect(() => {
@@ -411,12 +381,6 @@ export default function PlannerClient() {
       overlay.classList.remove('is-sheet');
     };
   }, [picker]);
-
-  useEffect(() => {
-    if (!loading && todayRef.current && viewingThisWeek) {
-      setTimeout(() => todayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-    }
-  }, [loading]);
 
   // ── Meal operations ─────────────────────────────────────────────────────────
 
@@ -946,123 +910,163 @@ export default function PlannerClient() {
     return !pickerSearch || r.title.toLowerCase().includes(pickerSearch.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(pickerSearch.toLowerCase()));
   });
 
-  const totalMeals = countPlannedDays(mealPlans, weekStartIso);
+  const todayIso = formatDate(new Date());
+  const selectedIso = formatDate(getDayDate(weekStart, selectedDayIndex));
+  const dayIsPlanned = (iso: string) =>
+    mealPlans.some(m => mealOnDate(m, iso) && m.meal_type === 'dinner');
+
+  const loadCalendarMonth = (key: string) => {
+    void ensureMonths([key, ...adjacentMonthKeys(key)])
+      .then(all => setMealPlans(all))
+      .catch(() => { /* keep what is already on screen */ });
+  };
+
+  const openCalendar = () => {
+    const key = monthKeyOf(selectedIso);
+    setCalendarMonthKey(key);
+    setShowCalendar(true);
+    loadCalendarMonth(key);
+  };
+
+  const shiftCalendar = (months: number) => {
+    const next = shiftMonthKey(calendarMonthKey, months);
+    setCalendarMonthKey(next);
+    loadCalendarMonth(next);
+  };
+
+  const jumpToIso = (iso: string) => {
+    const d = parseLocalIso(iso);
+    setWeekStart(startOfDisplayWeek(d, weekStartsOn));
+    setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
+    setShowCalendar(false);
+  };
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="pl-root">
 
-      {/* Top bar */}
-      <div className="pl-topbar">
-        <div className="pl-topbar-left">
-          <h1 className="pl-title">Meal Planner</h1>
-          <div className="pl-week-nav">
-            <button className="pl-nav-btn" aria-label="Previous week" onClick={() => {
-              setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n; });
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+      {showCalendar && (
+        <button
+          type="button"
+          className="pl-cal-backdrop"
+          aria-label="Close calendar"
+          onClick={() => setShowCalendar(false)}
+        />
+      )}
+
+      <div className="pl-nav">
+        <div className="pl-nav-bar">
+          <div className="pl-nav-left">
+            <button
+              type="button"
+              className={`pl-week-toggle${showCalendar ? ' is-open' : ''}`}
+              aria-expanded={showCalendar}
+              aria-label={showCalendar ? 'Close calendar' : 'Open calendar'}
+              onClick={() => { if (showCalendar) setShowCalendar(false); else openCalendar(); }}
+            >
+              <span className="pl-week-label">
+                {showCalendar ? monthTitle(calendarMonthKey) : formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}
+              </span>
+              <svg className="pl-week-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
             </button>
-            <span className="pl-week-label">{formatWeekLabel(formatDate(weekStart), new Date(), weekStartsOn)}</span>
-            <button className="pl-nav-btn" aria-label="Next week" onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n; })}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-            </button>
-            {!viewingThisWeek && (
-              <button className="pl-today-btn" onClick={() => {
-                setWeekStart(startOfDisplayWeek(new Date(), weekStartsOn));
-                setSelectedDayIndex(displayDayIndex(new Date(), weekStartsOn));
-              }}>Today</button>
+            {!viewingThisWeek && !showCalendar && (
+              <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
             )}
           </div>
-          <span className="pl-count">{totalMeals} of 7 planned</span>
-        </div>
-        <div className="pl-topbar-right">
-          <button className="pl-icon-btn" title="Jump to a date" aria-label="Jump to a date" onClick={() => openNativeDatePicker(jumpDateRef.current)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <path d="M16 2v4M8 2v4M3 10h18"/>
+          <button type="button" className="pl-magic-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
             </svg>
-          </button>
-          <HiddenDatePicker
-            ariaLabel="Jump to a date"
-            inputRef={jumpDateRef}
-            className="pl-jump-date"
-            onPick={iso => {
-              const d = parseLocalIso(iso);
-              setWeekStart(startOfDisplayWeek(d, weekStartsOn));
-              setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
-            }}
-          />
-          <button className="pl-icon-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>
-          </button>
-          <button className="pl-icon-btn" title="Shopping list" aria-label="Shopping list" onClick={() => setShowGenerateList(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 6h15l-1.5 9h-12z"/>
-              <circle cx="9" cy="20" r="1.4"/>
-              <circle cx="18" cy="20" r="1.4"/>
-              <path d="M6 6L5 3H2"/>
-            </svg>
-          </button>
-          <button
-            className="pl-icon-btn is-add"
-            title="Add dinner"
-            aria-label="Add dinner"
-            onClick={() => { setPicker({ dayIndex: selectedDayIndex }); setPickerSearch(''); }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Auto-plan</span>
           </button>
         </div>
+
+        {showCalendar ? (
+          <div className="pl-cal" role="dialog" aria-label="Month calendar">
+            <div className="pl-cal-toolbar">
+              <button type="button" className="pl-nav-btn" aria-label="Previous month" onClick={() => shiftCalendar(-1)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
+              <button type="button" className="pl-nav-btn" aria-label="Next month" onClick={() => shiftCalendar(1)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+            <div className="pl-cal-weekdays" aria-hidden="true">
+              {dayKeys.map(key => (
+                <span key={key}>{DAY_SHORT[key]}</span>
+              ))}
+            </div>
+            <div className="pl-cal-grid">
+              {monthCalendarCells(calendarMonthKey, weekStartsOn).map(cell => {
+                const date = parseLocalIso(cell.iso);
+                const planned = dayIsPlanned(cell.iso);
+                const isToday = cell.iso === todayIso;
+                const isSelected = cell.iso === selectedIso;
+                const weekday = date.toLocaleDateString('en-AU', { weekday: 'long' });
+                const longDate = date.toLocaleDateString('en-AU', { day: 'numeric', month: 'long' });
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    className={calendarDayClass({ inMonth: cell.inMonth, planned, today: isToday, selected: isSelected })}
+                    aria-current={isToday ? 'date' : undefined}
+                    aria-label={`${weekday} ${longDate}${isToday ? ', today' : ''}${planned ? ', planned' : ''}`}
+                    onClick={() => jumpToIso(cell.iso)}
+                  >
+                    {date.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="pl-week-strip" role="tablist" aria-label="Days this week">
+            {DAYS.map((dayName, dayIndex) => {
+              const date = getDayDate(weekStart, dayIndex);
+              const planned = getMealsForDay(dayIndex).length > 0;
+              const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
+              const isSelected = dayIndex === selectedDayIndex;
+              const short = DAY_SHORT[dayKeys[dayIndex]];
+              return (
+                <button
+                  key={dayIndex}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  className={weekChipClass({ planned, today: isToday, selected: isSelected })}
+                  aria-label={`${dayName} ${date.getDate()}, ${planned ? 'planned' : 'nothing planned'}`}
+                  onClick={() => setSelectedDayIndex(dayIndex)}
+                >
+                  <span className="pl-chip-wd">{short}</span>
+                  <span className="pl-chip-num">{date.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {loading ? (
         <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
       ) : (
         <>
-        <div className="pl-week-strip" role="tablist" aria-label="Days this week">
-          {DAYS.map((dayName, dayIndex) => {
-            const date = getDayDate(weekStart, dayIndex);
-            const planned = getMealsForDay(dayIndex).length > 0;
-            const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
-            const isSelected = dayIndex === selectedDayIndex;
-            const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
-            return (
-              <button
-                key={dayIndex}
-                type="button"
-                role="tab"
-                aria-selected={isSelected}
-                className={weekChipClass({ planned, today: isToday, selected: isSelected })}
-                aria-label={`${dayName} ${date.getDate()}, ${planned ? 'planned' : 'nothing planned'}`}
-                onClick={() => {
-                  setSelectedDayIndex(dayIndex);
-                  dayEls.current[dayIndex]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-              >
-                <span className="pl-chip-wd">{short}</span>
-                <span className="pl-chip-num">{date.getDate()}</span>
-              </button>
-            );
-          })}
-        </div>
-
         <div className={`pl-days${drag?.armed ? ' is-dragging' : ''}`}>
           {DAYS.map((dayName, dayIndex) => {
             const date = getDayDate(weekStart, dayIndex);
             const isToday = viewingThisWeek && dayIndex === todayDisplayIdx;
             const isPast = viewingThisWeek && dayIndex < todayDisplayIdx;
             const dayMeals = getMealsForDay(dayIndex);
-            const daySuggestions = suggestions[dayIndex] ?? [];
             const short = date.toLocaleDateString('en-AU', { weekday: 'short' });
             const dayNum = date.getDate();
 
             return (
               <div
                 key={dayIndex}
-                ref={el => {
-                  dayEls.current[dayIndex] = el;
-                  if (isToday) todayRef.current = el;
-                }}
+                ref={el => { dayEls.current[dayIndex] = el; }}
                 className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
               >
                 {dayMeals.length > 0 && (
@@ -1075,10 +1079,6 @@ export default function PlannerClient() {
                         prepTime: recipe?.prep_time,
                         servings: meal.servings || recipe?.servings,
                       });
-                      const tags = [
-                        recipe?.primary_protein,
-                        ...(recipe?.tags ?? []),
-                      ].filter((t, i, all): t is string => Boolean(t) && all.indexOf(t) === i).slice(0, 2);
                       return (
                         <div
                           key={meal.id}
@@ -1117,13 +1117,6 @@ export default function PlannerClient() {
                           <div className="pl-recipe-info">
                             <span className="pl-recipe-name">{recipe?.title}</span>
                             {meta && <div className="pl-recipe-meta">{meta}</div>}
-                            {tags.length > 0 && (
-                              <div className="pl-recipe-tags">
-                                {tags.map(t => (
-                                  <span key={t} className="pl-recipe-tag">{t}</span>
-                                ))}
-                              </div>
-                            )}
                           </div>
                           <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
                             <button
@@ -1144,12 +1137,6 @@ export default function PlannerClient() {
                         </div>
                       );
                     })}
-                    <button
-                      className="pl-add-another"
-                      onClick={() => { setPicker({ dayIndex }); setPickerSearch(''); }}
-                    >
-                      Add another
-                    </button>
                   </div>
                 )}
 
@@ -1168,34 +1155,22 @@ export default function PlannerClient() {
                         Add dinner
                       </span>
                     </button>
-                    {daySuggestions.length > 0 && (
-                      <div className="pl-suggestions">
-                        <span className="pl-suggestions-label">This week's suggestions</span>
-                        <div className="pl-suggestion-pills">
-                          {daySuggestions.map(r => (
-                            <button key={r.id} className="pl-suggestion-pill" onClick={() => addMeal(dayIndex, r.id)} title={r.title}>
-                              {r.primary_protein && <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: PROTEIN_COLORS[r.primary_protein] || '#ccc', display: 'inline-block' }} />}
-                              {r.title}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                <textarea
-                  className="pl-day-note"
-                  placeholder="Add a note… (e.g. out for dinner, use leftovers)"
-                  value={notes[dayIndex] ?? ''}
-                  onChange={e => handleNoteChange(dayIndex, e.target.value)}
-                  rows={1}
-                  onInput={e => {
-                    const el = e.currentTarget;
-                    el.style.height = 'auto';
-                    el.style.height = el.scrollHeight + 'px';
-                  }}
-                />
+                {notes[dayIndex] ? (
+                  <textarea
+                    className="pl-day-note"
+                    value={notes[dayIndex]}
+                    onChange={e => handleNoteChange(dayIndex, e.target.value)}
+                    rows={1}
+                    onInput={e => {
+                      const el = e.currentTarget;
+                      el.style.height = 'auto';
+                      el.style.height = el.scrollHeight + 'px';
+                    }}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -1402,16 +1377,6 @@ export default function PlannerClient() {
         </>
       )}
 
-      {/* Magic modal */}
-      {showGenerateList && (
-        <GenerateListModal
-          onClose={() => setShowGenerateList(false)}
-          onCreated={(id) => { setShowGenerateList(false); window.location.href = '/shopping-list'; }}
-          defaultWeekStart={formatDate(weekStart)}
-          weekStartsOn={weekStartsOn}
-        />
-      )}
-
       {showMagic && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
           <div className="magic-modal">
@@ -1478,51 +1443,146 @@ export default function PlannerClient() {
       )}
 
       <style>{`
-        .pl-root { max-width: 680px; }
+        .pl-root {
+          position: relative;
+          max-width: 680px;
+          display: flex; flex-direction: column;
+          height: calc(100dvh - var(--bottom-nav-height, 0px) - 2rem);
+          min-height: 0;
+        }
 
-        /* Top bar */
-        .pl-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.25rem; }
-        .pl-title { font-family: var(--font-body); font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--ink); margin-bottom: 0.35rem; letter-spacing: -0.02em; }
-        .pl-week-nav { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-        .pl-nav-btn { background: none; border: none; border-radius: 8px; padding: 0.3rem; cursor: pointer; color: var(--ink-muted); display: flex; align-items: center; transition: all 0.15s; }
+        /* Absolute nav panel — stays on top of the week */
+        .pl-nav {
+          position: absolute; top: 0; left: 0; right: 0; z-index: 40;
+          background: var(--cream);
+          padding: 0.15rem 0 0.35rem;
+          box-shadow: 0 8px 18px -12px rgba(26,22,18,0.35);
+        }
+        .pl-cal-backdrop {
+          position: absolute; inset: 0; z-index: 35;
+          border: none; background: rgba(26,22,18,0.18);
+          cursor: pointer;
+        }
+        .pl-nav-bar {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 0.5rem; min-height: 32px;
+        }
+        .pl-nav-left { display: flex; align-items: center; gap: 0.25rem; min-width: 0; }
+        .pl-week-toggle {
+          display: inline-flex; align-items: center; gap: 0.28rem;
+          background: none; border: none; padding: 0.2rem 0.15rem;
+          cursor: pointer; font-family: var(--font-body); color: var(--ink);
+          min-width: 0;
+        }
+        .pl-week-label {
+          font-size: 0.92rem; font-weight: 650; letter-spacing: -0.01em;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .pl-week-chevron { flex-shrink: 0; color: var(--ink-muted); transition: transform 0.15s; }
+        .pl-week-toggle.is-open .pl-week-chevron { transform: rotate(180deg); }
+        .pl-nav-btn {
+          background: none; border: none; border-radius: 8px; padding: 0.28rem;
+          cursor: pointer; color: var(--ink-muted); display: flex; align-items: center;
+          transition: all 0.15s;
+        }
         .pl-nav-btn:hover { background: var(--parchment); color: var(--ink); }
-        .pl-week-label { font-size: 0.95rem; color: var(--ink-muted); padding: 0 0.2rem; font-weight: 500; }
-        .pl-today-btn { background: none; border: none; font-size: 0.78rem; color: var(--sage); cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px; font-family: var(--font-body); transition: all 0.15s; }
-        .pl-today-btn:hover { background: var(--sage-light); }
-        .pl-topbar-right { position: relative; display: flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
-        .pl-count { font-size: 0.75rem; color: var(--ink-muted); margin-right: 0.35rem; }
-        .pl-icon-btn { width: 38px; height: 38px; border: none; background: none; border-radius: 10px; color: var(--ink-soft); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s, color 0.15s; }
-        .pl-icon-btn:hover { background: var(--parchment); color: var(--ink); }
-        .pl-icon-btn.is-add { background: var(--sage-light); color: var(--sage); }
-        .pl-icon-btn.is-add:hover { background: var(--sage); color: white; }
-        .pl-jump-date { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        .pl-today-btn {
+          background: none; border: none; font-size: 0.72rem; font-weight: 600;
+          color: var(--rust); cursor: pointer; padding: 0.2rem 0.4rem;
+          border-radius: 99px; font-family: var(--font-body); transition: all 0.15s;
+        }
+        .pl-today-btn:hover { background: rgba(181,69,27,0.1); }
+        .pl-magic-btn {
+          display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+          height: 30px; padding: 0 0.7rem; flex-shrink: 0;
+          border: none; border-radius: 99px;
+          background: var(--ink); color: var(--cream);
+          font-family: var(--font-body); font-size: 0.72rem; font-weight: 600;
+          cursor: pointer; transition: background 0.15s;
+        }
+        .pl-magic-btn:hover { background: var(--rust); }
 
-        /* Week strip */
-        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.35rem; margin-bottom: 1.25rem; }
+        /* Compact week navbar */
+        .pl-week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
         .pl-chip {
-          display: flex; flex-direction: column; align-items: center; justify-content: center;
-          gap: 2px; padding: 0.45rem 0.15rem 0.5rem; border: none; background: transparent;
-          border-radius: 16px; cursor: pointer; font-family: var(--font-body); min-width: 0;
-          transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+          display: flex; flex-direction: row; align-items: center; justify-content: center;
+          gap: 3px; padding: 0.22rem 0.08rem; border: none; background: transparent;
+          border-radius: 99px; cursor: pointer; font-family: var(--font-body); min-width: 0;
+          min-height: 30px;
+          transition: background 0.15s, color 0.15s;
         }
-        .pl-chip-wd { font-size: 0.68rem; font-weight: 500; color: var(--ink-muted); letter-spacing: 0.01em; }
-        .pl-chip-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.2; }
-        .pl-chip.is-planned .pl-chip-num {
-          width: 28px; height: 28px; border-radius: 50%;
-          display: inline-flex; align-items: center; justify-content: center;
-          background: var(--sage-light); color: var(--sage);
+        .pl-chip-wd { font-size: 0.6rem; font-weight: 500; color: var(--ink-muted); letter-spacing: 0.01em; }
+        .pl-chip-num {
+          font-size: 0.76rem; font-weight: 700; color: var(--ink); line-height: 1;
+          min-width: 1.35em; text-align: center;
         }
+        .pl-chip.is-planned:not(.is-today):not(.is-selected) .pl-chip-num { color: var(--sage); }
+        .pl-chip.is-planned:not(.is-today):not(.is-selected) { background: var(--sage-light); }
         .pl-chip.is-empty .pl-chip-num { color: var(--ink-muted); font-weight: 500; }
-        .pl-chip.is-today:not(.is-selected) { box-shadow: inset 0 0 0 1.5px var(--rust); }
+        .pl-chip.is-today .pl-chip-num {
+          width: 20px; height: 20px; min-width: 20px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: var(--rust); color: white;
+        }
+        .pl-chip.is-today:not(.is-selected) { background: rgba(181,69,27,0.1); }
         .pl-chip.is-selected { background: var(--sage); }
         .pl-chip.is-selected .pl-chip-wd,
         .pl-chip.is-selected .pl-chip-num { color: white; }
-        .pl-chip.is-selected.is-planned .pl-chip-num { background: rgba(255,255,255,0.18); color: white; }
-        .pl-chip:hover:not(.is-selected) { background: var(--parchment); }
+        .pl-chip.is-selected.is-today { background: var(--rust); }
+        .pl-chip.is-selected.is-today .pl-chip-num { background: rgba(255,255,255,0.2); }
+        .pl-chip:hover:not(.is-selected):not(.is-today) { background: var(--parchment); }
 
-        /* Day list */
-        .pl-days { display: flex; flex-direction: column; gap: 0.15rem; }
-        .pl-day { padding-block: 0.15rem; }
+        /* Month calendar panel */
+        .pl-cal { padding: 0.2rem 0 0.15rem; }
+        .pl-cal-toolbar {
+          display: flex; align-items: center; justify-content: space-between;
+          margin-bottom: 0.25rem;
+        }
+        .pl-cal-weekdays {
+          display: grid; grid-template-columns: repeat(7, 1fr);
+          text-align: center; font-size: 0.6rem; font-weight: 600;
+          color: var(--ink-muted); letter-spacing: 0.02em;
+          padding: 0.15rem 0 0.2rem;
+        }
+        .pl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .pl-cal-day {
+          aspect-ratio: 1; max-height: 40px; width: 100%;
+          border: none; background: none; border-radius: 50%;
+          font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
+          color: var(--ink); cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          transition: background 0.12s, color 0.12s;
+        }
+        .pl-cal-day.is-outside { color: var(--ink-muted); opacity: 0.4; }
+        .pl-cal-day.is-planned:not(.is-today):not(.is-selected) {
+          background: var(--sage-light); color: var(--sage); font-weight: 650;
+        }
+        .pl-cal-day.is-today {
+          background: var(--rust); color: white; font-weight: 700;
+        }
+        .pl-cal-day.is-selected:not(.is-today) {
+          background: var(--sage); color: white; font-weight: 700;
+        }
+        .pl-cal-day.is-selected.is-today {
+          box-shadow: 0 0 0 2px var(--cream), 0 0 0 3.5px var(--rust);
+        }
+        .pl-cal-day:hover:not(.is-today):not(.is-selected) { background: var(--parchment); }
+
+        /* Day list — seven equal rows so the week fits one screen */
+        .pl-days {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex; flex-direction: column;
+          gap: 2px;
+          overflow: hidden;
+          padding-top: 4.55rem;
+        }
+        .pl-day {
+          flex: 1 1 0;
+          min-height: 0;
+          display: flex; flex-direction: column; justify-content: center;
+          padding-block: 0;
+        }
         .pl-day.is-past { opacity: 0.55; }
         .pl-day.is-drop-target {
           outline: 2px solid var(--sage);
@@ -1533,13 +1593,17 @@ export default function PlannerClient() {
         .pl-days.is-dragging { user-select: none; cursor: grabbing; }
 
         /* Recipe stack */
-        .pl-meal-stack { display: flex; flex-direction: column; gap: 0.15rem; }
+        .pl-meal-stack {
+          display: flex; flex-direction: column; gap: 2px;
+          min-height: 0; flex: 1; justify-content: center;
+        }
 
         /* Recipe card */
         .pl-recipe-card {
-          display: flex; align-items: center; gap: 0.75rem;
-          background: white; border: none; border-radius: 16px;
-          padding: 0.7rem 0.65rem; cursor: pointer;
+          display: flex; align-items: center; gap: 0.55rem;
+          background: white; border: none; border-radius: 12px;
+          padding: 0.3rem 0.45rem; cursor: pointer;
+          min-height: 0; flex: 1 1 0;
           transition: background 0.15s, box-shadow 0.15s;
         }
         .pl-recipe-card:hover { background: #fff; box-shadow: 0 2px 14px rgba(26,22,18,0.06); }
@@ -1630,67 +1694,53 @@ export default function PlannerClient() {
         .pl-card-wd { font-size: 0.68rem; font-weight: 600; color: var(--ink-muted); }
         .pl-card-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.15; }
         .pl-recipe-img {
-          width: 64px; height: 64px; flex-shrink: 0; border-radius: 12px;
+          width: 42px; height: 42px; flex-shrink: 0; border-radius: 10px;
           overflow: hidden; background: var(--parchment);
           display: flex; align-items: center; justify-content: center;
         }
         .pl-recipe-img img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
         .pl-recipe-img-fallback { font-size: 1.4rem; line-height: 1; }
         .pl-recipe-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
-        .pl-recipe-name { font-size: 0.95rem; color: var(--ink); font-weight: 700; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
-        .pl-recipe-meta { font-size: 0.75rem; color: var(--ink-muted); }
-        .pl-recipe-tags { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-top: 2px; }
-        .pl-recipe-tag {
-          background: var(--sage-light); border: none; border-radius: 99px;
-          padding: 2px 8px; font-size: 0.68rem; font-weight: 600; color: var(--sage);
-          text-transform: capitalize;
+        .pl-recipe-name {
+          font-size: 0.88rem; color: var(--ink); font-weight: 700; line-height: 1.2;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .pl-recipe-meta { font-size: 0.7rem; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .pl-card-actions { display: flex; align-items: center; flex-shrink: 0; }
         .pl-card-btn {
-          background: none; border: none; border-radius: 50%; width: 36px; height: 36px; min-width: 36px;
+          background: none; border: none; border-radius: 50%; width: 32px; height: 32px; min-width: 32px;
           display: flex; align-items: center; justify-content: center; cursor: pointer;
           color: var(--ink-muted); transition: background 0.15s, color 0.15s; padding: 0;
         }
         .pl-card-btn:hover, .pl-card-btn.is-open { background: var(--parchment); color: var(--ink); }
-        .pl-add-another {
-          align-self: flex-start; margin: 0 0 0.25rem 114px; padding: 0.15rem 0;
-          background: none; border: none; font-size: 0.75rem; color: var(--sage);
-          font-family: var(--font-body); cursor: pointer; font-weight: 600;
-        }
-        .pl-add-another:hover { text-decoration: underline; }
 
         /* Empty slot */
-        .pl-empty-slot { margin-bottom: 0.15rem; }
+        .pl-empty-slot { min-height: 0; height: 100%; display: flex; align-items: center; }
         .pl-empty-card {
-          display: flex; align-items: center; gap: 0.75rem; width: 100%;
-          background: none; border: none; padding: 0.55rem 0.65rem; border-radius: 16px;
+          display: flex; align-items: center; gap: 0.55rem; width: 100%; height: 100%;
+          background: none; border: none; padding: 0.25rem 0.45rem; border-radius: 12px;
           cursor: pointer; font-family: var(--font-body); text-align: left;
         }
         .pl-empty-card:hover { background: rgba(255,255,255,0.55); }
         .pl-empty-card .pl-card-date { cursor: pointer; }
         .pl-add-dinner-pill {
-          display: flex; align-items: center; justify-content: center; gap: 0.45rem;
-          flex: 1; padding: 0.85rem 1rem;
+          display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+          flex: 1; padding: 0.4rem 0.7rem;
           background: none; border: 1.5px dashed var(--border);
-          border-radius: 14px; font-size: 0.82rem; color: var(--ink-muted);
+          border-radius: 10px; font-size: 0.78rem; color: var(--ink-muted);
           font-family: var(--font-body);
         }
         .pl-empty-card:hover .pl-add-dinner-pill { border-color: var(--sage); color: var(--sage); }
-        .pl-suggestions { margin-top: 0.6rem; }
-        .pl-suggestions-label { font-size: 0.65rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 0.4rem; }
-        .pl-suggestion-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-        .pl-suggestion-pill { display: inline-flex; align-items: center; gap: 5px; padding: 0.28rem 0.65rem; background: white; border: 1px solid var(--border); border-radius: 99px; font-size: 0.73rem; color: var(--ink-soft); font-family: var(--font-body); cursor: pointer; transition: all 0.15s; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pl-suggestion-pill:hover { border-color: var(--rust); color: var(--rust); background: rgba(181,69,27,0.03); }
 
         /* Day note textarea */
         .pl-day-note {
           width: 100%; box-sizing: border-box;
           border: none;
           background: transparent; resize: none; overflow: hidden;
-          font-size: 0.82rem; font-family: var(--font-body); color: var(--ink-soft);
-          line-height: 1.5; padding: 0; margin-top: 4px;
+          font-size: 0.72rem; font-family: var(--font-body); color: var(--ink-soft);
+          line-height: 1.3; padding: 0; margin-top: 0;
           outline: none; transition: color 0.15s;
-          min-height: 30px;
+          min-height: 0; flex-shrink: 0;
         }
         .pl-day-note::placeholder { color: var(--ink-muted); font-style: italic; }
         .pl-day-note:focus { color: var(--ink); }
@@ -1791,19 +1841,25 @@ export default function PlannerClient() {
         .btn-magic-go:hover:not(:disabled) { background: var(--rust); }
         .btn-magic-go:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; }
+        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; padding-top: 6rem; }
+
+        @media (min-width: 901px) {
+          .pl-root { height: calc(100dvh - 6rem); }
+        }
 
         /* Mobile */
         @media (max-width: 600px) {
-          .pl-title { font-size: 1.45rem; }
-          .pl-topbar { gap: 0.6rem; margin-bottom: 0.9rem; }
-          .pl-week-strip { gap: 0.2rem; margin-bottom: 0.85rem; }
-          .pl-chip { padding: 0.35rem 0.05rem 0.4rem; border-radius: 14px; }
-          .pl-chip-num { font-size: 0.88rem; }
-          .pl-chip.is-planned .pl-chip-num { width: 26px; height: 26px; }
-          .pl-recipe-img { width: 56px; height: 56px; border-radius: 10px; }
-          .pl-recipe-name { font-size: 0.88rem; }
-          .pl-add-another { margin-left: 98px; }
+          .pl-root { height: calc(100dvh - var(--bottom-nav-height, 0px) - 1.25rem); }
+          .pl-nav { padding-bottom: 0.28rem; }
+          .pl-week-label { font-size: 0.88rem; }
+          .pl-chip { padding: 0.18rem 0.04rem; min-height: 28px; }
+          .pl-chip-wd { font-size: 0.56rem; }
+          .pl-chip-num { font-size: 0.72rem; }
+          .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
+          .pl-days { padding-top: 4.2rem; }
+          .pl-cal-day { max-height: 36px; font-size: 0.74rem; }
+          .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
+          .pl-recipe-name { font-size: 0.84rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }
