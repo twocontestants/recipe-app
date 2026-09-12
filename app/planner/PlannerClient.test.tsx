@@ -89,6 +89,8 @@ describe('PlannerClient week nav', () => {
     expect(screen.queryByRole('button', { name: 'Shopping list' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Previous week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Go to previous week' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Go to next week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open month calendar' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open calendar' })).toBeNull();
     const monday = screen.getByRole('tab', { name: /monday .* planned/i });
@@ -140,6 +142,15 @@ describe('PlannerClient week nav', () => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Previous week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to next week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to previous week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
     });
