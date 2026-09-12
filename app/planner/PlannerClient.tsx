@@ -1688,7 +1688,7 @@ export default function PlannerClient() {
         }
         .pl-week-strip-clip.is-shifting { pointer-events: none; }
         .pl-week-strip.is-incoming {
-          position: absolute; left: 0; right: 0;
+          position: absolute; left: 0; right: 0; height: 100%; width: 100%;
           pointer-events: none;
         }
         .pl-cal-slot {
