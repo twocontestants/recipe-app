@@ -120,6 +120,24 @@ describe('mealPlansForSelectedDinners', () => {
     ])).toEqual([lastWeek, thisWeek]);
   });
 
+  it('keeps only the ticked copy when the same recipe is planned twice on one day', () => {
+    const first = dinner({
+      title: 'Pie',
+      ingredient: 'onion',
+      planned_on: '2026-09-12',
+      id: 'mp-a',
+    });
+    const second = dinner({
+      title: 'Pie',
+      ingredient: 'onion',
+      planned_on: '2026-09-12',
+      id: 'mp-b',
+    });
+    expect(mealPlansForSelectedDinners([first, second], [
+      { id: 'mp-a', recipe_id: 'r1', planned_on: '2026-09-12' },
+    ])).toEqual([first]);
+  });
+
   it('does not include an unticked same-recipe dinner that shares the storage week', () => {
     // Sunday 6 Sep is this display week when the week starts Sunday; that
     // calendar day still lives in the Mon 31 Aug storage week, which also
@@ -149,12 +167,12 @@ describe('mealPlansForSelectedDinners', () => {
 describe('parseShoppingDinnerPicks', () => {
   it('keeps planned dinners and drops malformed rows', () => {
     expect(parseShoppingDinnerPicks([
-      { recipe_id: 'r1', planned_on: '2026-09-02' },
+      { id: 'mp-1', recipe_id: 'r1', planned_on: '2026-09-02' },
       { recipe_id: 3 },
       null,
       { recipe_id: 'r2', week_start: '2026-08-31', day_of_week: 2 },
     ])).toEqual([
-      { recipe_id: 'r1', planned_on: '2026-09-02' },
+      { id: 'mp-1', recipe_id: 'r1', planned_on: '2026-09-02' },
       { recipe_id: 'r2', week_start: '2026-08-31', day_of_week: 2 },
     ]);
   });

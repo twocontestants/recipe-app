@@ -3,10 +3,7 @@
 import { useState, useEffect } from 'react';
 import { showToast } from './Toast';
 import {
-  DAY_SHORT,
   dayDateOf,
-  indexToDayKey,
-  formatWeekLabel,
   getThisDisplayWeek,
   localDateIso,
   parseDayOfWeek,
@@ -16,18 +13,16 @@ import {
 } from '@/lib/plannerDays';
 import { storageWeeksForDateRange } from '@/lib/plannerMonth';
 import { mealOnDate } from '@/lib/plannerDate';
-
-interface MealEntry {
-  recipe_id: string;
-  recipe_title: string;
-  day_of_week: number;
-  week_start: string;
-  planned_on: string;
-}
-
-function mealKey(m: { planned_on: string; recipe_id: string }): string {
-  return `${m.planned_on}::${m.recipe_id}`;
-}
+import {
+  defaultSelectedMealKeys,
+  generateListDateRange,
+  generateListWeekTag,
+  generateListWeeks,
+  mealDayLabel,
+  mealEntryKey,
+  visibleGenerateListWeeks,
+  type GenerateListMeal,
+} from '@/lib/generateListOptions';
 
 interface Props {
   onClose: () => void;
@@ -38,19 +33,10 @@ interface Props {
 
 export default function GenerateListModal({ onClose, onCreated, defaultWeekStart, weekStartsOn = 'monday' }: Props) {
   const thisWeek = getThisDisplayWeek(weekStartsOn);
-  const nextWeek = shiftWeek(thisWeek, 1);
   const prevWeek = shiftWeek(thisWeek, -1);
-  const weeks = [prevWeek, thisWeek, nextWeek];
+  const weeks = generateListWeeks(weekStartsOn, defaultWeekStart);
 
-  const weekTagLabel = (ws: string) => {
-    const label = formatWeekLabel(ws, new Date(), weekStartsOn);
-    if (label === 'This week') return 'this week';
-    if (label === 'Next week') return 'next week';
-    if (ws === prevWeek) return 'last week';
-    return label;
-  };
-
-  const [meals, setMeals] = useState<Record<string, MealEntry[]>>({});
+  const [meals, setMeals] = useState<Record<string, GenerateListMeal[]>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [subtitle, setSubtitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -59,9 +45,8 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
-      const map: Record<string, MealEntry[]> = {};
-      const from = prevWeek;
-      const to = localDateIso(dayDateOf(nextWeek, 6));
+      const map: Record<string, GenerateListMeal[]> = {};
+      const { from, to } = generateListDateRange(weeks);
       let plans: unknown[] = [];
       try {
         const weeksParam = storageWeeksForDateRange(from, to).join(',');
@@ -70,18 +55,28 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
         if (Array.isArray(data)) plans = data;
       } catch { plans = []; }
       for (const wk of weeks) {
-        const entries: MealEntry[] = [];
+        const entries: GenerateListMeal[] = [];
         for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
           const day = dayDateOf(wk, dayIndex);
           const coords = storageCoords(day);
           const iso = localDateIso(day);
           for (const raw of plans) {
             if (!raw || typeof raw !== 'object') continue;
-            const p = raw as { recipe_id?: string; recipe?: { title?: string }; day_of_week?: unknown; week_start?: string; planned_on?: string };
+            const p = raw as {
+              id?: string;
+              recipe_id?: string;
+              recipe?: { title?: string };
+              day_of_week?: unknown;
+              week_start?: string;
+              planned_on?: string;
+            };
             const storedDay = parseDayOfWeek(p.day_of_week);
             if (!p.recipe_id) continue;
             if (!mealOnDate(p, iso)) continue;
+            const id = typeof p.id === 'string' && p.id ? p.id : undefined;
             entries.push({
+              key: mealEntryKey({ id, planned_on: iso, recipe_id: p.recipe_id }, entries.length),
+              id,
               recipe_id: p.recipe_id,
               recipe_title: p.recipe?.title ?? 'Unknown',
               day_of_week: storedDay ?? coords.dayOfWeek,
@@ -93,16 +88,12 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
         map[wk] = entries;
       }
       setMeals(map);
-      // Default-select all meals from the defaultWeekStart (or this week)
       const defaultWk = defaultWeekStart ?? thisWeek;
-      const defaultSelected = new Set<string>(
-        (map[defaultWk] ?? []).map(m => mealKey(m))
-      );
-      setSelected(defaultSelected);
+      setSelected(new Set(defaultSelectedMealKeys(map, defaultWk, thisWeek, localDateIso(new Date()))));
       setLoading(false);
     };
     fetchAll();
-  }, [weekStartsOn]);
+  }, [weekStartsOn, defaultWeekStart]);
 
   const toggleMeal = (key: string) => {
     setSelected(prev => {
@@ -113,7 +104,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
   };
 
   const toggleWeek = (wk: string) => {
-    const wkMeals = (meals[wk] ?? []).map(m => mealKey(m));
+    const wkMeals = (meals[wk] ?? []).map(m => m.key);
     const allSelected = wkMeals.every(k => selected.has(k));
     setSelected(prev => {
       const next = new Set(prev);
@@ -124,29 +115,28 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
   };
 
   const selectedCount = selected.size;
+  const shownWeeks = visibleGenerateListWeeks(weeks, meals, thisWeek, defaultWeekStart);
 
   const handleGenerate = async () => {
     if (!selectedCount) { showToast('Select at least one recipe', 'error'); return; }
     setSaving(true);
     try {
-      // Collect selected recipe_ids and week_starts
-      const selectedMeals: MealEntry[] = [];
+      const selectedMeals: GenerateListMeal[] = [];
       for (const wk of weeks) {
         for (const m of meals[wk] ?? []) {
-          const key = mealKey(m);
-          if (selected.has(key)) selectedMeals.push(m);
+          if (selected.has(m.key)) selectedMeals.push(m);
         }
       }
       const recipe_ids = [...new Set(selectedMeals.map(m => m.recipe_id))];
       const week_starts = [...new Set(selectedMeals.map(m => m.week_start))];
       const mealsPayload = selectedMeals.map(m => ({
+        id: m.id,
         recipe_id: m.recipe_id,
         planned_on: m.planned_on,
         week_start: m.week_start,
         day_of_week: m.day_of_week,
       }));
 
-      // Name: "Week of X" or "Multiple weeks" + time
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase();
       const weekStr = week_starts.length === 1
@@ -197,8 +187,16 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
           display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px;
           border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
           cursor: pointer; transition: background 0.12s;
+          position: relative;
         }
         .glm-meal-row.is-selected { background: rgba(181,69,27,0.05); border-color: rgba(181,69,27,0.3); }
+        .glm-checkbox-input {
+          position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+          overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+        }
+        .glm-checkbox-input:focus-visible + .glm-check {
+          box-shadow: 0 0 0 2px white, 0 0 0 4px var(--rust);
+        }
         .glm-check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.12s; }
         .glm-meal-row.is-selected .glm-check { background: var(--rust); border-color: var(--rust); }
         .glm-meal-name { flex: 1; font-size: 0.88rem; color: var(--ink); min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
@@ -221,10 +219,10 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
       `}</style>
 
       <div className="glm-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-        <div className="glm-sheet">
+        <div className="glm-sheet" role="dialog" aria-labelledby="glm-title">
           <div className="glm-handle" />
           <div className="glm-header">
-            <div className="glm-title">New shopping list</div>
+            <div className="glm-title" id="glm-title">New shopping list</div>
             <div className="glm-sub">Select recipes to include</div>
           </div>
 
@@ -233,16 +231,16 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
               <div style={{ padding: '2rem', textAlign: 'center' }}><div className="loading-dots"><span/><span/><span/></div></div>
             ) : (
               <>
-                {weeks.map(wk => {
+                {shownWeeks.map(wk => {
                   const wkMeals = meals[wk] ?? [];
-                  const wkKeys = wkMeals.map(m => mealKey(m));
+                  const wkKeys = wkMeals.map(m => m.key);
                   const allSel = wkKeys.length > 0 && wkKeys.every(k => selected.has(k));
                   return (
                     <div key={wk} className="glm-week-section">
                       <div className="glm-week-header">
-                        <span className="glm-week-label">{weekTagLabel(wk)}</span>
+                        <span className="glm-week-label">{generateListWeekTag(wk, weekStartsOn, prevWeek)}</span>
                         {wkMeals.length > 0 && (
-                          <button className="glm-week-toggle" onClick={() => toggleWeek(wk)}>
+                          <button type="button" className="glm-week-toggle" onClick={() => toggleWeek(wk)}>
                             {allSel ? 'Deselect all' : 'Select all'}
                           </button>
                         )}
@@ -250,16 +248,22 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
                       {wkMeals.length === 0 ? (
                         <p className="glm-empty">Nothing planned for this week</p>
                       ) : wkMeals.map(m => {
-                        const key = mealKey(m);
-                        const isSel = selected.has(key);
+                        const isSel = selected.has(m.key);
+                        const day = mealDayLabel(m.planned_on);
                         return (
-                          <div key={key} className={`glm-meal-row ${isSel ? 'is-selected' : ''}`} onClick={() => toggleMeal(key)}>
-                            <div className="glm-check">
+                          <label key={m.key} className={`glm-meal-row ${isSel ? 'is-selected' : ''}`}>
+                            <input
+                              type="checkbox"
+                              className="glm-checkbox-input"
+                              checked={isSel}
+                              onChange={() => toggleMeal(m.key)}
+                            />
+                            <span className="glm-check" aria-hidden="true">
                               {isSel && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                            </div>
+                            </span>
                             <span className="glm-meal-name">{m.recipe_title}</span>
-                            <span className="glm-meal-day">{DAY_SHORT[indexToDayKey(parseDayOfWeek(m.day_of_week) ?? 0)]}</span>
-                          </div>
+                            <span className="glm-meal-day">{day}</span>
+                          </label>
                         );
                       })}
                     </div>
@@ -267,8 +271,9 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
                 })}
 
                 <div className="glm-subtitle-field">
-                  <label className="glm-subtitle-label">Note (optional)</label>
+                  <label className="glm-subtitle-label" htmlFor="glm-note">Note (optional)</label>
                   <input
+                    id="glm-note"
                     className="glm-subtitle-input"
                     placeholder="e.g. Birthday week, Christmas dinner…"
                     value={subtitle}
@@ -281,7 +286,7 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
           </div>
 
           <div className="glm-footer">
-            <button className="glm-generate-btn" onClick={handleGenerate} disabled={saving || selectedCount === 0}>
+            <button type="button" className="glm-generate-btn" onClick={handleGenerate} disabled={saving || selectedCount === 0}>
               {saving
                 ? <><span className="loading-dots"><span/><span/><span/></span> Generating…</>
                 : <>Generate list{selectedCount > 0 ? ` · ${selectedCount} recipe${selectedCount !== 1 ? 's' : ''}` : ''}</>}
