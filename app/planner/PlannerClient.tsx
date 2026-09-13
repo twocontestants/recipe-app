@@ -14,8 +14,8 @@ import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
-import { fetchMealsForMonths, mergePlannerMeals } from '@/lib/loadPlannerMonth';
-import { calendarDayClass, displayWeekDateRange, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
+import { fetchMealsForMonths, fetchNotesForMonths, mergePlannerMeals, replaceNotesInRange } from '@/lib/loadPlannerMonth';
+import { calendarDayClass, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -190,13 +190,12 @@ export default function PlannerClient() {
   const [moveSheetPlan, setMoveSheetPlan] = useState<Record<number, PlannedMeal[]>>({});
   const [moveSheetSaving, setMoveSheetSaving] = useState(false);
   const mealStoreRef = useRef(new Map<string, MealPlan>());
+  const noteStoreRef = useRef(new Map<string, string>());
   const loadedMonthsRef = useRef(new Set<string>());
   const weekStartRef = useRef(weekStart);
   weekStartRef.current = weekStart;
   const weekStartsOnRef = useRef(weekStartsOn);
   weekStartsOnRef.current = weekStartsOn;
-  const notesRef = useRef(notes);
-  notesRef.current = notes;
   const daysClipRef = useRef<HTMLDivElement>(null);
   const weekStripClipRef = useRef<HTMLDivElement>(null);
   const weekShiftGen = useRef(0);
@@ -213,6 +212,8 @@ export default function PlannerClient() {
   weekShiftRef.current = weekShift;
 
   const snapshotMealPlans = () => [...mealStoreRef.current.values()];
+  const notesForWeek = (start: Date | string) =>
+    notesByDisplayIndex(noteStoreRef.current, typeof start === 'string' ? start : formatDate(start));
 
   const mergeMealPlans = (plans: MealPlan[]) => {
     for (const plan of plans) mealStoreRef.current.set(plan.id, plan);
@@ -221,17 +222,20 @@ export default function PlannerClient() {
   const ensureMonths = async (keys: string[]): Promise<MealPlan[]> => {
     const needed = missingMonths(keys, loadedMonthsRef.current);
     if (needed.length) {
-      const meals = await fetchMealsForMonths(needed);
-      if (!meals.length) return snapshotMealPlans();
+      const [meals, monthNotes] = await Promise.all([
+        fetchMealsForMonths(needed),
+        fetchNotesForMonths(needed),
+      ]);
       for (const key of needed) {
         const { from, to } = monthRange(key);
         for (const [id, meal] of mealStoreRef.current) {
           const on = plannedOnOf(meal);
           if (on >= from && on <= to) mealStoreRef.current.delete(id);
         }
+        replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
+        loadedMonthsRef.current.add(key);
       }
       mergeMealPlans(meals);
-      for (const key of needed) loadedMonthsRef.current.add(key);
     }
     return snapshotMealPlans();
   };
@@ -240,12 +244,27 @@ export default function PlannerClient() {
     const displayIso = formatDate(weekStartRef.current);
     const keys = monthsForDisplayWeek(displayIso);
     try {
-      const monthMeals = await fetchMealsForMonths(keys);
+      const [monthMeals, monthNotes] = await Promise.all([
+        fetchMealsForMonths(keys),
+        fetchNotesForMonths(keys),
+      ]);
       const meals = mergePlannerMeals(monthMeals);
-      if (!meals.length && mealStoreRef.current.size > 0) return;
+      if (!meals.length && mealStoreRef.current.size > 0) {
+        for (const key of keys) {
+          const { from, to } = monthRange(key);
+          replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
+        }
+        setNotes(notesForWeek(weekStartRef.current));
+        return;
+      }
       mealStoreRef.current = new Map(meals.map(meal => [meal.id, meal]));
       if (meals.length) loadedMonthsRef.current = new Set(keys);
+      for (const key of keys) {
+        const { from, to } = monthRange(key);
+        replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
+      }
       setMealPlans(snapshotMealPlans());
+      setNotes(notesForWeek(weekStartRef.current));
     } catch { /* keep the copy already on screen */ }
   };
 
@@ -277,31 +296,15 @@ export default function PlannerClient() {
 
   const weekStartIso = formatDate(weekStart);
 
-  const fetchNotesForWeek = async (displayIso: string): Promise<Record<number, string>> => {
-    const { from, to } = displayWeekDateRange(displayIso);
-    const notesRes = await fetch(
-      `/api/planner-notes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-    );
-    let notesByIso: Record<string, string> = {};
-    if (notesRes.ok) {
-      const raw = await notesRes.json();
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) notesByIso = raw as Record<string, string>;
-    }
-    return notesByDisplayIndex(notesByIso, displayIso);
-  };
-
   const fetchData = useCallback(async () => {
     const displayIso = weekStartIso;
     const monthKeys = monthsForDisplayWeek(displayIso);
     const firstPaint = mealStoreRef.current.size === 0;
     if (firstPaint) setLoading(true);
     try {
-      const [, weekNotes] = await Promise.all([
-        ensureMonths(monthKeys),
-        fetchNotesForWeek(displayIso),
-      ]);
+      await ensureMonths(monthKeys);
       setMealPlans(snapshotMealPlans());
-      setNotes(weekNotes);
+      setNotes(notesForWeek(displayIso));
       const neighbours = monthKeys.flatMap(key => adjacentMonthKeys(key));
       void ensureMonths(neighbours).then(all => setMealPlans(all)).catch(() => { /* optional prefetch */ });
     } catch { showToast('Failed to load planner', 'error'); }
@@ -814,7 +817,10 @@ export default function PlannerClient() {
   // ── Notes ───────────────────────────────────────────────────────────────────
 
   const handleNoteChange = (dayIndex: number, value: string) => {
-    setNotes(prev => ({ ...prev, [dayIndex]: value }));
+    const iso = formatDate(getDayDate(weekStart, dayIndex));
+    if (value.trim()) noteStoreRef.current.set(iso, value);
+    else noteStoreRef.current.delete(iso);
+    setNotes(notesForWeek(weekStart));
     if (noteTimers.current[dayIndex]) clearTimeout(noteTimers.current[dayIndex]);
     noteTimers.current[dayIndex] = setTimeout(async () => {
       try {
@@ -974,17 +980,9 @@ export default function PlannerClient() {
     weekShiftLockRef.current = false;
     weekStartRef.current = current.toStart;
     setWeekStart(current.toStart);
-    setNotes(current.toNotes);
+    setNotes(notesForWeek(current.toStart));
     setWeekShift(null);
     setWeekShiftBusy(null);
-  };
-
-  const applyNotesIfCurrent = (displayIso: string, weekNotes: Record<number, string>) => {
-    if (weekShiftRef.current && formatDate(weekShiftRef.current.toStart) === displayIso) {
-      weekShiftRef.current.toNotes = weekNotes;
-      return;
-    }
-    if (formatDate(weekStartRef.current) === displayIso) setNotes(weekNotes);
   };
 
   const shiftAdjacentWeek = async (weeks: 1 | -1) => {
@@ -997,19 +995,15 @@ export default function PlannerClient() {
     const gen = ++weekShiftGen.current;
     weekShiftLockRef.current = true;
     const monthKeys = monthsForDisplayWeek(toIso);
-    const needsMeals = missingMonths(monthKeys, loadedMonthsRef.current).length > 0;
-    if (needsMeals) setWeekShiftBusy(direction);
-    void fetchNotesForWeek(toIso).then(
-      loaded => applyNotesIfCurrent(toIso, loaded),
-      () => { /* notes land later via fetchData */ },
-    );
+    const needsMonths = missingMonths(monthKeys, loadedMonthsRef.current).length > 0;
+    if (needsMonths) setWeekShiftBusy(direction);
     try {
-      if (needsMeals) {
+      if (needsMonths) {
         await ensureMonths(monthKeys).catch(() => snapshotMealPlans());
       }
       if (gen !== weekShiftGen.current) return;
       setMealPlans(snapshotMealPlans());
-      const toNotes: Record<number, string> = {};
+      const toNotes = notesForWeek(toIso);
       if (!shouldAnimateWeekShift(window)) {
         weekShiftLockRef.current = false;
         weekStartRef.current = toStart;
@@ -1022,7 +1016,7 @@ export default function PlannerClient() {
         direction,
         fromStart,
         toStart,
-        fromNotes: notesRef.current,
+        fromNotes: notesForWeek(fromStart),
         toNotes,
       };
       weekShiftRef.current = next;

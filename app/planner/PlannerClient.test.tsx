@@ -181,26 +181,26 @@ describe('PlannerClient week nav', () => {
     ).toBe('true');
   });
 
-  it('changes week from the jump buttons without waiting for notes', async () => {
+  it('reuses cached month notes when moving to the next week', async () => {
     const thisWeek = getThisDisplayWeek('monday');
     const mon = localDateIso(dayDateOf(thisWeek, 0));
-    let notesCalls = 0;
-    let releaseNotes = () => {};
+    let notesGets = 0;
+    let plannerGets = 0;
 
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/preferences')) {
         return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
       }
+      if (url.includes('/api/planner-notes') && url.includes('from=')) {
+        notesGets += 1;
+        return { ok: true, json: async () => ({ [mon]: 'Defrost chicken' }) };
+      }
       if (url.includes('/api/planner-notes')) {
-        notesCalls += 1;
-        if (notesCalls === 1) {
-          return { ok: true, json: async () => ({}) };
-        }
-        await new Promise<void>(resolve => { releaseNotes = resolve; });
-        return { ok: true, json: async () => ({}) };
+        return { ok: true, json: async () => ({ success: true }) };
       }
       if (url.includes('/api/planner')) {
+        plannerGets += 1;
         return { ok: true, json: async () => [dinner('this-mon-a', mon)] };
       }
       return { ok: false, json: async () => ({}) };
@@ -209,21 +209,35 @@ describe('PlannerClient week nav', () => {
     Element.prototype.scrollIntoView = vi.fn();
     render(<PlannerClient />);
 
-    const mondayChip = await screen.findByRole('tab', { name: /monday/i });
-    const mondayBefore = mondayChip.textContent;
+    expect(await screen.findByDisplayValue('Defrost chicken')).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue('Defrost chicken'), { target: { value: 'Buy thyme' } });
+    const mondayBefore = screen.getByRole('tab', { name: /monday/i }).textContent;
+    await waitFor(() => expect(notesGets).toBeGreaterThanOrEqual(1));
+    await waitFor(async () => {
+      const notesSnapshot = notesGets;
+      const plannerSnapshot = plannerGets;
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(notesGets).toBe(notesSnapshot);
+      expect(plannerGets).toBe(plannerSnapshot);
+    });
+    const notesAfterLoad = notesGets;
+    const plannerAfterLoad = plannerGets;
+
     fireEvent.click(screen.getByRole('button', { name: 'Go to next week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
     });
+    expect(screen.queryByDisplayValue('Defrost chicken')).toBeNull();
+    expect(notesGets).toBe(notesAfterLoad);
+    expect(plannerGets).toBe(plannerAfterLoad);
+
     fireEvent.click(screen.getByRole('button', { name: 'Go to previous week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
-    });
-    releaseNotes();
+    expect(await screen.findByDisplayValue('Buy thyme')).toBeTruthy();
+    expect(notesGets).toBe(notesAfterLoad);
+    expect(plannerGets).toBe(plannerAfterLoad);
   });
 
   it('opens the existing context menu from the three-dot button', async () => {

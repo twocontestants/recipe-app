@@ -13,13 +13,14 @@ export function displayWeekDateRange(weekStartIso: string): { from: string; to: 
 }
 
 export function notesByDisplayIndex(
-  notesByIso: Record<string, string>,
+  notesByIso: Record<string, string> | Map<string, string>,
   weekStartIso: string,
 ): Record<number, string> {
+  const lookup = notesByIso instanceof Map ? notesByIso : new Map(Object.entries(notesByIso));
   const out: Record<number, string> = {};
   for (let i = 0; i < 7; i++) {
     const iso = localDateIso(dayDateOf(weekStartIso, i));
-    const note = notesByIso[iso];
+    const note = lookup.get(iso);
     if (note) out[i] = note;
   }
   return out;
