@@ -1016,34 +1016,38 @@ export default function PlannerClient() {
     const stripClip = weekStripClipRef.current;
     const days = [...(dayClip?.querySelectorAll('.pl-days') ?? [])] as HTMLElement[];
     const strips = [...(stripClip?.querySelectorAll('.pl-week-strip') ?? [])] as HTMLElement[];
-    const dayDistance = dayClip?.getBoundingClientRect().height ?? 0;
-    const stripDistance = stripClip?.getBoundingClientRect().width ?? 0;
-    if (days.length < 2 || dayDistance < 8) {
+    const dayDistance = Math.max(dayClip?.getBoundingClientRect().height ?? 0, 1);
+    const stripDistance = Math.max(stripClip?.getBoundingClientRect().width ?? 0, 1);
+    if (days.length < 2) {
       commitWeekShift();
       return;
     }
-    const animations = playSyncedShift(
-      [
-        { elements: days, axis: 'y', distance: dayDistance },
-        { elements: strips, axis: 'x', distance: Math.max(stripDistance, 1) },
-      ],
-      weekShift.direction,
-    );
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      animations.forEach(animation => animation.cancel());
-      [...days, ...strips].forEach(el => { el.style.transform = ''; });
-      flushSync(() => { commitWeekShift(); });
-    };
-    void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
-    const timer = window.setTimeout(finish, WEEK_SHIFT_MS + 80);
-    return () => {
-      settled = true;
-      animations.forEach(animation => animation.cancel());
-      window.clearTimeout(timer);
-    };
+    try {
+      const animations = playSyncedShift(
+        [
+          { elements: days, axis: 'y', distance: dayDistance },
+          { elements: strips, axis: 'x', distance: stripDistance },
+        ],
+        weekShift.direction,
+      );
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        animations.forEach(animation => animation.cancel());
+        [...days, ...strips].forEach(el => { el.style.transform = ''; });
+        flushSync(() => { commitWeekShift(); });
+      };
+      void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
+      const timer = window.setTimeout(finish, WEEK_SHIFT_MS + 80);
+      return () => {
+        settled = true;
+        animations.forEach(animation => animation.cancel());
+        window.clearTimeout(timer);
+      };
+    } catch {
+      commitWeekShift();
+    }
   }, [weekShift]);
 
   const incomingDaysStyle = weekShift ? incomingWeekAnchor(weekShift.direction, 'y') : undefined;
