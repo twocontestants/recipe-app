@@ -1336,14 +1336,14 @@ export default function PlannerClient() {
         </div>
 
         <div className="pl-week-bar">
-          <button type="button" className="pl-nav-btn" aria-label="Previous week" disabled={shifting} onClick={() => { void shiftAdjacentWeek(-1); }}>
+          <button type="button" className="pl-nav-btn" aria-label="Previous week" disabled={shifting} onClick={e => { e.currentTarget.blur(); void shiftAdjacentWeek(-1); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
           <div ref={weekStripClipRef} className={`pl-week-strip-clip${weekShift ? ' is-shifting' : ''}${weekShift?.motion === 'crossfade' ? ' is-fading' : ''}`}>
             {renderWeekStrip(weekShift?.fromStart ?? weekStart, false)}
             {weekShift ? renderWeekStrip(weekShift.toStart, true) : null}
           </div>
-          <button type="button" className="pl-nav-btn" aria-label="Next week" disabled={shifting} onClick={() => { void shiftAdjacentWeek(1); }}>
+          <button type="button" className="pl-nav-btn" aria-label="Next week" disabled={shifting} onClick={e => { e.currentTarget.blur(); void shiftAdjacentWeek(1); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
           </button>
         </div>
@@ -1415,7 +1415,7 @@ export default function PlannerClient() {
             className="pl-week-jump"
             aria-label="Go to previous week"
             disabled={shifting}
-            onClick={() => { void shiftAdjacentWeek(-1); }}
+            onClick={e => { e.currentTarget.blur(); void shiftAdjacentWeek(-1); }}
           >
             {weekShiftBusy === 'prev' ? (
               <span className="loading-dots" aria-hidden><span/><span/><span/></span>
@@ -1438,7 +1438,7 @@ export default function PlannerClient() {
             className="pl-week-jump"
             aria-label="Go to next week"
             disabled={shifting}
-            onClick={() => { void shiftAdjacentWeek(1); }}
+            onClick={e => { e.currentTarget.blur(); void shiftAdjacentWeek(1); }}
           >
             Next week
             {weekShiftBusy === 'next' ? (
@@ -1800,10 +1800,16 @@ export default function PlannerClient() {
           background: none; border: none; border-radius: 8px; padding: 0.35rem 0.2rem;
           cursor: pointer; color: var(--ink-muted); display: flex; align-items: center;
           justify-content: center; min-width: 28px; min-height: 32px;
-          transition: all 0.15s;
+          transition: background 0.15s, color 0.15s;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
-        .pl-nav-btn:hover:not(:disabled) { background: var(--parchment); color: var(--ink); }
+        .pl-nav-btn:active:not(:disabled) { background: var(--parchment); color: var(--ink); }
+        .pl-nav-btn:focus { outline: none; }
+        .pl-nav-btn:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
         .pl-nav-btn:disabled { opacity: 0.4; cursor: default; }
+        @media (hover: hover) {
+          .pl-nav-btn:hover:not(:disabled) { background: var(--parchment); color: var(--ink); }
+        }
         .pl-today-btn {
           background: none; border: none; font-size: 0.72rem; font-weight: 600;
           color: var(--rust); cursor: pointer; padding: 0.2rem 0.4rem;
@@ -1871,14 +1877,15 @@ export default function PlannerClient() {
           color: var(--ink-muted); letter-spacing: 0.02em;
           padding: 0.15rem 0 0.2rem;
         }
-        .pl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .pl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; justify-items: center; }
         .pl-cal-day {
-          aspect-ratio: 1; max-height: 40px; width: 100%;
+          width: 36px; height: 36px; flex-shrink: 0;
           border: none; background: none; border-radius: 50%;
           font-family: var(--font-body); font-size: 0.78rem; font-weight: 500;
           color: var(--ink); cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           transition: background 0.12s, color 0.12s;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
         .pl-cal-day.is-outside { color: var(--ink-muted); opacity: 0.4; }
         .pl-cal-day.is-planned:not(.is-today):not(.is-selected) {
@@ -1912,10 +1919,16 @@ export default function PlannerClient() {
           color: var(--ink-muted); letter-spacing: 0.01em;
           border-radius: 10px;
           transition: color 0.15s, background 0.15s;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation;
         }
-        .pl-week-jump:hover:not(:disabled) { color: var(--ink); background: rgba(255,255,255,0.55); }
+        .pl-week-jump:active:not(:disabled) { color: var(--ink); background: rgba(255,255,255,0.55); }
+        .pl-week-jump:focus { outline: none; background: none; color: var(--ink-muted); }
+        .pl-week-jump:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; color: var(--ink); }
         .pl-week-jump:disabled { cursor: default; opacity: 0.55; }
         .pl-week-jump .loading-dots { transform: scale(0.7); }
+        @media (hover: hover) {
+          .pl-week-jump:hover:not(:disabled) { color: var(--ink); background: rgba(255,255,255,0.55); }
+        }
         .pl-days-clip {
           flex: 1 1 auto;
           min-height: 0;
@@ -2215,7 +2228,7 @@ export default function PlannerClient() {
           .pl-chip-wd { font-size: 0.56rem; }
           .pl-chip-num { font-size: 0.72rem; }
           .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
-          .pl-cal-day { max-height: 36px; font-size: 0.74rem; }
+          .pl-cal-day { width: 32px; height: 32px; font-size: 0.74rem; }
           .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
           .pl-recipe-name { font-size: 0.84rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
