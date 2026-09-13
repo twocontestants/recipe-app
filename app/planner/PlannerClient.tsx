@@ -41,8 +41,8 @@ import {
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
   WEEK_SHIFT_MS,
-  incomingWeekOffset,
-  playSyncedTranslateY,
+  incomingWeekAnchor,
+  playSyncedShift,
   shouldAnimateWeekShift,
   type WeekShiftDirection,
 } from '@/lib/plannerWeekShift';
@@ -1012,21 +1012,29 @@ export default function PlannerClient() {
 
   useLayoutEffect(() => {
     if (!weekShift) return;
-    const days = [...(daysClipRef.current?.querySelectorAll('.pl-days') ?? [])] as HTMLElement[];
-    const strips = [...(weekStripClipRef.current?.querySelectorAll('.pl-week-strip') ?? [])] as HTMLElement[];
-    const els = [...days, ...strips];
-    if (els.length < 2) {
+    const dayClip = daysClipRef.current;
+    const stripClip = weekStripClipRef.current;
+    const days = [...(dayClip?.querySelectorAll('.pl-days') ?? [])] as HTMLElement[];
+    const strips = [...(stripClip?.querySelectorAll('.pl-week-strip') ?? [])] as HTMLElement[];
+    const dayDistance = dayClip?.getBoundingClientRect().height ?? 0;
+    const stripDistance = stripClip?.getBoundingClientRect().width ?? 0;
+    if (days.length < 2 || dayDistance < 8) {
       commitWeekShift();
       return;
     }
-    els.forEach(el => { void el.getBoundingClientRect(); });
-    const animations = playSyncedTranslateY(els, weekShift.direction);
+    const animations = playSyncedShift(
+      [
+        { elements: days, axis: 'y', distance: dayDistance },
+        { elements: strips, axis: 'x', distance: Math.max(stripDistance, 1) },
+      ],
+      weekShift.direction,
+    );
     let settled = false;
     const finish = () => {
       if (settled) return;
       settled = true;
       animations.forEach(animation => animation.cancel());
-      els.forEach(el => { el.style.transform = ''; });
+      [...days, ...strips].forEach(el => { el.style.transform = ''; });
       flushSync(() => { commitWeekShift(); });
     };
     void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
@@ -1038,7 +1046,8 @@ export default function PlannerClient() {
     };
   }, [weekShift]);
 
-  const incomingOffset = weekShift ? { top: incomingWeekOffset(weekShift.direction) } : undefined;
+  const incomingDaysStyle = weekShift ? incomingWeekAnchor(weekShift.direction, 'y') : undefined;
+  const incomingStripStyle = weekShift ? incomingWeekAnchor(weekShift.direction, 'x') : undefined;
   const labelWeekStart = weekShift?.toStart ?? weekStart;
   const shifting = Boolean(weekShift) || Boolean(weekShiftBusy);
 
@@ -1050,7 +1059,7 @@ export default function PlannerClient() {
         role={incoming ? undefined : 'tablist'}
         aria-hidden={incoming || undefined}
         aria-label={incoming ? undefined : 'Days this week'}
-        style={incoming && weekShift ? incomingOffset : undefined}
+        style={incoming && weekShift ? incomingStripStyle : undefined}
       >
         {DAYS.map((dayName, dayIndex) => {
           const date = getDayDate(start, dayIndex);
@@ -1084,7 +1093,7 @@ export default function PlannerClient() {
       <div
         className={`pl-days${drag?.armed && !incoming ? ' is-dragging' : ''}${incoming ? ' is-incoming' : ''}`}
         aria-hidden={incoming || undefined}
-        style={incoming && weekShift ? incomingOffset : undefined}
+        style={incoming && weekShift ? incomingDaysStyle : undefined}
       >
         {DAYS.map((_, dayIndex) => {
           const date = getDayDate(start, dayIndex);
@@ -1668,7 +1677,7 @@ export default function PlannerClient() {
         }
         .pl-week-strip-clip.is-shifting { pointer-events: none; }
         .pl-week-strip.is-incoming {
-          position: absolute; left: 0; right: 0; height: 100%; width: 100%;
+          position: absolute; left: 0; right: auto; height: 100%; width: 100%;
           pointer-events: none;
         }
         .pl-cal-slot {

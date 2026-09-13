@@ -1,27 +1,31 @@
-export const WEEK_SHIFT_MS = 520;
+export const WEEK_SHIFT_MS = 640;
 export const WEEK_SHIFT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 export type WeekShiftDirection = 'next' | 'prev';
+export type WeekShiftAxis = 'x' | 'y';
 
-/** Incoming week sits just below (next) or above (prev) the visible clip. */
-export function incomingWeekOffset(direction: WeekShiftDirection): string {
-  return direction === 'next' ? '100%' : '-100%';
+export function incomingWeekAnchor(
+  direction: WeekShiftDirection,
+  axis: WeekShiftAxis,
+): { top: string; left?: string } {
+  const start = direction === 'next' ? '100%' : '-100%';
+  if (axis === 'y') return { top: start };
+  return { top: '0', left: start };
 }
 
-/**
- * Both the recipe list and the week-chip strip use this transform so they
- * start and finish together. Percentages are of each element's own height.
- */
-export function weekShiftTranslateY(direction: WeekShiftDirection, edge: 'start' | 'end'): string {
-  if (edge === 'start') return 'translateY(0%)';
-  return direction === 'next' ? 'translateY(-100%)' : 'translateY(100%)';
+export function weekShiftDelta(direction: WeekShiftDirection, distancePx: number): number {
+  return (direction === 'next' ? -1 : 1) * distancePx;
 }
 
-export function weekShiftKeyframes(direction: WeekShiftDirection): Array<{ transform: string }> {
-  return [
-    { transform: weekShiftTranslateY(direction, 'start') },
-    { transform: weekShiftTranslateY(direction, 'end') },
-  ];
+export function weekShiftKeyframes(
+  axis: WeekShiftAxis,
+  direction: WeekShiftDirection,
+  distancePx: number,
+): Array<{ transform: string }> {
+  const delta = weekShiftDelta(direction, distancePx);
+  const from = axis === 'y' ? 'translateY(0px)' : 'translateX(0px)';
+  const to = axis === 'y' ? `translateY(${delta}px)` : `translateX(${delta}px)`;
+  return [{ transform: from }, { transform: to }];
 }
 
 export function weekShiftAnimationOptions(): KeyframeAnimationOptions {
@@ -32,10 +36,15 @@ export function weekShiftAnimationOptions(): KeyframeAnimationOptions {
   };
 }
 
-export function playSyncedTranslateY(elements: HTMLElement[], direction: WeekShiftDirection): Animation[] {
-  const keyframes = weekShiftKeyframes(direction);
+export function playSyncedShift(
+  groups: Array<{ elements: HTMLElement[]; axis: WeekShiftAxis; distance: number }>,
+  direction: WeekShiftDirection,
+): Animation[] {
   const options = weekShiftAnimationOptions();
-  return elements.map(el => el.animate(keyframes, options));
+  return groups.flatMap(group => {
+    const keyframes = weekShiftKeyframes(group.axis, direction, group.distance);
+    return group.elements.map(el => el.animate(keyframes, options));
+  });
 }
 
 export function prefersReducedWeekShift(

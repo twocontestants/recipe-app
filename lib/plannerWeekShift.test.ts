@@ -2,29 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   WEEK_SHIFT_EASING,
   WEEK_SHIFT_MS,
-  incomingWeekOffset,
-  playSyncedTranslateY,
+  incomingWeekAnchor,
+  playSyncedShift,
   prefersReducedWeekShift,
   shouldAnimateWeekShift,
   weekShiftAnimationOptions,
+  weekShiftDelta,
   weekShiftKeyframes,
-  weekShiftTranslateY,
 } from './plannerWeekShift';
 
 describe('week shift motion', () => {
-  it('parks the incoming week below for next and above for previous', () => {
-    expect(incomingWeekOffset('next')).toBe('100%');
-    expect(incomingWeekOffset('prev')).toBe('-100%');
+  it('parks the incoming recipes below/above and the chips to the side', () => {
+    expect(incomingWeekAnchor('next', 'y')).toEqual({ top: '100%' });
+    expect(incomingWeekAnchor('prev', 'y')).toEqual({ top: '-100%' });
+    expect(incomingWeekAnchor('next', 'x')).toEqual({ top: '0', left: '100%' });
+    expect(incomingWeekAnchor('prev', 'x')).toEqual({ top: '0', left: '-100%' });
   });
 
-  it('scrolls next week up from below and previous week down from above', () => {
-    expect(weekShiftTranslateY('next', 'start')).toBe('translateY(0%)');
-    expect(weekShiftTranslateY('next', 'end')).toBe('translateY(-100%)');
-    expect(weekShiftTranslateY('prev', 'start')).toBe('translateY(0%)');
-    expect(weekShiftTranslateY('prev', 'end')).toBe('translateY(100%)');
+  it('moves next week in the negative direction and previous week in the positive', () => {
+    expect(weekShiftDelta('next', 400)).toBe(-400);
+    expect(weekShiftDelta('prev', 400)).toBe(400);
   });
 
-  it('plays the same keyframes and timing on every track', () => {
+  it('plays the same duration on recipe and chip tracks even when distances differ', () => {
     const calls: Array<{ keyframes: unknown; options: unknown }> = [];
     const el = {
       animate: vi.fn((keyframes: unknown, options: unknown) => {
@@ -32,11 +32,21 @@ describe('week shift motion', () => {
         return { finished: Promise.resolve() };
       }),
     };
-    playSyncedTranslateY([el, el] as unknown as HTMLElement[], 'next');
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual(calls[1]);
-    expect(calls[0].keyframes).toEqual(weekShiftKeyframes('next'));
+    const days = el as unknown as HTMLElement;
+    const chips = el as unknown as HTMLElement;
+    playSyncedShift(
+      [
+        { elements: [days, days], axis: 'y', distance: 400 },
+        { elements: [chips, chips], axis: 'x', distance: 280 },
+      ],
+      'next',
+    );
+    expect(calls).toHaveLength(4);
     expect(calls[0].options).toEqual(weekShiftAnimationOptions());
+    expect(calls.every(call => call.options)).toBeTruthy();
+    expect(calls[0].options).toEqual(calls[3].options);
+    expect(calls[0].keyframes).toEqual(weekShiftKeyframes('y', 'next', 400));
+    expect(calls[2].keyframes).toEqual(weekShiftKeyframes('x', 'next', 280));
     expect(weekShiftAnimationOptions()).toEqual({
       duration: WEEK_SHIFT_MS,
       easing: WEEK_SHIFT_EASING,
