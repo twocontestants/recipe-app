@@ -29,6 +29,10 @@ describe('notesByDisplayIndex', () => {
       { '2026-08-24': 'Mon', '2026-08-26': 'Wed', '2026-08-31': 'next' },
       '2026-08-24',
     )).toEqual({ 0: 'Mon', 2: 'Wed' });
+    expect(notesByDisplayIndex(
+      new Map([['2026-08-24', 'Mon'], ['2026-08-26', 'Wed']]),
+      '2026-08-24',
+    )).toEqual({ 0: 'Mon', 2: 'Wed' });
   });
 });
 
