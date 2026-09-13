@@ -43,12 +43,16 @@ import {
 } from '@/lib/plannerDays';
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
+  WEEK_CROSSFADE_MS,
   WEEK_SHIFT_MS,
   incomingWeekAnchor,
+  incomingWeekFadeAnchor,
+  playSyncedCrossfade,
   playSyncedShift,
   shouldAnimateWeekShift,
-  weekSlideDirection,
+  weekJumpMotion,
   type WeekShiftDirection,
+  type WeekShiftMotion,
 } from '@/lib/plannerWeekShift';
 import {
   isRailOrigin,
@@ -204,6 +208,7 @@ export default function PlannerClient() {
   const weekShiftLockRef = useRef(false);
   const weekShiftRef = useRef<{
     direction: WeekShiftDirection;
+    motion: WeekShiftMotion;
     fromStart: Date;
     toStart: Date;
     fromNotes: Record<number, string>;
@@ -980,9 +985,9 @@ export default function PlannerClient() {
       return;
     }
     cancelWeekShift();
-    const slide = weekSlideDirection(displayWeekOffset(fromIso, toIso));
-    if (slide) {
-      void shiftAdjacentWeek(slide === 'next' ? 1 : -1, dayIndex);
+    const jump = weekJumpMotion(displayWeekOffset(fromIso, toIso));
+    if (jump) {
+      void shiftToWeek(toStart, jump.direction, jump.motion, dayIndex);
       return;
     }
     setWeekStart(toStart);
@@ -1002,13 +1007,15 @@ export default function PlannerClient() {
     setWeekShiftBusy(null);
   };
 
-  const shiftAdjacentWeek = async (weeks: 1 | -1, selectDayIndex?: number) => {
+  const shiftToWeek = async (
+    toStart: Date,
+    direction: WeekShiftDirection,
+    motion: WeekShiftMotion,
+    selectDayIndex?: number,
+  ) => {
     if (weekShiftRef.current || weekShiftLockRef.current) return;
     const fromStart = weekStartRef.current;
-    const toStart = new Date(fromStart);
-    toStart.setDate(fromStart.getDate() + weeks * 7);
     const toIso = formatDate(toStart);
-    const direction: WeekShiftDirection = weeks === 1 ? 'next' : 'prev';
     const gen = ++weekShiftGen.current;
     weekShiftLockRef.current = true;
     const monthKeys = monthsForDisplayWeek(toIso);
@@ -1032,6 +1039,7 @@ export default function PlannerClient() {
       }
       const next = {
         direction,
+        motion,
         fromStart,
         toStart,
         fromNotes: notesForWeek(fromStart),
@@ -1048,6 +1056,13 @@ export default function PlannerClient() {
     }
   };
 
+  const shiftAdjacentWeek = (weeks: 1 | -1, selectDayIndex?: number) => {
+    const fromStart = weekStartRef.current;
+    const toStart = new Date(fromStart);
+    toStart.setDate(fromStart.getDate() + weeks * 7);
+    return shiftToWeek(toStart, weeks === 1 ? 'next' : 'prev', 'slide', selectDayIndex);
+  };
+
   useLayoutEffect(() => {
     if (!weekShift) return;
     const dayClip = daysClipRef.current;
@@ -1061,23 +1076,29 @@ export default function PlannerClient() {
       return;
     }
     try {
-      const animations = playSyncedShift(
-        [
-          { elements: days, axis: 'y', distance: dayDistance },
-          { elements: strips, axis: 'x', distance: stripDistance },
-        ],
-        weekShift.direction,
-      );
+      const fading = weekShift.motion === 'crossfade';
+      const animations = fading
+        ? playSyncedCrossfade([days[0], strips[0]].filter(Boolean), [days[1], strips[1]].filter(Boolean))
+        : playSyncedShift(
+          [
+            { elements: days, axis: 'y', distance: dayDistance },
+            { elements: strips, axis: 'x', distance: stripDistance },
+          ],
+          weekShift.direction,
+        );
       let settled = false;
       const finish = () => {
         if (settled) return;
         settled = true;
         animations.forEach(animation => animation.cancel());
-        [...days, ...strips].forEach(el => { el.style.transform = ''; });
+        [...days, ...strips].forEach(el => {
+          el.style.transform = '';
+          el.style.opacity = '';
+        });
         flushSync(() => { commitWeekShift(); });
       };
       void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
-      const timer = window.setTimeout(finish, WEEK_SHIFT_MS + 80);
+      const timer = window.setTimeout(finish, (fading ? WEEK_CROSSFADE_MS : WEEK_SHIFT_MS) + 80);
       return () => {
         settled = true;
         animations.forEach(animation => animation.cancel());
@@ -1088,8 +1109,12 @@ export default function PlannerClient() {
     }
   }, [weekShift]);
 
-  const incomingDaysStyle = weekShift ? incomingWeekAnchor(weekShift.direction, 'y') : undefined;
-  const incomingStripStyle = weekShift ? incomingWeekAnchor(weekShift.direction, 'x') : undefined;
+  const incomingDaysStyle = weekShift
+    ? (weekShift.motion === 'crossfade' ? incomingWeekFadeAnchor() : incomingWeekAnchor(weekShift.direction, 'y'))
+    : undefined;
+  const incomingStripStyle = weekShift
+    ? (weekShift.motion === 'crossfade' ? incomingWeekFadeAnchor() : incomingWeekAnchor(weekShift.direction, 'x'))
+    : undefined;
   const labelWeekStart = weekShift?.toStart ?? weekStart;
   const shifting = Boolean(weekShift) || Boolean(weekShiftBusy);
 
@@ -1314,7 +1339,7 @@ export default function PlannerClient() {
           <button type="button" className="pl-nav-btn" aria-label="Previous week" disabled={shifting} onClick={() => { void shiftAdjacentWeek(-1); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
-          <div ref={weekStripClipRef} className={`pl-week-strip-clip${weekShift ? ' is-shifting' : ''}`}>
+          <div ref={weekStripClipRef} className={`pl-week-strip-clip${weekShift ? ' is-shifting' : ''}${weekShift?.motion === 'crossfade' ? ' is-fading' : ''}`}>
             {renderWeekStrip(weekShift?.fromStart ?? weekStart, false)}
             {weekShift ? renderWeekStrip(weekShift.toStart, true) : null}
           </div>
@@ -1403,7 +1428,7 @@ export default function PlannerClient() {
           </button>
           <div
             ref={daysClipRef}
-            className={`pl-days-clip${weekShift ? ' is-shifting' : ''}${drag?.armed ? ' is-dragging' : ''}`}
+            className={`pl-days-clip${weekShift ? ' is-shifting' : ''}${weekShift?.motion === 'crossfade' ? ' is-fading' : ''}${drag?.armed ? ' is-dragging' : ''}`}
           >
             {renderWeekDays(weekShift?.fromStart ?? weekStart, weekShift?.fromNotes ?? notes, false)}
             {weekShift ? renderWeekDays(weekShift.toStart, weekShift.toNotes, true) : null}
@@ -1900,6 +1925,8 @@ export default function PlannerClient() {
         .pl-days-clip.is-shifting { pointer-events: none; }
         .pl-days-clip.is-shifting .pl-days,
         .pl-week-strip-clip.is-shifting .pl-week-strip { will-change: transform; }
+        .pl-days-clip.is-fading .pl-days,
+        .pl-week-strip-clip.is-fading .pl-week-strip { will-change: opacity; }
         .pl-days-clip.is-dragging { user-select: none; cursor: grabbing; }
         .pl-days {
           height: 100%;
