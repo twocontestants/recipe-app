@@ -1,13 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   WEEK_SHIFT_EASING,
   WEEK_SHIFT_MS,
   incomingWeekOffset,
-  incomingWeekStyle,
+  playSyncedTranslateY,
   prefersReducedWeekShift,
   shouldAnimateWeekShift,
-  weekShiftDurationMs,
-  weekShiftMotionStyle,
+  weekShiftAnimationOptions,
+  weekShiftKeyframes,
   weekShiftTranslateY,
 } from './plannerWeekShift';
 
@@ -24,31 +24,32 @@ describe('week shift motion', () => {
     expect(weekShiftTranslateY('prev', 'end')).toBe('translateY(100%)');
   });
 
-  it('uses the same transform and timing for the recipe list and the week strip', () => {
-    const nextEnd = weekShiftMotionStyle('next', 'end');
-    const incoming = incomingWeekStyle('next', 'end');
-    expect(incoming.transform).toBe(nextEnd.transform);
-    expect(incoming.transition).toBe(nextEnd.transition);
-    expect(incoming.transition).toBe(`transform ${WEEK_SHIFT_MS}ms ${WEEK_SHIFT_EASING}`);
-    expect(incoming.top).toBe('100%');
-  });
-
-  it('does not animate the start frame so the incoming week can be positioned first', () => {
-    expect(weekShiftMotionStyle('prev', 'start').transition).toBe('none');
-    expect(incomingWeekStyle('prev', 'start')).toEqual({
-      top: '-100%',
-      transform: 'translateY(0%)',
-      transition: 'none',
+  it('plays the same keyframes and timing on every track', () => {
+    const calls: Array<{ keyframes: unknown; options: unknown }> = [];
+    const el = {
+      animate: vi.fn((keyframes: unknown, options: unknown) => {
+        calls.push({ keyframes, options });
+        return { finished: Promise.resolve() };
+      }),
+    };
+    playSyncedTranslateY([el, el] as unknown as HTMLElement[], 'next');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(calls[1]);
+    expect(calls[0].keyframes).toEqual(weekShiftKeyframes('next'));
+    expect(calls[0].options).toEqual(weekShiftAnimationOptions());
+    expect(weekShiftAnimationOptions()).toEqual({
+      duration: WEEK_SHIFT_MS,
+      easing: WEEK_SHIFT_EASING,
+      fill: 'forwards',
     });
   });
 });
 
-describe('weekShiftDurationMs', () => {
-  it('reads seconds and milliseconds from computed transition-duration', () => {
-    expect(weekShiftDurationMs({ transitionDuration: '0.46s' })).toBe(460);
-    expect(weekShiftDurationMs({ transitionDuration: '460ms' })).toBe(460);
-    expect(weekShiftDurationMs({ transitionDuration: '0s' })).toBe(0);
-    expect(weekShiftDurationMs({ transitionDuration: '' })).toBe(0);
+describe('prefersReducedWeekShift', () => {
+  it('skips motion when the user asks for reduced motion', () => {
+    expect(prefersReducedWeekShift(() => ({ matches: true }))).toBe(true);
+    expect(prefersReducedWeekShift(() => ({ matches: false }))).toBe(false);
+    expect(prefersReducedWeekShift()).toBe(false);
   });
 });
 

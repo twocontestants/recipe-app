@@ -1,8 +1,7 @@
-export const WEEK_SHIFT_MS = 460;
+export const WEEK_SHIFT_MS = 520;
 export const WEEK_SHIFT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 export type WeekShiftDirection = 'next' | 'prev';
-export type WeekShiftPhase = 'start' | 'end';
 
 /** Incoming week sits just below (next) or above (prev) the visible clip. */
 export function incomingWeekOffset(direction: WeekShiftDirection): string {
@@ -13,43 +12,30 @@ export function incomingWeekOffset(direction: WeekShiftDirection): string {
  * Both the recipe list and the week-chip strip use this transform so they
  * start and finish together. Percentages are of each element's own height.
  */
-export function weekShiftTranslateY(
-  direction: WeekShiftDirection,
-  phase: WeekShiftPhase,
-): string {
-  if (phase === 'start') return 'translateY(0%)';
+export function weekShiftTranslateY(direction: WeekShiftDirection, edge: 'start' | 'end'): string {
+  if (edge === 'start') return 'translateY(0%)';
   return direction === 'next' ? 'translateY(-100%)' : 'translateY(100%)';
 }
 
-export function weekShiftMotionStyle(
-  direction: WeekShiftDirection,
-  phase: WeekShiftPhase,
-): { transform: string; transition: string } {
+export function weekShiftKeyframes(direction: WeekShiftDirection): Array<{ transform: string }> {
+  return [
+    { transform: weekShiftTranslateY(direction, 'start') },
+    { transform: weekShiftTranslateY(direction, 'end') },
+  ];
+}
+
+export function weekShiftAnimationOptions(): KeyframeAnimationOptions {
   return {
-    transform: weekShiftTranslateY(direction, phase),
-    transition: phase === 'end'
-      ? `transform ${WEEK_SHIFT_MS}ms ${WEEK_SHIFT_EASING}`
-      : 'none',
+    duration: WEEK_SHIFT_MS,
+    easing: WEEK_SHIFT_EASING,
+    fill: 'forwards',
   };
 }
 
-export function incomingWeekStyle(
-  direction: WeekShiftDirection,
-  phase: WeekShiftPhase,
-): { top: string; transform: string; transition: string } {
-  return {
-    top: incomingWeekOffset(direction),
-    ...weekShiftMotionStyle(direction, phase),
-  };
-}
-
-/** Parse a CSS `transition-duration` value (first item if a list) into ms. */
-export function weekShiftDurationMs(style: { transitionDuration: string }): number {
-  const raw = style.transitionDuration.split(',')[0]?.trim() ?? '';
-  if (!raw) return 0;
-  if (raw.endsWith('ms')) return parseFloat(raw) || 0;
-  if (raw.endsWith('s')) return (parseFloat(raw) || 0) * 1000;
-  return parseFloat(raw) || 0;
+export function playSyncedTranslateY(elements: HTMLElement[], direction: WeekShiftDirection): Animation[] {
+  const keyframes = weekShiftKeyframes(direction);
+  const options = weekShiftAnimationOptions();
+  return elements.map(el => el.animate(keyframes, options));
 }
 
 export function prefersReducedWeekShift(
@@ -58,7 +44,7 @@ export function prefersReducedWeekShift(
   return Boolean(matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
 }
 
-/** Skip CSS week slides in jsdom and when the user asks for reduced motion. */
+/** Skip week slides in jsdom and when the user asks for reduced motion. */
 export function shouldAnimateWeekShift(win: {
   matchMedia?: (query: string) => { matches: boolean } | null;
   navigator?: { userAgent?: string };

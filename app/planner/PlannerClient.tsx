@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import PickerSearchField from '@/components/PickerSearchField';
@@ -40,12 +41,10 @@ import {
 import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
 import {
   WEEK_SHIFT_MS,
-  incomingWeekStyle,
+  incomingWeekOffset,
+  playSyncedTranslateY,
   shouldAnimateWeekShift,
-  weekShiftDurationMs,
-  weekShiftMotionStyle,
   type WeekShiftDirection,
-  type WeekShiftPhase,
 } from '@/lib/plannerWeekShift';
 import {
   isRailOrigin,
@@ -203,7 +202,6 @@ export default function PlannerClient() {
     toStart: Date;
     fromNotes: Record<number, string>;
     toNotes: Record<number, string>;
-    phase: WeekShiftPhase;
   } | null>(null);
   const [weekShift, setWeekShift] = useState<typeof weekShiftRef.current>(null);
   const [weekShiftBusy, setWeekShiftBusy] = useState<WeekShiftDirection | null>(null);
@@ -1002,7 +1000,6 @@ export default function PlannerClient() {
         toStart,
         fromNotes: notesRef.current,
         toNotes,
-        phase: 'start' as const,
       };
       weekShiftRef.current = next;
       setWeekShift(next);
@@ -1014,47 +1011,34 @@ export default function PlannerClient() {
   };
 
   useLayoutEffect(() => {
-    if (!weekShift || weekShift.phase !== 'start') return;
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setWeekShift(current => (
-          current && current.phase === 'start' ? { ...current, phase: 'end' } : current
-        ));
-      });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [weekShift]);
-
-  useEffect(() => {
-    if (!weekShift || weekShift.phase !== 'end') return;
-    const el = daysClipRef.current?.querySelector('.pl-days') as HTMLElement | null;
-    const ms = el ? weekShiftDurationMs(getComputedStyle(el)) : WEEK_SHIFT_MS;
-    if (ms <= 0) {
+    if (!weekShift) return;
+    const days = [...(daysClipRef.current?.querySelectorAll('.pl-days') ?? [])] as HTMLElement[];
+    const strips = [...(weekStripClipRef.current?.querySelectorAll('.pl-week-strip') ?? [])] as HTMLElement[];
+    const els = [...days, ...strips];
+    if (els.length < 2) {
       commitWeekShift();
       return;
     }
+    els.forEach(el => { void el.getBoundingClientRect(); });
+    const animations = playSyncedTranslateY(els, weekShift.direction);
     let settled = false;
     const finish = () => {
       if (settled) return;
       settled = true;
-      commitWeekShift();
+      animations.forEach(animation => animation.cancel());
+      els.forEach(el => { el.style.transform = ''; });
+      flushSync(() => { commitWeekShift(); });
     };
-    const onEnd = (event: TransitionEvent) => {
-      if (event.propertyName !== 'transform') return;
-      finish();
-    };
-    el?.addEventListener('transitionend', onEnd);
-    const strip = weekStripClipRef.current?.querySelector('.pl-week-strip');
-    strip?.addEventListener('transitionend', onEnd as EventListener);
-    const timer = window.setTimeout(finish, ms + 40);
+    void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
+    const timer = window.setTimeout(finish, WEEK_SHIFT_MS + 80);
     return () => {
-      el?.removeEventListener('transitionend', onEnd);
-      strip?.removeEventListener('transitionend', onEnd as EventListener);
+      settled = true;
+      animations.forEach(animation => animation.cancel());
       window.clearTimeout(timer);
     };
   }, [weekShift]);
 
-  const shiftMotion = weekShift ? weekShiftMotionStyle(weekShift.direction, weekShift.phase) : undefined;
+  const incomingOffset = weekShift ? { top: incomingWeekOffset(weekShift.direction) } : undefined;
   const labelWeekStart = weekShift?.toStart ?? weekStart;
   const shifting = Boolean(weekShift) || Boolean(weekShiftBusy);
 
@@ -1066,9 +1050,7 @@ export default function PlannerClient() {
         role={incoming ? undefined : 'tablist'}
         aria-hidden={incoming || undefined}
         aria-label={incoming ? undefined : 'Days this week'}
-        style={incoming && weekShift
-          ? incomingWeekStyle(weekShift.direction, weekShift.phase)
-          : shiftMotion}
+        style={incoming && weekShift ? incomingOffset : undefined}
       >
         {DAYS.map((dayName, dayIndex) => {
           const date = getDayDate(start, dayIndex);
@@ -1102,9 +1084,7 @@ export default function PlannerClient() {
       <div
         className={`pl-days${drag?.armed && !incoming ? ' is-dragging' : ''}${incoming ? ' is-incoming' : ''}`}
         aria-hidden={incoming || undefined}
-        style={incoming && weekShift
-          ? incomingWeekStyle(weekShift.direction, weekShift.phase)
-          : shiftMotion}
+        style={incoming && weekShift ? incomingOffset : undefined}
       >
         {DAYS.map((_, dayIndex) => {
           const date = getDayDate(start, dayIndex);
