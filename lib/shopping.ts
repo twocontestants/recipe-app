@@ -221,8 +221,9 @@ export function aggregateContributions(contributions: { amount: string; unit: st
   return { totalAmount: totalCount ? formatDecimal(totalCount) : '', unit: countUnit || '' };
 }
 
-/** One ticked dinner from the generate-list UI (calendar day + recipe). */
+/** One ticked dinner from the generate-list UI (meal plan id, or calendar day + recipe). */
 export type ShoppingDinnerPick = {
+  id?: string;
   recipe_id: string;
   planned_on?: string | Date | null;
   week_start?: string | Date | null;
@@ -237,20 +238,27 @@ function dinnerPickKey(pick: ShoppingDinnerPick): string {
 
 /**
  * Keep only the dinners the cook ticked.
- * `recipe_ids` + whole weeks is too coarse: the same recipe last week (or later
- * in the same storage week) would otherwise be counted again.
+ * Prefer meal-plan id so two same-day copies of a recipe stay independent.
+ * Fall back to calendar day + recipe for older clients that omit id.
  */
-export function mealPlansForSelectedDinners<T extends ShoppingDinnerPick>(
+export function mealPlansForSelectedDinners<T extends ShoppingDinnerPick & { id?: string }>(
   plans: T[],
   picks: ShoppingDinnerPick[],
 ): T[] {
-  const wanted = new Set<string>();
+  const wantedIds = new Set<string>();
+  const wantedKeys = new Set<string>();
   for (const pick of picks) {
-    const key = dinnerPickKey(pick);
-    if (key) wanted.add(key);
+    if (pick.id) wantedIds.add(pick.id);
+    else {
+      const key = dinnerPickKey(pick);
+      if (key) wantedKeys.add(key);
+    }
   }
-  if (!wanted.size) return [];
-  return plans.filter(plan => wanted.has(dinnerPickKey(plan)));
+  if (!wantedIds.size && !wantedKeys.size) return [];
+  return plans.filter(plan => {
+    if (plan.id && wantedIds.has(plan.id)) return true;
+    return wantedKeys.size > 0 && wantedKeys.has(dinnerPickKey(plan));
+  });
 }
 
 export function parseShoppingDinnerPicks(raw: unknown): ShoppingDinnerPick[] {
@@ -259,6 +267,7 @@ export function parseShoppingDinnerPicks(raw: unknown): ShoppingDinnerPick[] {
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const row = item as {
+      id?: unknown;
       recipe_id?: unknown;
       planned_on?: unknown;
       week_start?: unknown;
@@ -266,6 +275,7 @@ export function parseShoppingDinnerPicks(raw: unknown): ShoppingDinnerPick[] {
     };
     if (typeof row.recipe_id !== 'string' || !row.recipe_id) continue;
     const pick: ShoppingDinnerPick = { recipe_id: row.recipe_id };
+    if (typeof row.id === 'string' && row.id) pick.id = row.id;
     if (typeof row.planned_on === 'string' && row.planned_on) pick.planned_on = row.planned_on;
     if (typeof row.week_start === 'string' && row.week_start) pick.week_start = row.week_start;
     if (row.day_of_week !== undefined) pick.day_of_week = row.day_of_week;

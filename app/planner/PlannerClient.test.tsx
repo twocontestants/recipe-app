@@ -16,6 +16,10 @@ vi.mock('@/components/usePlannerLive', () => ({
   usePlannerLive: () => ({ broadcastPlannerChanged: vi.fn() }),
 }));
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
+
 import PlannerClient from './PlannerClient';
 
 afterEach(() => {
@@ -85,8 +89,8 @@ describe('PlannerClient week nav', () => {
     });
     expect(screen.queryByText(/of 7 planned/i)).toBeNull();
     expect(screen.getByRole('button', { name: 'Auto-plan' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New shopping list' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Jump to a date' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Shopping list' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Previous week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Go to previous week' })).toBeTruthy();
@@ -205,5 +209,34 @@ describe('PlannerClient week nav', () => {
     expect(screen.getByRole('menuitem', { name: 'Replace' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /move to/i })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
+  });
+
+  it('opens a shopping list dialogue for the week on screen', async () => {
+    const today = localDateIso(new Date());
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return {
+          ok: true,
+          json: async () => [dinner('today-meal', today)],
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New shopping list' }));
+    expect(await screen.findByRole('dialog', { name: 'New shopping list' })).toBeTruthy();
+    expect(await screen.findByRole('checkbox', { name: /meal today-meal/i })).toBeTruthy();
+    expect(screen.getByText('this week')).toBeTruthy();
   });
 });

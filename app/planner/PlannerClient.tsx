@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import type { Recipe, MealPlan } from '@/lib/db';
 import { showToast } from '@/components/Toast';
+import GenerateListModal from '@/components/GenerateListModal';
 import PickerSearchField from '@/components/PickerSearchField';
 import PickerRecipeRow from '@/components/PickerRecipeRow';
 import PlannerCardMenu from '@/components/PlannerCardMenu';
@@ -113,6 +115,7 @@ interface MagicSettings { variety: 'low'|'medium'|'high'; servings: number; pref
 
 export default function PlannerClient() {
   const { user } = useAuth();
+  const router = useRouter();
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   const [weekStart, setWeekStart] = useState<Date>(() => startOfDisplayWeek(new Date(), 'monday'));
   const [selectedDayIndex, setSelectedDayIndex] = useState(() => displayDayIndex(new Date(), 'monday'));
@@ -134,6 +137,7 @@ export default function PlannerClient() {
 
   // Magic
   const [showMagic, setShowMagic] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
   const [magicSettings, setMagicSettings] = useState<MagicSettings>({ variety: 'medium', servings: 4, preferTags: '', excludeTags: '' });
   const [magicLoading, setMagicLoading] = useState(false);
 
@@ -1247,12 +1251,27 @@ export default function PlannerClient() {
               <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
             )}
           </div>
-          <button type="button" className="pl-magic-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-            </svg>
-            <span>Auto-plan</span>
-          </button>
+          <div className="pl-nav-actions">
+            <button
+              type="button"
+              className="pl-shop-btn"
+              title="New shopping list"
+              aria-label="New shopping list"
+              onClick={() => setShowGenerate(true)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+                <rect x="9" y="3" width="6" height="4" rx="1"/>
+                <path d="M9 12h6M9 16h4"/>
+              </svg>
+            </button>
+            <button type="button" className="pl-magic-btn" title="Auto-plan" aria-label="Auto-plan" onClick={() => setShowMagic(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+              </svg>
+              <span>Auto-plan</span>
+            </button>
+          </div>
         </div>
 
         <div className="pl-week-bar">
@@ -1571,6 +1590,18 @@ export default function PlannerClient() {
         </>
       )}
 
+      {showGenerate && (
+        <GenerateListModal
+          weekStartsOn={weekStartsOn}
+          defaultWeekStart={weekStartIso}
+          onClose={() => setShowGenerate(false)}
+          onCreated={() => {
+            setShowGenerate(false);
+            router.push('/shopping-list');
+          }}
+        />
+      )}
+
       {showMagic && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowMagic(false); }}>
           <div className="magic-modal">
@@ -1718,6 +1749,15 @@ export default function PlannerClient() {
           border-radius: 99px; font-family: var(--font-body); transition: all 0.15s;
         }
         .pl-today-btn:hover { background: rgba(181,69,27,0.1); }
+        .pl-nav-actions { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+        .pl-shop-btn {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 30px; height: 30px; flex-shrink: 0;
+          border: none; border-radius: 99px;
+          background: var(--parchment); color: var(--ink);
+          cursor: pointer; transition: background 0.15s, color 0.15s;
+        }
+        .pl-shop-btn:hover { background: var(--rust); color: var(--cream); }
         .pl-magic-btn {
           display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
           height: 30px; padding: 0 0.7rem; flex-shrink: 0;

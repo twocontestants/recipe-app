@@ -19,6 +19,7 @@ import { io, Socket } from 'socket.io-client';
 import GenerateListModal from '@/components/GenerateListModal';
 import NewShoppingItemRow from '@/components/NewShoppingItemRow';
 import { opsNeedListChanged, type ShoppingOp } from '@/lib/shoppingOps';
+import { parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
 
 function genId() { return 'i' + Math.random().toString(36).slice(2, 10); }
 
@@ -182,6 +183,7 @@ export default function ShoppingListClient() {
   // App-wide behaviour for saving a dragged category change to the dictionary:
   // 'ask' (prompt each time), 'always' (save silently), 'never'.
   const [prefMode, setPrefMode] = useState<'ask' | 'always' | 'never'>('ask');
+  const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   // The pending "save this category to your preferences?" prompt, if any.
   const [pendingPref, setPendingPref] = useState<{ name: string; label: string; category: string } | null>(null);
   const [prefDontAsk, setPrefDontAsk] = useState(false);
@@ -413,7 +415,11 @@ export default function ShoppingListClient() {
     (async () => {
       try {
         const res = await fetch('/api/preferences');
-        if (res.ok) { const d = await res.json(); if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode); }
+        if (res.ok) {
+          const d = await res.json();
+          if (d?.categoryPrefMode) setPrefMode(d.categoryPrefMode);
+          setWeekStartsOn(parseWeekStartDay(d?.weekStartDay));
+        }
       } catch { /* default to 'ask' */ }
     })();
   }, []);
@@ -1076,6 +1082,7 @@ export default function ShoppingListClient() {
 
       {showGenerate && (
         <GenerateListModal
+          weekStartsOn={weekStartsOn}
           onClose={() => setShowGenerate(false)}
           onCreated={async (id) => {
             setShowGenerate(false);
