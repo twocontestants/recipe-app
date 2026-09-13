@@ -174,7 +174,13 @@ describe('PlannerClient week nav', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
     expect(screen.queryByText(calendarMonth)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Month calendar' })).toBeNull();
+    });
+    expect(screen.getByText('This week')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open month calendar' }));
     expect(screen.getByText(calendarMonth)).toBeTruthy();
 
     const jump = await screen.findByRole('button', { name: new RegExp(`^${otherLabel}`, 'i') });
