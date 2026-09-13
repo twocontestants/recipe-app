@@ -181,6 +181,104 @@ describe('PlannerClient week nav', () => {
     ).toBe('true');
   });
 
+  it('selects an adjacent calendar day and returns with Today', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    const nextWeek = shiftWeek(thisWeek, 1);
+    const nextWed = localDateIso(dayDateOf(nextWeek, 2));
+    const nextWedDate = new Date(`${nextWed}T12:00:00`);
+    const nextLabel = nextWedDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return { ok: true, json: async () => [dinner('this-mon-a', mon)] };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+    await screen.findByRole('tab', { name: /monday/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open month calendar' }));
+    let nextBtn = screen.queryByRole('button', { name: new RegExp(`^${nextLabel}`, 'i') });
+    if (!nextBtn) {
+      fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+      nextBtn = screen.getByRole('button', { name: new RegExp(`^${nextLabel}`, 'i') });
+    }
+    fireEvent.click(nextBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Month calendar' })).toBeNull();
+    });
+    const nextWeekday = nextWedDate.toLocaleDateString('en-AU', { weekday: 'long' });
+    expect(
+      screen.getByRole('tab', { name: new RegExp(`^${nextWeekday} ${nextWedDate.getDate()}`, 'i') })
+        .getAttribute('aria-selected'),
+    ).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    const today = new Date();
+    const todayWeekday = today.toLocaleDateString('en-AU', { weekday: 'long' });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('tab', { name: new RegExp(`^${todayWeekday} ${today.getDate()}`, 'i') })
+          .getAttribute('aria-selected'),
+      ).toBe('true');
+    });
+  });
+
+  it('jumps two weeks from the calendar in one step', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    const farWeek = shiftWeek(thisWeek, 2);
+    const farWed = localDateIso(dayDateOf(farWeek, 2));
+    const farDate = new Date(`${farWed}T12:00:00`);
+    const farLabel = farDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return { ok: true, json: async () => [dinner('this-mon-a', mon)] };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+    await screen.findByRole('tab', { name: /monday/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open month calendar' }));
+    let farBtn = screen.queryByRole('button', { name: new RegExp(`^${farLabel}`, 'i') });
+    if (!farBtn) {
+      fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+      farBtn = screen.getByRole('button', { name: new RegExp(`^${farLabel}`, 'i') });
+    }
+    fireEvent.click(farBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Month calendar' })).toBeNull();
+    });
+    const farWeekday = farDate.toLocaleDateString('en-AU', { weekday: 'long' });
+    expect(
+      screen.getByRole('tab', { name: new RegExp(`^${farWeekday} ${farDate.getDate()}`, 'i') })
+        .getAttribute('aria-selected'),
+    ).toBe('true');
+  });
+
   it('reuses cached month notes when moving to the next week', async () => {
     const thisWeek = getThisDisplayWeek('monday');
     const mon = localDateIso(dayDateOf(thisWeek, 0));

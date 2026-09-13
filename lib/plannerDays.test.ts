@@ -13,6 +13,7 @@ import {
   parseLocalIso,
   parseWeekStartDay,
   shiftWeek,
+  displayWeekOffset,
   startOfDisplayWeek,
   storageCoords,
   storageWeeksForDisplayWeek,
@@ -100,6 +101,14 @@ describe('week helpers', () => {
   it('shifts a week by seven local days', () => {
     expect(shiftWeek('2026-08-17', 1)).toBe('2026-08-24');
     expect(shiftWeek('2026-08-17', -1)).toBe('2026-08-10');
+  });
+
+  it('counts whole display weeks between week starts', () => {
+    expect(displayWeekOffset('2026-08-17', '2026-08-17')).toBe(0);
+    expect(displayWeekOffset('2026-08-17', '2026-08-24')).toBe(1);
+    expect(displayWeekOffset('2026-08-24', '2026-08-17')).toBe(-1);
+    expect(displayWeekOffset('2026-08-17', '2026-08-31')).toBe(2);
+    expect(displayWeekOffset('2026-08-17', '2026-07-20')).toBe(-4);
   });
 
   it('labels this week and next week from a fixed now', () => {

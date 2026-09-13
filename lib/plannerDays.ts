@@ -190,6 +190,15 @@ export function shiftWeek(weekStart: string, weeks: number): string {
   return localDateIso(d);
 }
 
+/** Whole display weeks between two week-start ISOs. Positive is later. */
+export function displayWeekOffset(fromWeekStart: string, toWeekStart: string): number {
+  const from = parseLocalIso(fromWeekStart);
+  const to = parseLocalIso(toWeekStart);
+  const fromUtc = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const toUtc = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((toUtc - fromUtc) / (7 * 24 * 60 * 60 * 1000));
+}
+
 export function isThisWeek(weekStart: string, now = new Date(), weekStartsOn: DayKey = 'monday'): boolean {
   return weekStart === getThisDisplayWeek(weekStartsOn, now);
 }

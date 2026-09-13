@@ -1,14 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  WEEK_CROSSFADE_MS,
   WEEK_SHIFT_EASING,
   WEEK_SHIFT_MS,
   incomingWeekAnchor,
+  incomingWeekFadeAnchor,
+  playSyncedCrossfade,
   playSyncedShift,
   prefersReducedWeekShift,
   shouldAnimateWeekShift,
+  weekCrossfadeAnimationOptions,
+  weekCrossfadeKeyframes,
+  weekJumpMotion,
   weekShiftAnimationOptions,
   weekShiftDelta,
   weekShiftKeyframes,
+  weekSlideDirection,
 } from './plannerWeekShift';
 
 describe('week shift motion', () => {
@@ -60,6 +67,55 @@ describe('prefersReducedWeekShift', () => {
     expect(prefersReducedWeekShift(() => ({ matches: true }))).toBe(true);
     expect(prefersReducedWeekShift(() => ({ matches: false }))).toBe(false);
     expect(prefersReducedWeekShift()).toBe(false);
+  });
+});
+
+describe('weekSlideDirection', () => {
+  it('slides only for an adjacent week', () => {
+    expect(weekSlideDirection(1)).toBe('next');
+    expect(weekSlideDirection(-1)).toBe('prev');
+    expect(weekSlideDirection(0)).toBeNull();
+    expect(weekSlideDirection(2)).toBeNull();
+    expect(weekSlideDirection(-3)).toBeNull();
+  });
+});
+
+describe('weekJumpMotion', () => {
+  it('crossfades multi-week jumps and slides a single week', () => {
+    expect(weekJumpMotion(0)).toBeNull();
+    expect(weekJumpMotion(1)).toEqual({ direction: 'next', motion: 'slide' });
+    expect(weekJumpMotion(-1)).toEqual({ direction: 'prev', motion: 'slide' });
+    expect(weekJumpMotion(2)).toEqual({ direction: 'next', motion: 'crossfade' });
+    expect(weekJumpMotion(-4)).toEqual({ direction: 'prev', motion: 'crossfade' });
+  });
+});
+
+describe('week crossfade', () => {
+  it('parks the incoming week on top at opacity 0', () => {
+    expect(incomingWeekFadeAnchor()).toEqual({ top: '0', left: '0', opacity: 0 });
+  });
+
+  it('fades outgoing and incoming on one shorter timeline', () => {
+    const calls: Array<{ keyframes: unknown; options: unknown }> = [];
+    const el = {
+      animate: vi.fn((keyframes: unknown, options: unknown) => {
+        calls.push({ keyframes, options });
+        return { finished: Promise.resolve() };
+      }),
+    };
+    const outgoing = el as unknown as HTMLElement;
+    const incoming = el as unknown as HTMLElement;
+    playSyncedCrossfade([outgoing, outgoing], [incoming, incoming]);
+    expect(calls).toHaveLength(4);
+    expect(calls[0].keyframes).toEqual(weekCrossfadeKeyframes(true));
+    expect(calls[2].keyframes).toEqual(weekCrossfadeKeyframes(false));
+    expect(calls.every(call => call.options)).toBeTruthy();
+    expect(weekCrossfadeAnimationOptions()).toEqual({
+      duration: WEEK_CROSSFADE_MS,
+      easing: WEEK_SHIFT_EASING,
+      fill: 'forwards',
+    });
+    expect(WEEK_CROSSFADE_MS).toBeLessThan(WEEK_SHIFT_MS);
   });
 });
 
