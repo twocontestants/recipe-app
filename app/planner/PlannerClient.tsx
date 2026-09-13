@@ -31,6 +31,7 @@ import {
   dayDateOf,
   displayDayIndex,
   displayDays,
+  displayWeekOffset,
   formatWeekLabel,
   localDateIso,
   parseLocalIso,
@@ -46,6 +47,7 @@ import {
   incomingWeekAnchor,
   playSyncedShift,
   shouldAnimateWeekShift,
+  weekSlideDirection,
   type WeekShiftDirection,
 } from '@/lib/plannerWeekShift';
 import {
@@ -206,6 +208,7 @@ export default function PlannerClient() {
     toStart: Date;
     fromNotes: Record<number, string>;
     toNotes: Record<number, string>;
+    selectDayIndex?: number;
   } | null>(null);
   const [weekShift, setWeekShift] = useState<typeof weekShiftRef.current>(null);
   const [weekShiftBusy, setWeekShiftBusy] = useState<WeekShiftDirection | null>(null);
@@ -966,11 +969,24 @@ export default function PlannerClient() {
   };
 
   const jumpToIso = (iso: string) => {
-    cancelWeekShift();
     const d = parseLocalIso(iso);
-    setWeekStart(startOfDisplayWeek(d, weekStartsOn));
-    setSelectedDayIndex(displayDayIndex(d, weekStartsOn));
+    const toStart = startOfDisplayWeek(d, weekStartsOn);
+    const fromIso = formatDate(weekStartRef.current);
+    const toIso = formatDate(toStart);
+    const dayIndex = displayDayIndex(d, weekStartsOn);
     setShowCalendar(false);
+    if (sameDisplayWeek(fromIso, toIso)) {
+      setSelectedDayIndex(dayIndex);
+      return;
+    }
+    cancelWeekShift();
+    const slide = weekSlideDirection(displayWeekOffset(fromIso, toIso));
+    if (slide) {
+      void shiftAdjacentWeek(slide === 'next' ? 1 : -1, dayIndex);
+      return;
+    }
+    setWeekStart(toStart);
+    setSelectedDayIndex(dayIndex);
   };
 
   const commitWeekShift = () => {
@@ -981,12 +997,13 @@ export default function PlannerClient() {
     weekStartRef.current = current.toStart;
     setWeekStart(current.toStart);
     setNotes(notesForWeek(current.toStart));
+    if (current.selectDayIndex != null) setSelectedDayIndex(current.selectDayIndex);
     setWeekShift(null);
     setWeekShiftBusy(null);
   };
 
-  const shiftAdjacentWeek = async (weeks: 1 | -1) => {
-    if (weekShiftRef.current || weekShiftBusy || weekShiftLockRef.current) return;
+  const shiftAdjacentWeek = async (weeks: 1 | -1, selectDayIndex?: number) => {
+    if (weekShiftRef.current || weekShiftLockRef.current) return;
     const fromStart = weekStartRef.current;
     const toStart = new Date(fromStart);
     toStart.setDate(fromStart.getDate() + weeks * 7);
@@ -1009,6 +1026,7 @@ export default function PlannerClient() {
         weekStartRef.current = toStart;
         setWeekStart(toStart);
         setNotes(toNotes);
+        if (selectDayIndex != null) setSelectedDayIndex(selectDayIndex);
         setWeekShiftBusy(null);
         return;
       }
@@ -1018,6 +1036,7 @@ export default function PlannerClient() {
         toStart,
         fromNotes: notesForWeek(fromStart),
         toNotes,
+        selectDayIndex,
       };
       weekShiftRef.current = next;
       setWeekShift(next);
@@ -1088,7 +1107,9 @@ export default function PlannerClient() {
           const date = getDayDate(start, dayIndex);
           const planned = getMealsForDay(dayIndex, start).length > 0;
           const isToday = thisWeek && dayIndex === todayDisplayIdx;
-          const isSelected = !incoming && dayIndex === selectedDayIndex;
+          const isSelected = incoming
+            ? weekShift?.selectDayIndex === dayIndex
+            : dayIndex === selectedDayIndex;
           const short = DAY_SHORT[dayKeys[dayIndex]];
           return (
             <button

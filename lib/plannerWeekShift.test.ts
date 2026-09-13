@@ -9,6 +9,7 @@ import {
   weekShiftAnimationOptions,
   weekShiftDelta,
   weekShiftKeyframes,
+  weekSlideDirection,
 } from './plannerWeekShift';
 
 describe('week shift motion', () => {
@@ -60,6 +61,16 @@ describe('prefersReducedWeekShift', () => {
     expect(prefersReducedWeekShift(() => ({ matches: true }))).toBe(true);
     expect(prefersReducedWeekShift(() => ({ matches: false }))).toBe(false);
     expect(prefersReducedWeekShift()).toBe(false);
+  });
+});
+
+describe('weekSlideDirection', () => {
+  it('slides only for an adjacent week', () => {
+    expect(weekSlideDirection(1)).toBe('next');
+    expect(weekSlideDirection(-1)).toBe('prev');
+    expect(weekSlideDirection(0)).toBeNull();
+    expect(weekSlideDirection(2)).toBeNull();
+    expect(weekSlideDirection(-3)).toBeNull();
   });
 });
 

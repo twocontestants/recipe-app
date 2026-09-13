@@ -4,6 +4,13 @@ export const WEEK_SHIFT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 export type WeekShiftDirection = 'next' | 'prev';
 export type WeekShiftAxis = 'x' | 'y';
 
+/** One-week slide, or null for same week / a multi-week jump. */
+export function weekSlideDirection(weekOffset: number): WeekShiftDirection | null {
+  if (weekOffset === 1) return 'next';
+  if (weekOffset === -1) return 'prev';
+  return null;
+}
+
 export function incomingWeekAnchor(
   direction: WeekShiftDirection,
   axis: WeekShiftAxis,
