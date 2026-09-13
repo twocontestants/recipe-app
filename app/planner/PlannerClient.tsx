@@ -200,6 +200,7 @@ export default function PlannerClient() {
   const daysClipRef = useRef<HTMLDivElement>(null);
   const weekStripClipRef = useRef<HTMLDivElement>(null);
   const weekShiftGen = useRef(0);
+  const weekShiftLockRef = useRef(false);
   const weekShiftRef = useRef<{
     direction: WeekShiftDirection;
     fromStart: Date;
@@ -952,6 +953,7 @@ export default function PlannerClient() {
 
   const cancelWeekShift = () => {
     weekShiftGen.current += 1;
+    weekShiftLockRef.current = false;
     weekShiftRef.current = null;
     setWeekShift(null);
     setWeekShiftBusy(null);
@@ -969,30 +971,48 @@ export default function PlannerClient() {
     const current = weekShiftRef.current;
     if (!current) return;
     weekShiftRef.current = null;
+    weekShiftLockRef.current = false;
+    weekStartRef.current = current.toStart;
     setWeekStart(current.toStart);
     setNotes(current.toNotes);
     setWeekShift(null);
     setWeekShiftBusy(null);
   };
 
+  const applyNotesIfCurrent = (displayIso: string, weekNotes: Record<number, string>) => {
+    if (weekShiftRef.current && formatDate(weekShiftRef.current.toStart) === displayIso) {
+      weekShiftRef.current.toNotes = weekNotes;
+      return;
+    }
+    if (formatDate(weekStartRef.current) === displayIso) setNotes(weekNotes);
+  };
+
   const shiftAdjacentWeek = async (weeks: 1 | -1) => {
-    if (weekShiftRef.current || weekShiftBusy) return;
+    if (weekShiftRef.current || weekShiftBusy || weekShiftLockRef.current) return;
     const fromStart = weekStartRef.current;
     const toStart = new Date(fromStart);
     toStart.setDate(fromStart.getDate() + weeks * 7);
     const toIso = formatDate(toStart);
     const direction: WeekShiftDirection = weeks === 1 ? 'next' : 'prev';
     const gen = ++weekShiftGen.current;
-    setWeekShiftBusy(direction);
+    weekShiftLockRef.current = true;
+    const monthKeys = monthsForDisplayWeek(toIso);
+    const needsMeals = missingMonths(monthKeys, loadedMonthsRef.current).length > 0;
+    if (needsMeals) setWeekShiftBusy(direction);
+    void fetchNotesForWeek(toIso).then(
+      loaded => applyNotesIfCurrent(toIso, loaded),
+      () => { /* notes land later via fetchData */ },
+    );
     try {
-      const [, loadedNotes] = await Promise.all([
-        ensureMonths(monthsForDisplayWeek(toIso)).catch(() => snapshotMealPlans()),
-        fetchNotesForWeek(toIso).catch(() => ({})),
-      ]);
+      if (needsMeals) {
+        await ensureMonths(monthKeys).catch(() => snapshotMealPlans());
+      }
       if (gen !== weekShiftGen.current) return;
       setMealPlans(snapshotMealPlans());
-      const toNotes = loadedNotes;
+      const toNotes: Record<number, string> = {};
       if (!shouldAnimateWeekShift(window)) {
+        weekShiftLockRef.current = false;
+        weekStartRef.current = toStart;
         setWeekStart(toStart);
         setNotes(toNotes);
         setWeekShiftBusy(null);
@@ -1009,6 +1029,7 @@ export default function PlannerClient() {
       setWeekShift(next);
     } catch {
       if (gen !== weekShiftGen.current) return;
+      weekShiftLockRef.current = false;
       setWeekShiftBusy(null);
       showToast('Failed to load planner', 'error');
     }

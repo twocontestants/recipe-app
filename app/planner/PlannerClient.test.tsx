@@ -181,6 +181,51 @@ describe('PlannerClient week nav', () => {
     ).toBe('true');
   });
 
+  it('changes week from the jump buttons without waiting for notes', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    let notesCalls = 0;
+    let releaseNotes = () => {};
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        notesCalls += 1;
+        if (notesCalls === 1) {
+          return { ok: true, json: async () => ({}) };
+        }
+        await new Promise<void>(resolve => { releaseNotes = resolve; });
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return { ok: true, json: async () => [dinner('this-mon-a', mon)] };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    const mondayChip = await screen.findByRole('tab', { name: /monday/i });
+    const mondayBefore = mondayChip.textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Go to next week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Go to previous week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
+    });
+    releaseNotes();
+  });
+
   it('opens the existing context menu from the three-dot button', async () => {
     const thisWeek = getThisDisplayWeek('monday');
     const mon = localDateIso(dayDateOf(thisWeek, 0));
