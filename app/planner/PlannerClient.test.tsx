@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
-import { monthCalendarCells, monthKeyOf } from '@/lib/plannerMonth';
+import { monthCalendarCells, monthKeyOf, monthTitle } from '@/lib/plannerMonth';
 
 vi.mock('@/components/AuthProvider', () => ({
   useAuth: () => ({
@@ -96,6 +96,7 @@ describe('PlannerClient week nav', () => {
     expect(screen.getByRole('button', { name: 'Go to previous week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Go to next week' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open month calendar' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Today' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open calendar' })).toBeNull();
     const monday = screen.getByRole('tab', { name: /monday .* planned/i });
     const tuesday = screen.getByRole('tab', { name: /tuesday .* nothing planned/i });
@@ -164,9 +165,17 @@ describe('PlannerClient week nav', () => {
     expect(screen.getByRole('dialog', { name: 'Month calendar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous month' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next month' })).toBeTruthy();
+    expect(screen.getByText('This week')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Today' })).toBeTruthy();
+    const calendarMonth = monthTitle(monthKeyOf(localDateIso(new Date())));
+    expect(screen.getByText(calendarMonth)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Today' }).closest('.pl-nav-left')).toBeTruthy();
+    expect(screen.getByText(calendarMonth).className).toContain('pl-cal-month');
 
     fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+    expect(screen.queryByText(calendarMonth)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));
+    expect(screen.getByText(calendarMonth)).toBeTruthy();
 
     const jump = await screen.findByRole('button', { name: new RegExp(`^${otherLabel}`, 'i') });
     fireEvent.click(jump);

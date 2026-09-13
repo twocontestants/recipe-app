@@ -1260,9 +1260,9 @@ export default function PlannerClient() {
         <div className="pl-nav-bar">
           <div className="pl-nav-left">
             <span className="pl-week-label">
-              {showCalendar ? monthTitle(calendarMonthKey) : formatWeekLabel(formatDate(labelWeekStart), new Date(), weekStartsOn)}
+              {formatWeekLabel(formatDate(labelWeekStart), new Date(), weekStartsOn)}
             </span>
-            {formatDate(labelWeekStart) !== formatDate(startOfDisplayWeek(new Date(), weekStartsOn)) && (
+            {(showCalendar || formatDate(labelWeekStart) !== formatDate(startOfDisplayWeek(new Date(), weekStartsOn))) && (
               <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
             )}
           </div>
@@ -1309,7 +1309,7 @@ export default function PlannerClient() {
                 <button type="button" className="pl-nav-btn" aria-label="Previous month" onClick={() => shiftCalendar(-1)}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
                 </button>
-                <button type="button" className="pl-today-btn" onClick={() => jumpToIso(todayIso)}>Today</button>
+                <span className="pl-cal-month">{monthTitle(calendarMonthKey)}</span>
                 <button type="button" className="pl-nav-btn" aria-label="Next month" onClick={() => shiftCalendar(1)}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
                 </button>
@@ -1818,6 +1818,11 @@ export default function PlannerClient() {
         .pl-cal-toolbar {
           display: flex; align-items: center; justify-content: space-between;
           margin-bottom: 0.25rem;
+        }
+        .pl-cal-month {
+          font-size: 0.92rem; font-weight: 650; letter-spacing: -0.01em;
+          text-align: center; flex: 1; min-width: 0;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .pl-cal-weekdays {
           display: grid; grid-template-columns: repeat(7, 1fr);
