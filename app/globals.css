@@ -868,7 +868,7 @@ select.settings-select {
 
 .skeleton {
   display: inline-block;
-  background: var(--parchment);
+  background: color-mix(in srgb, var(--parchment) 40%, var(--border));
   border-radius: 6px;
   position: relative;
   overflow: hidden;
@@ -924,6 +924,12 @@ select.settings-select {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.sk-plain-list.step-list li {
+  padding-left: 0;
+}
+.sk-plain-list.step-list li::before {
+  content: none;
 }
 .sk-step {
   flex-direction: column;
