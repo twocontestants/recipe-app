@@ -6,6 +6,7 @@ import { showToast } from '@/components/Toast';
 import { DAY_KEYS, DAY_LABELS, parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
 import { useAuth } from '@/components/AuthProvider';
 import { AccountSettings } from '@/components/AccountSettings';
+import { SettingsDictionarySkeleton, SettingsUsersSkeleton } from '@/components/Skeleton';
 import type { AuthUser } from '@/lib/roles';
 import { isModerator } from '@/lib/roles';
 
@@ -173,7 +174,7 @@ export default function SettingsClient() {
       </p>
 
       {loading ? (
-        <div className="empty-state"><div className="loading-dots"><span/><span/><span/></div></div>
+        <SettingsDictionarySkeleton />
       ) : entries.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">🧂</div>
@@ -385,7 +386,7 @@ function ModeratorPanel() {
       <h2 className="section-title">Moderators</h2>
       <p className="settings-intro">Grant Publisher so a cook can share recipes publicly. Moderators can also unpublish anyone’s public recipe from that recipe’s page.</p>
       {loading ? (
-        <div className="loading-dots"><span /><span /><span /></div>
+        <SettingsUsersSkeleton />
       ) : (
         <ul className="moderator-user-list">
           {users.map(u => (

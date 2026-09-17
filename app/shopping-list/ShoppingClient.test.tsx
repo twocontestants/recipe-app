@@ -64,4 +64,11 @@ describe('ShoppingClient header actions', () => {
     expect(screen.queryByRole('button', { name: /^copy$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^print$/i })).toBeNull();
   });
+
+  it('shows shopping list skeletons while lists load', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    render(<ShoppingClient />);
+    expect(screen.getByRole('status', { name: 'Loading shopping list' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /shopping/i })).toBeTruthy();
+  });
 });

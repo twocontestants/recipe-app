@@ -29,6 +29,7 @@ import {
   upsertRecipeInList,
 } from '@/lib/recipeList';
 import { RecipeFormModal } from '@/components/RecipeFormModal';
+import { RecipesGridSkeleton, Skeleton } from '@/components/Skeleton';
 import { emptyRecipeForm, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
 
 export default function RecipesPage() {
@@ -372,7 +373,9 @@ export default function RecipesPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{user ? 'My' : 'Public'} <em>Recipes</em></h1>
-          <p className="page-subtitle">{recipes.length} recipes</p>
+          <p className="page-subtitle">
+            {loading ? <Skeleton width="6.5rem" height="0.7rem" /> : `${recipes.length} recipes`}
+          </p>
         </div>
         <div className="page-header-actions">
           {user && (
@@ -408,9 +411,7 @@ export default function RecipesPage() {
       </div>
 
       {loading ? (
-        <div className="empty-state">
-          <div className="loading-dots"><span/><span/><span/></div>
-        </div>
+        <RecipesGridSkeleton />
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">🍽️</div>
