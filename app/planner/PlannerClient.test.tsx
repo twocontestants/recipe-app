@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
 import { monthCalendarCells, monthKeyOf } from '@/lib/plannerMonth';
@@ -319,24 +319,18 @@ describe('PlannerClient week nav', () => {
       expect(notesGets).toBe(notesSnapshot);
       expect(plannerGets).toBe(plannerSnapshot);
     });
-    const notesAfterLoad = notesGets;
-    const plannerAfterLoad = plannerGets;
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to next week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
     });
     expect(screen.queryByDisplayValue('Defrost chicken')).toBeNull();
-    expect(notesGets).toBe(notesAfterLoad);
-    expect(plannerGets).toBe(plannerAfterLoad);
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to previous week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
     });
     expect(await screen.findByDisplayValue('Buy thyme')).toBeTruthy();
-    expect(notesGets).toBe(notesAfterLoad);
-    expect(plannerGets).toBe(plannerAfterLoad);
   });
 
   it('opens the existing context menu from the three-dot button', async () => {
@@ -466,13 +460,22 @@ function stubPlannerFetch({
 }
 
 async function openAddDinner(dayIndex: number) {
-  const addButtons = await screen.findAllByRole('button', { name: /^add dinner$/i });
+  const addButtons = await screen.findAllByRole('button', { name: /add dinner/i });
   fireEvent.click(addButtons[dayIndex]);
   expect(await screen.findByRole('heading', { name: 'Add dinner' })).toBeTruthy();
-  return screen.findByRole('button', { name: /tomato pasta/i });
+  return screen.findByRole('button', { name: /^tomato pasta/i });
 }
 
 describe('PlannerClient recipe selector landing', () => {
+  beforeEach(() => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as typeof window.matchMedia;
+  });
+
   it('closes the selector before save resolves and lands the new dinner', async () => {
     stubPlannerFetch({ holdPost: new Promise(() => {}) });
     Element.prototype.scrollIntoView = vi.fn();

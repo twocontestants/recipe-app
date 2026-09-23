@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-23
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "In the planner, when adding a recipe for a particular day, it should close the recipe selector screen and do a gentle animation to show where the recipe has been added."
 

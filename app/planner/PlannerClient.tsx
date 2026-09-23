@@ -425,7 +425,7 @@ export default function PlannerClient() {
       overlay.classList.toggle('is-keyboard', box.keyboardOpen);
       overlay.classList.toggle(
         'is-sheet',
-        window.innerWidth <= 600 || box.keyboardOpen || window.matchMedia('(pointer: coarse)').matches,
+        window.innerWidth <= 600 || box.keyboardOpen || Boolean(window.matchMedia?.('(pointer: coarse)')?.matches),
       );
     };
 
@@ -434,7 +434,7 @@ export default function PlannerClient() {
     vv?.addEventListener('scroll', sync);
     window.addEventListener('resize', sync);
 
-    if (!window.matchMedia('(pointer: coarse)').matches) {
+    if (!window.matchMedia?.('(pointer: coarse)')?.matches) {
       pickerSearchRef.current?.focus();
     }
 

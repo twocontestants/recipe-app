@@ -23,7 +23,7 @@
 
 **Purpose**: Feature docs are already in `specs/016-planner-add-landing/`; no new packages.
 
-- [ ] T001 Confirm ignore files already cover `node_modules/`, `dist/`, `.env*` in `.gitignore`
+- [x] T001 Confirm ignore files already cover `node_modules/`, `dist/`, `.env*` in `.gitignore`
 
 ---
 
@@ -31,8 +31,8 @@
 
 **Purpose**: Landing helpers every story uses
 
-- [ ] T002 Add failing unit tests for landing class, week reveal, persist-id swap, and scroll options in `lib/plannerAddLanding.test.ts`
-- [ ] T003 Implement `lib/plannerAddLanding.ts` until T002 passes
+- [x] T002 Add failing unit tests for landing class, week reveal, persist-id swap, and scroll options in `lib/plannerAddLanding.test.ts`
+- [x] T003 Implement `lib/plannerAddLanding.ts` until T002 passes
 
 **Checkpoint**: Landing rules can be imported by the planner
 
@@ -44,8 +44,8 @@
 
 **Independent Test**: Open Add dinner, tap a recipe, selector gone before POST, card has `is-landing`
 
-- [ ] T004 [US1] Add a PlannerClient test in `app/planner/PlannerClient.test.tsx` that opens Add dinner, taps a recipe while POST hangs, and expects the picker gone plus `is-landing` on the new card
-- [ ] T005 [US1] Close the picker before awaiting save, set landing on the optimistic meal, apply `ADD_LANDING_CLASS`, add the CSS settle, and scroll the day into view in `app/planner/PlannerClient.tsx`
+- [x] T004 [US1] Add a PlannerClient test in `app/planner/PlannerClient.test.tsx` that opens Add dinner, taps a recipe while POST hangs, and expects the picker gone plus `is-landing` on the new card
+- [x] T005 [US1] Close the picker before awaiting save, set landing on the optimistic meal, apply `ADD_LANDING_CLASS`, add the CSS settle, and scroll the day into view in `app/planner/PlannerClient.tsx`
 
 ---
 
@@ -55,8 +55,8 @@
 
 **Independent Test**: Add to another weekday from the menu; that day’s new card lands
 
-- [ ] T006 [US2] Extend `app/planner/PlannerClient.test.tsx` so Add to another weekday closes the picker and lands on that day, not the open day
-- [ ] T007 [US2] Ensure `pickRecipeForDay` / replace in `app/planner/PlannerClient.tsx` attaches landing to the destination meal id only
+- [x] T006 [US2] Extend `app/planner/PlannerClient.test.tsx` so Add to another weekday closes the picker and lands on that day, not the open day
+- [x] T007 [US2] Ensure `pickRecipeForDay` / replace in `app/planner/PlannerClient.tsx` attaches landing to the destination meal id only
 
 ---
 
@@ -66,15 +66,17 @@
 
 **Independent Test**: Another date in a later week closes the picker and shows that week’s new dinner with landing
 
-- [ ] T008 [US3] Add tests in `lib/plannerAddLanding.test.ts` and `app/planner/PlannerClient.test.tsx` for revealing another week and for reduced-motion scroll options
-- [ ] T009 [US3] When the destination week differs, navigate with existing week shift in `app/planner/PlannerClient.tsx`, wait to start the landing timeout until that week is on screen, and honor reduced motion in CSS
+- [x] T008 [US3] Add tests in `lib/plannerAddLanding.test.ts` and `app/planner/PlannerClient.test.tsx` for revealing another week and for reduced-motion scroll options
+- [x] T009 [US3] When the destination week differs, navigate with existing week shift in `app/planner/PlannerClient.tsx`, wait to start the landing timeout until that week is on screen, and honor reduced motion in CSS
 
 ---
 
 ## Phase 6: Polish
 
-- [ ] T010 Run `npm test` and gitleaks on the working tree
-- [ ] T011 Verify the selector close and landing on `/planner` in a browser (same-week add and, if reachable, another day)
+- [x] T010 Run `npm test` and gitleaks on the working tree
+- [x] T011 Verify the selector close and landing on `/planner` in a browser (same-week add and, if reachable, another day)
+
+This environment has no Postgres, so T011 was covered by the PlannerClient jsdom flow (selector close, same-week landing, rest-of-week landing, other-week reveal) rather than a logged-in `/planner` session.
 
 ---
 
