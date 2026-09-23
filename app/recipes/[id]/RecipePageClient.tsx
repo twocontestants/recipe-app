@@ -11,6 +11,7 @@ import { useAddToPlannerModal } from '@/components/useAddToPlannerModal';
 import { recipeEditPath, recipeViewPath, recipeWantsEdit } from '@/lib/recipeLinks';
 import { recipeSlug } from '@/lib/recipeSlug';
 import { EMPTY_RECIPE_FORM, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
+import { RecipeDetailSkeleton } from '@/components/Skeleton';
 
 export default function RecipePageClient({
   recipeId,
@@ -185,11 +186,7 @@ export default function RecipePageClient({
   };
 
   if (loading) {
-    return (
-      <div className="empty-state">
-        <div className="loading-dots"><span/><span/><span/></div>
-      </div>
-    );
+    return <RecipeDetailSkeleton />;
   }
 
   if (missing || !recipe) {

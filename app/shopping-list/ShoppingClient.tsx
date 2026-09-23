@@ -20,6 +20,7 @@ import GenerateListModal from '@/components/GenerateListModal';
 import NewShoppingItemRow from '@/components/NewShoppingItemRow';
 import { opsNeedListChanged, type ShoppingOp } from '@/lib/shoppingOps';
 import { parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
+import { ShoppingItemsSkeleton, ShoppingSelectorSkeleton } from '@/components/Skeleton';
 
 function genId() { return 'i' + Math.random().toString(36).slice(2, 10); }
 
@@ -890,7 +891,9 @@ export default function ShoppingListClient() {
       </div>
 
       {/* List selector */}
-      {!loadingLists && (
+      {loadingLists ? (
+        <ShoppingSelectorSkeleton />
+      ) : (
         <div className="sl-selector-row no-print" ref={dropdownRef}>
           {lists.length === 0 ? (
             <div className="sl-empty-prompt">
@@ -949,7 +952,7 @@ export default function ShoppingListClient() {
       )}
 
       {loadingLists || loadingItems ? (
-        <div className="empty-state"><div className="loading-dots"><span/><span/><span/></div></div>
+        <ShoppingItemsSkeleton />
       ) : !activeId ? null : isEmpty ? (
         <div className="empty-state">
           <div className="empty-state-icon">🛒</div>

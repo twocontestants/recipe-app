@@ -396,4 +396,11 @@ describe('PlannerClient week nav', () => {
     expect(await screen.findByRole('checkbox', { name: /meal today-meal/i })).toBeTruthy();
     expect(screen.getByText('this week')).toBeTruthy();
   });
+
+  it('shows day-row skeletons while the week loads', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    render(<PlannerClient />);
+    expect(screen.getByRole('status', { name: 'Loading planner' })).toBeTruthy();
+    expect(document.querySelectorAll('.sk-planner-day').length).toBe(7);
+  });
 });

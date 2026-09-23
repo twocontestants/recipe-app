@@ -12,6 +12,7 @@ import PlannerCardMenu from '@/components/PlannerCardMenu';
 import PlannerDaySheet, { type PlannedMeal } from '@/components/PlannerDaySheet';
 import { usePlannerLive } from '@/components/usePlannerLive';
 import { useAuth } from '@/components/AuthProvider';
+import { PlannerDaysSkeleton } from '@/components/Skeleton';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, fetchNotesForMonths, mergePlannerMeals, replaceNotesInRange } from '@/lib/loadPlannerMonth';
@@ -1407,7 +1408,9 @@ export default function PlannerClient() {
       </div>
 
       {loading ? (
-        <div className="pl-loading"><div className="loading-dots"><span/><span/><span/></div></div>
+        <div className="pl-days-viewport">
+          <PlannerDaysSkeleton />
+        </div>
       ) : (
         <div className="pl-days-viewport">
           <button
@@ -2216,8 +2219,6 @@ export default function PlannerClient() {
         .btn-magic-go { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.1rem; background: var(--ink); color: var(--cream); border: none; border-radius: 6px; font-size: 0.8rem; font-family: var(--font-body); cursor: pointer; transition: all 0.15s; }
         .btn-magic-go:hover:not(:disabled) { background: var(--rust); }
         .btn-magic-go:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .pl-loading { display: flex; align-items: center; justify-content: center; padding: 4rem; padding-top: 6rem; }
 
         /* Mobile */
         @media (max-width: 600px) {

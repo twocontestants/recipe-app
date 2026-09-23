@@ -145,4 +145,14 @@ describe('RecipePageClient', () => {
 
     expect(await screen.findByRole('heading', { name: 'Recipe not found' })).toBeTruthy();
   });
+
+  it('shows a recipe skeleton while the recipe loads', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    render(
+      <ToastProvider>
+        <RecipePageClient recipeId="abc-123" />
+      </ToastProvider>,
+    );
+    expect(screen.getByRole('status', { name: 'Loading recipe' })).toBeTruthy();
+  });
 });
