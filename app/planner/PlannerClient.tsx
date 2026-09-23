@@ -77,6 +77,16 @@ import {
   type RailHit,
   type WeekHit,
 } from '@/lib/plannerDrag';
+import {
+  ADD_LANDING_EASING,
+  ADD_LANDING_MS,
+  landingAfterPersist,
+  landingCardClass,
+  landingScrollOptions,
+  prefersReducedAddLanding,
+  shouldRevealDestinationWeek,
+  type AddLanding,
+} from '@/lib/plannerAddLanding';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -141,6 +151,7 @@ export default function PlannerClient() {
   const [pickerOwnOnly, setPickerOwnOnly] = useState(false);
   const pickerOverlayRef = useRef<HTMLDivElement>(null);
   const pickerSearchRef = useRef<HTMLInputElement>(null);
+  const [landing, setLanding] = useState<AddLanding | null>(null);
 
   // Magic
   const [showMagic, setShowMagic] = useState(false);
@@ -219,6 +230,12 @@ export default function PlannerClient() {
   const [weekShift, setWeekShift] = useState<typeof weekShiftRef.current>(null);
   const [weekShiftBusy, setWeekShiftBusy] = useState<WeekShiftDirection | null>(null);
   weekShiftRef.current = weekShift;
+  const shiftToWeekRef = useRef<(
+    toStart: Date,
+    direction: WeekShiftDirection,
+    motion: WeekShiftMotion,
+    selectDayIndex?: number,
+  ) => Promise<void>>(async () => {});
 
   const snapshotMealPlans = () => [...mealStoreRef.current.values()];
   const notesForWeek = (start: Date | string) =>
@@ -239,6 +256,7 @@ export default function PlannerClient() {
         const { from, to } = monthRange(key);
         for (const [id, meal] of mealStoreRef.current) {
           const on = plannedOnOf(meal);
+          if (id.startsWith('tmp-')) continue;
           if (on >= from && on <= to) mealStoreRef.current.delete(id);
         }
         replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
@@ -266,7 +284,9 @@ export default function PlannerClient() {
         setNotes(notesForWeek(weekStartRef.current));
         return;
       }
+      const temps = [...mealStoreRef.current.values()].filter(meal => String(meal.id).startsWith('tmp-'));
       mealStoreRef.current = new Map(meals.map(meal => [meal.id, meal]));
+      for (const temp of temps) mealStoreRef.current.set(temp.id, temp);
       if (meals.length) loadedMonthsRef.current = new Set(keys);
       for (const key of keys) {
         const { from, to } = monthRange(key);
@@ -405,7 +425,7 @@ export default function PlannerClient() {
       overlay.classList.toggle('is-keyboard', box.keyboardOpen);
       overlay.classList.toggle(
         'is-sheet',
-        window.innerWidth <= 600 || box.keyboardOpen || window.matchMedia('(pointer: coarse)').matches,
+        window.innerWidth <= 600 || box.keyboardOpen || Boolean(window.matchMedia?.('(pointer: coarse)')?.matches),
       );
     };
 
@@ -414,7 +434,7 @@ export default function PlannerClient() {
     vv?.addEventListener('scroll', sync);
     window.addEventListener('resize', sync);
 
-    if (!window.matchMedia('(pointer: coarse)').matches) {
+    if (!window.matchMedia?.('(pointer: coarse)')?.matches) {
       pickerSearchRef.current?.focus();
     }
 
@@ -440,6 +460,16 @@ export default function PlannerClient() {
     };
   }, [picker]);
 
+  useLayoutEffect(() => {
+    if (!landing) return;
+    if (weekShift) return;
+    if (formatDate(weekStart) !== landing.weekStartIso) return;
+    const reduced = prefersReducedAddLanding(window.matchMedia?.bind(window));
+    dayEls.current[landing.dayIndex]?.scrollIntoView(landingScrollOptions(reduced));
+    const timeout = window.setTimeout(() => setLanding(null), ADD_LANDING_MS);
+    return () => window.clearTimeout(timeout);
+  }, [landing, weekStart, weekShift]);
+
   // ── Meal operations ─────────────────────────────────────────────────────────
 
   const getMealsForDay = (dayIndex: number, start: Date = weekStart) =>
@@ -454,32 +484,24 @@ export default function PlannerClient() {
     const recipe = recipes.find(r => r.id === recipeId);
     const date = getDayDate(targetWeekStart, dayIndex);
     const coords = storageCoords(date);
-    const sameWeek = formatDate(startOfDisplayWeek(date, weekStartsOn)) === formatDate(weekStart);
+    const destWeekIso = formatDate(startOfDisplayWeek(date, weekStartsOn));
+    const currentWeekIso = formatDate(weekStartRef.current);
     const servings = recipe?.servings || 4;
-
-    if (!sameWeek) {
-      try {
-        const res = await fetch('/api/planner', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ planned_on: formatDate(date), week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
-        });
-        if (!res.ok) throw new Error();
-        broadcastPlannerChanged();
-        const when = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-        showToast(`Added to ${when}`, 'success');
-      } catch {
-        showToast('Failed to add meal', 'error');
-      }
-      return;
-    }
 
     const tempId = `tmp-${Date.now()}`;
     const optimistic: MealPlan = {
       id: tempId, recipe_id: recipeId, day_of_week: coords.dayOfWeek,
       meal_type: 'dinner', servings, planned_on: formatDate(date), week_start: coords.weekStart, recipe: recipe as any,
     };
-    setMealPlans(prev => [...prev, optimistic]);
     mealStoreRef.current.set(tempId, optimistic);
+    setMealPlans(prev => [...prev, optimistic]);
+    setSelectedDayIndex(dayIndex);
+    setLanding({ mealId: tempId, dayIndex, weekStartIso: destWeekIso });
+    if (shouldRevealDestinationWeek(currentWeekIso, destWeekIso)) {
+      const jump = weekJumpMotion(displayWeekOffset(currentWeekIso, destWeekIso));
+      if (jump) void shiftToWeekRef.current(targetWeekStart, jump.direction, jump.motion, dayIndex);
+    }
+
     try {
       const res = await fetch('/api/planner', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -490,10 +512,12 @@ export default function PlannerClient() {
       mealStoreRef.current.delete(tempId);
       mealStoreRef.current.set(real.id, real);
       setMealPlans(prev => prev.map(m => m.id === tempId ? real : m));
+      setLanding(prev => landingAfterPersist(prev, tempId, real.id));
       broadcastPlannerChanged();
     } catch {
       mealStoreRef.current.delete(tempId);
       setMealPlans(prev => prev.filter(m => m.id !== tempId));
+      setLanding(prev => prev?.mealId === tempId ? null : prev);
       showToast('Failed to add meal', 'error');
     }
   };
@@ -518,11 +542,14 @@ export default function PlannerClient() {
 
   const pickRecipeForDay = async (dayIndex: number, recipeId: string, targetWeekStart: Date = weekStart) => {
     const sameWeek = formatDate(targetWeekStart) === formatDate(weekStart);
-    if (picker?.replacingId && sameWeek && dayIndex === picker.dayIndex) {
-      await removeMeal(picker.replacingId);
-    }
-    await addMeal(dayIndex, recipeId, targetWeekStart);
+    const replacingId = picker?.replacingId;
+    const openDay = picker?.dayIndex;
     setPicker(null);
+    setPickerSearch('');
+    if (replacingId && sameWeek && dayIndex === openDay) {
+      void removeMeal(replacingId);
+    }
+    void addMeal(dayIndex, recipeId, targetWeekStart);
   };
 
   const pickRecipeForDate = async (iso: string, recipeId: string) => {
@@ -1056,6 +1083,7 @@ export default function PlannerClient() {
       showToast('Failed to load planner', 'error');
     }
   };
+  shiftToWeekRef.current = shiftToWeek;
 
   const shiftAdjacentWeek = (weeks: 1 | -1, selectDayIndex?: number) => {
     const fromStart = weekStartRef.current;
@@ -1189,10 +1217,13 @@ export default function PlannerClient() {
                       prepTime: recipe?.prep_time,
                       servings: meal.servings || recipe?.servings,
                     });
+                    const landingClass = landingCardClass(meal.id, landing, {
+                      destinationVisible: !incoming && !weekShift && formatDate(start) === landing?.weekStartIso,
+                    });
                     return (
                       <div
                         key={meal.id}
-                        className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}`}
+                        className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${landingClass ? ` ${landingClass}` : ''}`}
                         onClick={() => {
                           if (incoming || weekShift) return;
                           if (suppressCardClick.current) {
@@ -1972,6 +2003,10 @@ export default function PlannerClient() {
 
         @media (prefers-reduced-motion: reduce) {
           .pl-days, .pl-week-strip { transition: none !important; }
+          .pl-recipe-card.is-landing {
+            animation: none;
+            box-shadow: 0 0 0 3px rgba(181, 69, 27, 0.28);
+          }
         }
 
         /* Recipe stack */
@@ -1990,6 +2025,26 @@ export default function PlannerClient() {
         }
         .pl-recipe-card:hover { background: #fff; box-shadow: 0 2px 14px rgba(26,22,18,0.06); }
         .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
+        .pl-recipe-card.is-landing {
+          animation: plCardLand ${ADD_LANDING_MS}ms ${ADD_LANDING_EASING};
+        }
+        @keyframes plCardLand {
+          from {
+            opacity: 0.4;
+            transform: translateY(10px) scale(0.97);
+            box-shadow: 0 0 0 0 rgba(181, 69, 27, 0);
+          }
+          42% {
+            opacity: 1;
+            transform: translateY(0) scale(1.02);
+            box-shadow: 0 0 0 4px rgba(181, 69, 27, 0.2);
+          }
+          to {
+            opacity: 1;
+            transform: none;
+            box-shadow: 0 2px 14px rgba(26, 22, 18, 0.06);
+          }
+        }
         .pl-rail {
           position: fixed; top: 0; right: 0; bottom: var(--bottom-nav-height, 0px); z-index: 36;
           width: 92px;

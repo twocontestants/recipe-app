@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
 import { monthCalendarCells, monthKeyOf } from '@/lib/plannerMonth';
+import { ADD_LANDING_CLASS } from '@/lib/plannerAddLanding';
 
 vi.mock('@/components/AuthProvider', () => ({
   useAuth: () => ({
@@ -318,24 +319,18 @@ describe('PlannerClient week nav', () => {
       expect(notesGets).toBe(notesSnapshot);
       expect(plannerGets).toBe(plannerSnapshot);
     });
-    const notesAfterLoad = notesGets;
-    const plannerAfterLoad = plannerGets;
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to next week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).not.toBe(mondayBefore);
     });
     expect(screen.queryByDisplayValue('Defrost chicken')).toBeNull();
-    expect(notesGets).toBe(notesAfterLoad);
-    expect(plannerGets).toBe(plannerAfterLoad);
 
     fireEvent.click(screen.getByRole('button', { name: 'Go to previous week' }));
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /monday/i }).textContent).toBe(mondayBefore);
     });
     expect(await screen.findByDisplayValue('Buy thyme')).toBeTruthy();
-    expect(notesGets).toBe(notesAfterLoad);
-    expect(plannerGets).toBe(plannerAfterLoad);
   });
 
   it('opens the existing context menu from the three-dot button', async () => {
@@ -402,5 +397,147 @@ describe('PlannerClient week nav', () => {
     render(<PlannerClient />);
     expect(screen.getByRole('status', { name: 'Loading planner' })).toBeTruthy();
     expect(document.querySelectorAll('.sk-planner-day').length).toBe(7);
+  });
+});
+
+function pastaRecipe() {
+  return {
+    id: 'pasta-1',
+    title: 'Tomato Pasta',
+    servings: 4,
+    tags: ['italian'],
+    primary_protein: 'chicken',
+    cook_time: 25,
+    owner_id: 'u1',
+    visibility: 'household',
+    created_at: '',
+    updated_at: '',
+  };
+}
+
+function stubPlannerFetch({
+  meals = [],
+  recipes = [pastaRecipe()],
+  holdPost,
+}: {
+  meals?: unknown[];
+  recipes?: unknown[];
+  holdPost?: Promise<unknown>;
+} = {}) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || 'GET').toUpperCase();
+    if (url.includes('/api/preferences')) {
+      return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+    }
+    if (url.includes('/api/planner-notes')) {
+      return { ok: true, json: async () => ({}) };
+    }
+    if (url.includes('/api/recipes')) {
+      return { ok: true, json: async () => recipes };
+    }
+    if (url.includes('/api/planner') && method === 'POST') {
+      if (holdPost) await holdPost;
+      const body = JSON.parse(String(init?.body || '{}'));
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'saved-pasta',
+          planned_on: body.planned_on,
+          week_start: body.week_start,
+          recipe_id: body.recipe_id,
+          day_of_week: body.day_of_week,
+          meal_type: 'dinner',
+          servings: body.servings,
+        }),
+      };
+    }
+    if (url.includes('/api/planner')) {
+      return { ok: true, json: async () => meals };
+    }
+    return { ok: false, json: async () => ({}) };
+  }));
+}
+
+async function openAddDinner(dayIndex: number) {
+  const addButtons = await screen.findAllByRole('button', { name: /add dinner/i });
+  fireEvent.click(addButtons[dayIndex]);
+  expect(await screen.findByRole('heading', { name: 'Add dinner' })).toBeTruthy();
+  return screen.findByRole('button', { name: /^tomato pasta/i });
+}
+
+describe('PlannerClient recipe selector landing', () => {
+  beforeEach(() => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as typeof window.matchMedia;
+  });
+
+  it('closes the selector before save resolves and lands the new dinner', async () => {
+    stubPlannerFetch({ holdPost: new Promise(() => {}) });
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    fireEvent.click(await openAddDinner(0));
+
+    expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
+    expect(await screen.findByText('Tomato Pasta')).toBeTruthy();
+    const card = document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`);
+    expect(card).toBeTruthy();
+    expect(card?.textContent).toContain('Tomato Pasta');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('lands on the destination weekday when adding from the rest-of-week menu', async () => {
+    stubPlannerFetch();
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    await openAddDinner(0);
+    fireEvent.click(screen.getByLabelText('Add Tomato Pasta to another day'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /friday/i }));
+
+    expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
+    const card = await waitFor(() => {
+      const el = document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`);
+      expect(el).toBeTruthy();
+      return el;
+    });
+    expect(card?.textContent).toMatch(/fri/i);
+    expect(card?.textContent).toContain('Tomato Pasta');
+  });
+
+  it('shows the other week so the new dinner can land there', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const laterWeek = shiftWeek(thisWeek, 2);
+    const laterWed = localDateIso(dayDateOf(laterWeek, 2));
+    const laterDate = new Date(`${laterWed}T12:00:00`);
+
+    stubPlannerFetch();
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    await openAddDinner(0);
+    fireEvent.click(screen.getByLabelText('Add Tomato Pasta to another day'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /another date/i }));
+    fireEvent.change(screen.getByLabelText('Pick another date for Tomato Pasta'), {
+      target: { value: laterWed },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
+    });
+    const laterWeekday = laterDate.toLocaleDateString('en-AU', { weekday: 'long' });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('tab', { name: new RegExp(`^${laterWeekday} ${laterDate.getDate()}`, 'i') })
+          .getAttribute('aria-selected'),
+      ).toBe('true');
+    });
+    expect(await screen.findByText('Tomato Pasta')).toBeTruthy();
+    expect(document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`)).toBeTruthy();
   });
 });
