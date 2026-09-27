@@ -6,8 +6,8 @@ import {
   displayWeekDateRange,
   hasMealRecipeMethod,
   notesByDisplayIndex,
+  plannerDayClass,
   recipeCardMeta,
-  recipeCountLabel,
   sameDisplayWeek,
   weekChipClass,
 } from './plannerLoad';
@@ -53,19 +53,19 @@ describe('recipeCardMeta', () => {
   });
 });
 
-describe('recipeCountLabel', () => {
-  it('names one vs many dinners for the day chip', () => {
-    expect(recipeCountLabel(0)).toBe('');
-    expect(recipeCountLabel(1)).toBe('1 recipe');
-    expect(recipeCountLabel(2)).toBe('2 recipes');
-    expect(recipeCountLabel(3)).toBe('3 recipes');
-  });
-});
-
 describe('dayCardClass', () => {
   it('marks a stacked day so extra dinners share one card', () => {
     expect(dayCardClass({ recipeCount: 1 })).toBe('pl-day-card');
     expect(dayCardClass({ recipeCount: 2 })).toBe('pl-day-card has-multiple');
+  });
+});
+
+describe('plannerDayClass', () => {
+  it('lets occupied days hug recipe height instead of sharing equally', () => {
+    expect(plannerDayClass({ recipeCount: 0 })).toBe('pl-day');
+    expect(plannerDayClass({ recipeCount: 3, today: true })).toBe('pl-day is-today has-meals');
+    expect(plannerDayClass({ recipeCount: 1, past: true, dropTarget: true }))
+      .toBe('pl-day is-past is-drop-target has-meals');
   });
 });
 

@@ -47,15 +47,24 @@ export function recipeCardMeta(input: {
   return parts.join(' • ');
 }
 
-/** Compact count chip on a day that has more than one dinner. */
-export function recipeCountLabel(count: number): string {
-  if (!Number.isInteger(count) || count < 1) return '';
-  return count === 1 ? '1 recipe' : `${count} recipes`;
-}
-
 export function dayCardClass(opts: { recipeCount: number }): string {
   const parts = ['pl-day-card'];
   if (opts.recipeCount > 1) parts.push('has-multiple');
+  return parts.join(' ');
+}
+
+/** Packed days hug their recipes; empty days share whatever space is left. */
+export function plannerDayClass(opts: {
+  today?: boolean;
+  past?: boolean;
+  dropTarget?: boolean;
+  recipeCount: number;
+}): string {
+  const parts = ['pl-day'];
+  if (opts.today) parts.push('is-today');
+  if (opts.past) parts.push('is-past');
+  if (opts.dropTarget) parts.push('is-drop-target');
+  if (opts.recipeCount > 0) parts.push('has-meals');
   return parts.join(' ');
 }
 

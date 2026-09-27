@@ -16,7 +16,7 @@ import { PlannerDaysSkeleton } from '@/components/Skeleton';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, fetchNotesForMonths, mergePlannerMeals, replaceNotesInRange } from '@/lib/loadPlannerMonth';
-import { calendarDayClass, dayCardClass, notesByDisplayIndex, recipeCardMeta, recipeCountLabel, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
+import { calendarDayClass, dayCardClass, notesByDisplayIndex, plannerDayClass, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -1205,7 +1205,12 @@ export default function PlannerClient() {
             <div
               key={formatDate(date)}
               ref={incoming ? undefined : (el => { dayEls.current[dayIndex] = el; })}
-              className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${!incoming && drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
+              className={plannerDayClass({
+                today: isToday,
+                past: isPast,
+                dropTarget: !incoming && Boolean(drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex),
+                recipeCount: dayMeals.length,
+              })}
             >
               {dayMeals.length > 0 && (
                 <div className={dayCardClass({ recipeCount: dayMeals.length })}>
@@ -1274,14 +1279,6 @@ export default function PlannerClient() {
                       );
                     })}
                   </div>
-                  {dayMeals.length > 1 && (
-                    <span className="pl-recipe-count">
-                      {recipeCountLabel(dayMeals.length)}
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
-                        <path d="M9 6l6 6-6 6"/>
-                      </svg>
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -1977,7 +1974,8 @@ export default function PlannerClient() {
           flex: 1 1 auto;
           min-height: 0;
           position: relative;
-          overflow: hidden;
+          overflow-x: hidden;
+          overflow-y: auto;
         }
         .pl-days-clip.is-shifting { pointer-events: none; }
         .pl-days-clip.is-shifting .pl-days,
@@ -1987,10 +1985,9 @@ export default function PlannerClient() {
         .pl-days-clip.is-dragging { user-select: none; cursor: grabbing; }
         .pl-days {
           height: 100%;
-          min-height: 0;
+          min-height: 100%;
           display: flex; flex-direction: column;
           gap: 2px;
-          overflow: hidden;
         }
         .pl-days.is-incoming {
           position: absolute; left: 0; right: 0; height: 100%;
@@ -1998,9 +1995,13 @@ export default function PlannerClient() {
         }
         .pl-day {
           flex: 1 1 0;
-          min-height: 0;
+          min-height: 2.6rem;
           display: flex; flex-direction: column; justify-content: center;
           padding-block: 0;
+        }
+        .pl-day.has-meals {
+          flex: 0 0 auto;
+          min-height: 0;
         }
         .pl-day.is-past { opacity: 0.55; }
         .pl-day.is-drop-target {
@@ -2023,49 +2024,26 @@ export default function PlannerClient() {
         .pl-day-card {
           display: flex; align-items: center; gap: 0.45rem;
           background: white; border-radius: 16px;
-          padding: 0.28rem 0.4rem 0.28rem 0.3rem;
-          min-height: 0; max-height: 100%;
-          flex: 1 1 0; width: 100%; box-sizing: border-box;
-          overflow: hidden;
+          padding: 0.32rem 0.4rem 0.32rem 0.3rem;
+          min-height: 0;
+          flex: 0 0 auto; width: 100%; box-sizing: border-box;
         }
         .pl-meal-stack {
           display: flex; flex-direction: column; justify-content: center;
-          gap: 0.22rem; min-width: 0; min-height: 0; flex: 1;
-          overflow-y: auto; overflow-x: hidden;
-          scrollbar-width: thin;
-          overscroll-behavior: contain;
-          -webkit-overflow-scrolling: touch;
+          gap: 0.28rem; min-width: 0; min-height: 0; flex: 1;
         }
-        .pl-recipe-count {
-          flex-shrink: 0; align-self: center;
-          display: inline-flex; align-items: center; gap: 0.08rem;
-          font-size: 0.66rem; font-weight: 650; line-height: 1;
-          color: var(--rust);
-          background: rgba(181, 69, 27, 0.1);
-          border-radius: 99px;
-          padding: 0.28rem 0.38rem 0.28rem 0.5rem;
-          white-space: nowrap;
-        }
-        .pl-recipe-count svg { flex-shrink: 0; opacity: 0.75; }
 
         /* Recipe row inside the day card */
         .pl-recipe-card {
           display: flex; align-items: center; gap: 0.5rem;
           background: transparent; border: none; border-radius: 10px;
           padding: 0.08rem 0.1rem 0.08rem 0; cursor: pointer;
-          min-height: 2.15rem; flex: 1 1 0;
+          min-height: 2.4rem; flex: 0 0 auto;
           transition: background 0.15s, box-shadow 0.15s;
         }
-        .pl-day-card.has-multiple .pl-recipe-card {
-          flex: 1 1 0;
-          max-height: 2.65rem;
-        }
         .pl-day-card.has-multiple .pl-recipe-img {
-          width: 34px; height: 34px; border-radius: 8px;
+          width: 38px; height: 38px; border-radius: 9px;
         }
-        .pl-day-card.has-multiple .pl-recipe-img-fallback { font-size: 1.15rem; }
-        .pl-day-card.has-multiple .pl-recipe-name { font-size: 0.82rem; }
-        .pl-day-card.has-multiple .pl-recipe-meta { font-size: 0.66rem; }
         .pl-recipe-card:hover { background: var(--parchment); }
         .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
         .pl-recipe-card.is-landing {
@@ -2328,9 +2306,8 @@ export default function PlannerClient() {
           .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
           .pl-cal-day { width: 32px; height: 32px; font-size: 0.74rem; }
           .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
-          .pl-day-card.has-multiple .pl-recipe-img { width: 32px; height: 32px; border-radius: 8px; }
+          .pl-day-card.has-multiple .pl-recipe-img { width: 36px; height: 36px; border-radius: 9px; }
           .pl-recipe-name { font-size: 0.84rem; }
-          .pl-recipe-count { font-size: 0.62rem; padding: 0.22rem 0.42rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
           .modal-overlay { align-items: flex-end; }

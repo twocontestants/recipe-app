@@ -114,13 +114,14 @@ describe('PlannerClient week nav', () => {
 
     expect(screen.getByText('Meal this-mon-a')).toBeTruthy();
     expect(screen.getByText('Meal this-mon-b')).toBeTruthy();
-    expect(screen.getByText('2 recipes')).toBeTruthy();
+    expect(screen.queryByText('2 recipes')).toBeNull();
     expect(screen.queryByText('1 recipe')).toBeNull();
     const stacked = document.querySelector('.pl-day-card.has-multiple');
     expect(stacked?.textContent).toContain('Meal this-mon-a');
     expect(stacked?.textContent).toContain('Meal this-mon-b');
     expect(stacked?.querySelectorAll('.pl-card-date').length).toBe(1);
     expect(document.querySelectorAll('.pl-day-card').length).toBe(2);
+    expect(document.querySelector('.pl-day.has-meals')).toBeTruthy();
   });
 
   it('expands the week navbar into a month calendar and jumps to another day', async () => {
@@ -583,9 +584,10 @@ describe('PlannerClient stacked day recipes', () => {
     expect(await screen.findByText('Thai Pork Bites')).toBeTruthy();
     expect(screen.getByText('Asian Cucumber Salad')).toBeTruthy();
     expect(screen.getByText('Jasmine Rice')).toBeTruthy();
-    expect(screen.getByText('3 recipes')).toBeTruthy();
+    expect(screen.queryByText('3 recipes')).toBeNull();
     expect(document.querySelectorAll('.pl-day-card').length).toBe(1);
     expect(document.querySelectorAll('.pl-day-card.has-multiple').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day.has-meals').length).toBe(1);
     expect(document.querySelectorAll('.pl-recipe-card').length).toBe(3);
     expect(document.querySelectorAll('.pl-day-card .pl-card-date').length).toBe(1);
     expect(screen.getAllByRole('button', { name: 'Meal options' })).toHaveLength(3);
