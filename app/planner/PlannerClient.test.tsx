@@ -511,13 +511,12 @@ describe('PlannerClient recipe selector landing', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /friday/i }));
 
     expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
-    const card = await waitFor(() => {
+    await waitFor(() => {
       const el = document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`);
       expect(el).toBeTruthy();
-      return el;
+      expect(el?.textContent).toContain('Tomato Pasta');
+      expect(el?.closest('.pl-day-card')?.textContent).toMatch(/fri/i);
     });
-    expect(card?.textContent).toContain('Tomato Pasta');
-    expect(card?.closest('.pl-day-card')?.textContent).toMatch(/fri/i);
   });
 
   it('shows the other week so the new dinner can land there', async () => {

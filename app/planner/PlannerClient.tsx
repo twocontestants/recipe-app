@@ -1275,7 +1275,12 @@ export default function PlannerClient() {
                     })}
                   </div>
                   {dayMeals.length > 1 && (
-                    <span className="pl-recipe-count">{recipeCountLabel(dayMeals.length)}</span>
+                    <span className="pl-recipe-count">
+                      {recipeCountLabel(dayMeals.length)}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+                        <path d="M9 6l6 6-6 6"/>
+                      </svg>
+                    </span>
                   )}
                 </div>
               )}
@@ -2033,13 +2038,15 @@ export default function PlannerClient() {
         }
         .pl-recipe-count {
           flex-shrink: 0; align-self: center;
+          display: inline-flex; align-items: center; gap: 0.08rem;
           font-size: 0.66rem; font-weight: 650; line-height: 1;
           color: var(--rust);
           background: rgba(181, 69, 27, 0.1);
           border-radius: 99px;
-          padding: 0.28rem 0.5rem;
+          padding: 0.28rem 0.38rem 0.28rem 0.5rem;
           white-space: nowrap;
         }
+        .pl-recipe-count svg { flex-shrink: 0; opacity: 0.75; }
 
         /* Recipe row inside the day card */
         .pl-recipe-card {
