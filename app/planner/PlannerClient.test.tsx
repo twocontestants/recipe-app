@@ -111,6 +111,16 @@ describe('PlannerClient week nav', () => {
     expect(screen.queryByPlaceholderText(/add a note/i)).toBeNull();
     expect(screen.queryByText(/this week's suggestions/i)).toBeNull();
     expect(screen.queryByText(/add another/i)).toBeNull();
+
+    expect(screen.getByText('Meal this-mon-a')).toBeTruthy();
+    expect(screen.getByText('Meal this-mon-b')).toBeTruthy();
+    expect(screen.getByText('2 recipes')).toBeTruthy();
+    expect(screen.queryByText('1 recipe')).toBeNull();
+    const stacked = document.querySelector('.pl-day-card.has-multiple');
+    expect(stacked?.textContent).toContain('Meal this-mon-a');
+    expect(stacked?.textContent).toContain('Meal this-mon-b');
+    expect(stacked?.querySelectorAll('.pl-card-date').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day-card').length).toBe(2);
   });
 
   it('expands the week navbar into a month calendar and jumps to another day', async () => {
@@ -506,8 +516,8 @@ describe('PlannerClient recipe selector landing', () => {
       expect(el).toBeTruthy();
       return el;
     });
-    expect(card?.textContent).toMatch(/fri/i);
     expect(card?.textContent).toContain('Tomato Pasta');
+    expect(card?.closest('.pl-day-card')?.textContent).toMatch(/fri/i);
   });
 
   it('shows the other week so the new dinner can land there', async () => {
@@ -539,5 +549,46 @@ describe('PlannerClient recipe selector landing', () => {
     });
     expect(await screen.findByText('Tomato Pasta')).toBeTruthy();
     expect(document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`)).toBeTruthy();
+  });
+});
+
+describe('PlannerClient stacked day recipes', () => {
+  it('keeps three dinners on one day inside a single week-row card', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const wed = localDateIso(dayDateOf(thisWeek, 2));
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return {
+          ok: true,
+          json: async () => [
+            { ...dinner('pork-bites', wed), recipe: { ...dinner('pork-bites', wed).recipe, title: 'Thai Pork Bites' } },
+            { ...dinner('cucumber', wed), recipe: { ...dinner('cucumber', wed).recipe, title: 'Asian Cucumber Salad' } },
+            { ...dinner('rice', wed), recipe: { ...dinner('rice', wed).recipe, title: 'Jasmine Rice' } },
+          ],
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    expect(await screen.findByText('Thai Pork Bites')).toBeTruthy();
+    expect(screen.getByText('Asian Cucumber Salad')).toBeTruthy();
+    expect(screen.getByText('Jasmine Rice')).toBeTruthy();
+    expect(screen.getByText('3 recipes')).toBeTruthy();
+    expect(document.querySelectorAll('.pl-day-card').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day-card.has-multiple').length).toBe(1);
+    expect(document.querySelectorAll('.pl-recipe-card').length).toBe(3);
+    expect(document.querySelectorAll('.pl-day-card .pl-card-date').length).toBe(1);
+    expect(screen.getAllByRole('button', { name: 'Meal options' })).toHaveLength(3);
   });
 });

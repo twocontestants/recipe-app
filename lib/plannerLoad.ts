@@ -47,6 +47,18 @@ export function recipeCardMeta(input: {
   return parts.join(' • ');
 }
 
+/** Compact count chip on a day that has more than one dinner. */
+export function recipeCountLabel(count: number): string {
+  if (!Number.isInteger(count) || count < 1) return '';
+  return count === 1 ? '1 recipe' : `${count} recipes`;
+}
+
+export function dayCardClass(opts: { recipeCount: number }): string {
+  const parts = ['pl-day-card'];
+  if (opts.recipeCount > 1) parts.push('has-multiple');
+  return parts.join(' ');
+}
+
 export function weekChipClass(opts: {
   planned: boolean;
   today?: boolean;

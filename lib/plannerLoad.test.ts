@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   calendarDayClass,
   countPlannedDays,
+  dayCardClass,
   displayWeekDateRange,
   hasMealRecipeMethod,
   notesByDisplayIndex,
   recipeCardMeta,
+  recipeCountLabel,
   sameDisplayWeek,
   weekChipClass,
 } from './plannerLoad';
@@ -48,6 +50,22 @@ describe('recipeCardMeta', () => {
     expect(recipeCardMeta({ cookTime: 45, servings: 4 })).toBe('45 mins • 4 servings');
     expect(recipeCardMeta({ prepTime: 15, servings: 1 })).toBe('15 mins • 1 serving');
     expect(recipeCardMeta({})).toBe('');
+  });
+});
+
+describe('recipeCountLabel', () => {
+  it('names one vs many dinners for the day chip', () => {
+    expect(recipeCountLabel(0)).toBe('');
+    expect(recipeCountLabel(1)).toBe('1 recipe');
+    expect(recipeCountLabel(2)).toBe('2 recipes');
+    expect(recipeCountLabel(3)).toBe('3 recipes');
+  });
+});
+
+describe('dayCardClass', () => {
+  it('marks a stacked day so extra dinners share one card', () => {
+    expect(dayCardClass({ recipeCount: 1 })).toBe('pl-day-card');
+    expect(dayCardClass({ recipeCount: 2 })).toBe('pl-day-card has-multiple');
   });
 });
 
