@@ -87,6 +87,11 @@ import {
   shouldRevealDestinationWeek,
   type AddLanding,
 } from '@/lib/plannerAddLanding';
+import {
+  dinnerAddFailedMessage,
+  plannerDinnerPayload,
+  postPlannerDinner,
+} from '@/lib/plannerWrite';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
@@ -503,22 +508,29 @@ export default function PlannerClient() {
     }
 
     try {
-      const res = await fetch('/api/planner', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planned_on: formatDate(date), week_start: coords.weekStart, recipe_id: recipeId, day_of_week: coords.dayOfWeek, meal_type: 'dinner', servings }),
-      });
-      if (!res.ok) throw new Error();
-      const real = { ...await res.json(), recipe } as MealPlan;
+      const saved = await postPlannerDinner(plannerDinnerPayload({
+        plannedOn: formatDate(date),
+        weekStart: coords.weekStart,
+        dayOfWeek: coords.dayOfWeek,
+        recipeId,
+        servings,
+      }));
+      const real = { ...saved, recipe } as MealPlan;
+      if (!real.id) real.id = tempId;
       mealStoreRef.current.delete(tempId);
       mealStoreRef.current.set(real.id, real);
       setMealPlans(prev => prev.map(m => m.id === tempId ? real : m));
       setLanding(prev => landingAfterPersist(prev, tempId, real.id));
       broadcastPlannerChanged();
-    } catch {
+    } catch (e) {
       mealStoreRef.current.delete(tempId);
       setMealPlans(prev => prev.filter(m => m.id !== tempId));
       setLanding(prev => prev?.mealId === tempId ? null : prev);
-      showToast('Failed to add meal', 'error');
+      const detail = e instanceof Error ? e.message : 'Failed to add dinner';
+      showToast(dinnerAddFailedMessage(detail), 'error', {
+        label: 'Retry',
+        onClick: () => { void addMeal(dayIndex, recipeId, targetWeekStart); },
+      });
     }
   };
 

@@ -19,13 +19,19 @@ import {
   type DayKey,
 } from '@/lib/plannerDays';
 import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
+import {
+  dinnerAddFailedMessage,
+  dinnerAddedMessage,
+  plannerDinnerPayload,
+  postPlannerDinner,
+  type PlannerDinnerPayload,
+} from '@/lib/plannerWrite';
 
 export function useAddToPlannerModal(userId?: string | null) {
   const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
   const [plannerWeek, setPlannerWeek] = useState(() => getThisDisplayWeek('monday'));
   const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
-  const [addingToPlan, setAddingToPlan] = useState(false);
   const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
   const mealStoreRef = useRef(new Map<string, unknown>());
   const loadedMonthsRef = useRef(new Set<string>());
@@ -107,36 +113,39 @@ export function useAddToPlannerModal(userId?: string | null) {
     if (plannerModal) void fetchWeekPlan(plannerWeek);
   }, [plannerModal, plannerWeek, weekStartsOn]);
 
-  const handleAddToPlanner = async () => {
-    if (!plannerModal) return;
-    setAddingToPlan(true);
+  const persistDinner = async (payload: PlannerDinnerPayload, successMessage: string) => {
     try {
-      const date = calendarDateOf(plannerWeek, plannerDay);
-      const coords = storageCoords(date);
-      const res = await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planned_on: localDateIso(date),
-          week_start: coords.weekStart,
-          day_of_week: coords.dayOfWeek,
-          meal_type: 'dinner',
-          recipe_id: plannerModal.recipe.id,
-          servings: plannerModal.recipe.servings || 4,
-        }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      loadedMonthsRef.current.clear();
-      mealStoreRef.current.clear();
+      await postPlannerDinner(payload);
       broadcastPlannerChanged();
-      const dayLabel = date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-      showToast(`Dinner added for ${dayLabel}`, 'success');
-      setPlannerModal(null);
     } catch (e) {
-      showToast(`Failed: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
-    } finally {
-      setAddingToPlan(false);
+      const detail = e instanceof Error ? e.message : 'Unknown error';
+      showToast(dinnerAddFailedMessage(detail), 'error', {
+        label: 'Retry',
+        onClick: () => {
+          showToast(successMessage, 'success');
+          void persistDinner(payload, successMessage);
+        },
+      });
     }
+  };
+
+  const handleAddToPlanner = () => {
+    const modal = plannerModalRef.current;
+    if (!modal) return;
+    plannerModalRef.current = null;
+    const date = calendarDateOf(plannerWeek, plannerDay);
+    const coords = storageCoords(date);
+    const payload = plannerDinnerPayload({
+      plannedOn: localDateIso(date),
+      weekStart: coords.weekStart,
+      dayOfWeek: coords.dayOfWeek,
+      recipeId: modal.recipe.id,
+      servings: modal.recipe.servings || 4,
+    });
+    const successMessage = dinnerAddedMessage(date);
+    setPlannerModal(null);
+    showToast(successMessage, 'success');
+    void persistDinner(payload, successMessage);
   };
 
   const openPlannerModal = (recipe: Recipe) => {
@@ -151,7 +160,7 @@ export function useAddToPlannerModal(userId?: string | null) {
       weekStart={plannerWeek}
       selectedDay={plannerDay}
       weekPlan={weekPlan}
-      adding={addingToPlan}
+      adding={false}
       onClose={() => setPlannerModal(null)}
       onShiftWeek={weeks => setPlannerWeek(shiftWeek(plannerWeek, weeks))}
       onSelectDay={setPlannerDay}
