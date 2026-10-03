@@ -30,7 +30,7 @@ import {
 } from '@/lib/recipeList';
 import { RecipeFormModal } from '@/components/RecipeFormModal';
 import { RecipesGridSkeleton, Skeleton } from '@/components/Skeleton';
-import { emptyRecipeForm, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
+import { confirmDiscardUnsavedRecipe, emptyRecipeForm, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
 
 export default function RecipesPage() {
   const { user } = useAuth();
@@ -353,6 +353,11 @@ export default function RecipesPage() {
     setPlannerModal({ recipe });
   };
 
+  const closePasteModal = () => {
+    if (!confirmDiscardUnsavedRecipe(Boolean(pasteText.trim()))) return;
+    setShowPasteModal(false);
+  };
+
   const plannerModalJsx = plannerModal && (
     <AddToPlannerModal
       recipeTitle={plannerModal.recipe.title}
@@ -524,11 +529,11 @@ export default function RecipesPage() {
 
 
       {showPasteModal && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowPasteModal(false); }}>
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) closePasteModal(); }}>
           <div className="modal" style={{ maxWidth: '620px' }}>
             <div className="modal-header">
               <h2 className="modal-title">Paste Recipe Text</h2>
-              <button className="modal-close" onClick={() => setShowPasteModal(false)}>
+              <button className="modal-close" onClick={closePasteModal}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M18 6L6 18M6 6l12 12"/>
                 </svg>
@@ -552,7 +557,7 @@ export default function RecipesPage() {
             </div>
 
             <div className="modal-actions" style={{ marginTop: '0.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowPasteModal(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={closePasteModal}>Cancel</button>
               <button className="btn btn-primary" onClick={handlePasteImport} disabled={parsing || !pasteText.trim()}>
                 {parsing ? (
                   <><span className="loading-dots"><span/><span/><span/></span>&nbsp;Parsing…</>

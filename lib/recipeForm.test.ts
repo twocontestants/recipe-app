@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Recipe } from './db';
-import { EMPTY_RECIPE_FORM, emptyRecipeForm, recipeFormPayload, recipeToForm } from './recipeForm';
+import {
+  DISCARD_UNSAVED_RECIPE_MESSAGE,
+  EMPTY_RECIPE_FORM,
+  confirmDiscardUnsavedRecipe,
+  emptyRecipeForm,
+  recipeFormHasContent,
+  recipeFormPayload,
+  recipeToForm,
+} from './recipeForm';
 
 const recipe: Recipe = {
   id: 'r1',
@@ -20,6 +28,10 @@ const recipe: Recipe = {
   owner_id: 'u1',
   visibility: 'private',
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('recipeForm', () => {
   it('copies a recipe into the editor form', () => {
@@ -46,5 +58,37 @@ describe('recipeForm', () => {
     const fresh = emptyRecipeForm();
     expect(fresh.ingredients).not.toBe(EMPTY_RECIPE_FORM.ingredients);
     expect(fresh.steps).not.toBe(EMPTY_RECIPE_FORM.steps);
+  });
+
+  it('treats a blank new recipe as empty', () => {
+    expect(recipeFormHasContent(emptyRecipeForm())).toBe(false);
+  });
+
+  it('treats title, ingredients, steps, and other filled fields as content', () => {
+    expect(recipeFormHasContent({ ...emptyRecipeForm(), title: 'Soup' })).toBe(true);
+    expect(recipeFormHasContent({
+      ...emptyRecipeForm(),
+      ingredients: [{ amount: '1', unit: '', name: 'onion' }],
+    })).toBe(true);
+    expect(recipeFormHasContent({ ...emptyRecipeForm(), steps: ['Simmer'] })).toBe(true);
+    expect(recipeFormHasContent({ ...emptyRecipeForm(), servings: 2 })).toBe(true);
+  });
+});
+
+describe('confirmDiscardUnsavedRecipe', () => {
+  it('closes immediately when there is no content', () => {
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    expect(confirmDiscardUnsavedRecipe(false)).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('asks before discarding content', () => {
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    expect(confirmDiscardUnsavedRecipe(true)).toBe(false);
+    expect(confirm).toHaveBeenCalledWith(DISCARD_UNSAVED_RECIPE_MESSAGE);
+    confirm.mockReturnValue(true);
+    expect(confirmDiscardUnsavedRecipe(true)).toBe(true);
   });
 });

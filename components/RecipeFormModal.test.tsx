@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { RecipeFormModal } from './RecipeFormModal';
-import { emptyRecipeForm, type RecipeFormState } from '@/lib/recipeForm';
+import { DISCARD_UNSAVED_RECIPE_MESSAGE, emptyRecipeForm, type RecipeFormState } from '@/lib/recipeForm';
 
 afterEach(cleanup);
 
@@ -12,7 +12,7 @@ function paste(el: Element, text: string) {
   });
 }
 
-function renderEditor(initial: RecipeFormState = emptyRecipeForm()) {
+function renderEditor(initial: RecipeFormState = emptyRecipeForm(), onClose = () => {}) {
   function Harness() {
     const [form, setForm] = useState(initial);
     return (
@@ -23,7 +23,7 @@ function renderEditor(initial: RecipeFormState = emptyRecipeForm()) {
         saving={false}
         saveLabel="Save Recipe"
         onSave={() => {}}
-        onClose={() => {}}
+        onClose={onClose}
       />
     );
   }
@@ -76,5 +76,34 @@ describe('RecipeFormModal bulk paste', () => {
     expect(screen.getByDisplayValue('onion')).toBeTruthy();
     expect(screen.getByDisplayValue('carrots')).toBeTruthy();
     expect(screen.getByDisplayValue('celery stick')).toBeTruthy();
+  });
+});
+
+describe('RecipeFormModal unsaved close', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('closes an empty form without asking', () => {
+    const onClose = vi.fn();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    renderEditor(emptyRecipeForm(), onClose);
+    fireEvent.click(document.querySelector('.modal-overlay')!);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks before closing a form that has content', () => {
+    const onClose = vi.fn();
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    renderEditor({ ...emptyRecipeForm(), title: 'Pasta' }, onClose);
+    fireEvent.click(document.querySelector('.modal-overlay')!);
+    expect(confirm).toHaveBeenCalledWith(DISCARD_UNSAVED_RECIPE_MESSAGE);
+    expect(onClose).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
