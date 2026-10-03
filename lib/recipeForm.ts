@@ -62,3 +62,26 @@ export function recipeFormPayload(form: RecipeFormState) {
     steps: form.steps.filter(s => s.trim()),
   };
 }
+
+export const DISCARD_UNSAVED_RECIPE_MESSAGE =
+  'You have unsaved recipe details. Close and lose your progress?';
+
+export function recipeFormHasContent(form: RecipeFormState): boolean {
+  if (form.title.trim()) return true;
+  if (form.description.trim()) return true;
+  if (form.source_url.trim()) return true;
+  if (form.image_url.trim()) return true;
+  if (form.prep_time != null) return true;
+  if (form.cook_time != null) return true;
+  if (form.servings !== EMPTY_RECIPE_FORM.servings) return true;
+  if (form.primary_protein.trim()) return true;
+  if (form.tags.some(tag => tag.trim())) return true;
+  if (form.ingredients.some(ing =>
+    `${ing.amount || ''}${ing.unit || ''}${ing.name || ''}`.trim()
+  )) return true;
+  return form.steps.some(step => step.trim());
+}
+
+export function confirmDiscardUnsavedRecipe(hasContent: boolean): boolean {
+  return !hasContent || window.confirm(DISCARD_UNSAVED_RECIPE_MESSAGE);
+}

@@ -2,7 +2,7 @@
 
 import { useState, type ClipboardEvent } from 'react';
 import type { Ingredient } from '@/lib/db';
-import type { RecipeFormState } from '@/lib/recipeForm';
+import { confirmDiscardUnsavedRecipe, recipeFormHasContent, type RecipeFormState } from '@/lib/recipeForm';
 import {
   appendParsedIngredients,
   appendParsedSteps,
@@ -120,12 +120,21 @@ export function RecipeFormModal({
     setStepDraft(null);
   };
 
+  const requestClose = () => {
+    const hasContent = recipeFormHasContent(form)
+      || Boolean(importFromUrl?.url.trim())
+      || Boolean(ingredientDraft?.trim())
+      || Boolean(stepDraft?.trim());
+    if (!confirmDiscardUnsavedRecipe(hasContent)) return;
+    onClose();
+  };
+
   return (
-    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) requestClose(); }}>
       <div className="modal" style={{ maxWidth: '780px' }}>
         <div className="modal-header">
           <h2 className="modal-title">{heading}</h2>
-          <button type="button" className="modal-close" onClick={onClose}>
+          <button type="button" className="modal-close" onClick={requestClose}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
@@ -296,7 +305,7 @@ export function RecipeFormModal({
         </div>
 
         <div className="modal-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-secondary" onClick={requestClose}>Cancel</button>
           <button type="button" className="btn btn-primary" onClick={onSave} disabled={saving}>
             {saving ? <span className="loading-dots"><span/><span/><span/></span> : saveLabel}
           </button>
