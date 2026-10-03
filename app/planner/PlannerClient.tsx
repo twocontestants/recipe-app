@@ -16,7 +16,7 @@ import { PlannerDaysSkeleton } from '@/components/Skeleton';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
 import { fetchMealsForMonths, fetchNotesForMonths, mergePlannerMeals, replaceNotesInRange } from '@/lib/loadPlannerMonth';
-import { calendarDayClass, notesByDisplayIndex, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
+import { calendarDayClass, dayCardClass, notesByDisplayIndex, plannerDayClass, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
   missingMonths,
@@ -1205,73 +1205,80 @@ export default function PlannerClient() {
             <div
               key={formatDate(date)}
               ref={incoming ? undefined : (el => { dayEls.current[dayIndex] = el; })}
-              className={`pl-day ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}${!incoming && drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex ? ' is-drop-target' : ''}`}
+              className={plannerDayClass({
+                today: isToday,
+                past: isPast,
+                dropTarget: !incoming && Boolean(drag?.armed && drag.target?.type === 'week-day' && drag.target.index === dayIndex),
+                recipeCount: dayMeals.length,
+              })}
             >
               {dayMeals.length > 0 && (
-                <div className="pl-meal-stack">
-                  {dayMeals.map((meal, mealIndex) => {
-                    const recipe = meal.recipe;
-                    const menuOpen = !incoming && cardMenu?.mealId === meal.id;
-                    const meta = recipeCardMeta({
-                      cookTime: recipe?.cook_time,
-                      prepTime: recipe?.prep_time,
-                      servings: meal.servings || recipe?.servings,
-                    });
-                    const landingClass = landingCardClass(meal.id, landing, {
-                      destinationVisible: !incoming && !weekShift && formatDate(start) === landing?.weekStartIso,
-                    });
-                    return (
-                      <div
-                        key={meal.id}
-                        className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${landingClass ? ` ${landingClass}` : ''}`}
-                        onClick={() => {
-                          if (incoming || weekShift) return;
-                          if (suppressCardClick.current) {
-                            suppressCardClick.current = false;
-                            return;
-                          }
-                          if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view', meal.recipe?.title);
-                        }}
-                        title="View recipe"
-                      >
-                        <span className={`pl-card-date${mealIndex > 0 ? ' is-repeat' : ''}`}>
-                          <span className="pl-card-wd">{short}</span>
-                          <span className="pl-card-num">{dayNum}</span>
-                        </span>
-                        <div className="pl-recipe-img">
-                          {recipe?.image_url ? (
-                            <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                          ) : (
-                            <span className="pl-recipe-img-fallback" aria-hidden>🍽</span>
-                          )}
+                <div className={dayCardClass({ recipeCount: dayMeals.length })}>
+                  <span className="pl-card-date">
+                    <span className="pl-card-wd">{short}</span>
+                    <span className="pl-card-num">{dayNum}</span>
+                  </span>
+                  <div className="pl-meal-stack">
+                    {dayMeals.map(meal => {
+                      const recipe = meal.recipe;
+                      const menuOpen = !incoming && cardMenu?.mealId === meal.id;
+                      const meta = recipeCardMeta({
+                        cookTime: recipe?.cook_time,
+                        prepTime: recipe?.prep_time,
+                        servings: meal.servings || recipe?.servings,
+                      });
+                      const landingClass = landingCardClass(meal.id, landing, {
+                        destinationVisible: !incoming && !weekShift && formatDate(start) === landing?.weekStartIso,
+                      });
+                      return (
+                        <div
+                          key={meal.id}
+                          className={`pl-recipe-card${drag?.armed && drag.mealId === meal.id ? ' is-dragging' : ''}${landingClass ? ` ${landingClass}` : ''}`}
+                          onClick={() => {
+                            if (incoming || weekShift) return;
+                            if (suppressCardClick.current) {
+                              suppressCardClick.current = false;
+                              return;
+                            }
+                            if (meal.recipe_id) goToRecipe(meal.recipe_id, 'view', meal.recipe?.title);
+                          }}
+                          title="View recipe"
+                        >
+                          <div className="pl-recipe-img">
+                            {recipe?.image_url ? (
+                              <img src={recipe.image_url} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                            ) : (
+                              <span className="pl-recipe-img-fallback" aria-hidden>🍽</span>
+                            )}
+                          </div>
+                          <div className="pl-recipe-info">
+                            <span className="pl-recipe-name">{recipe?.title}</span>
+                            {meta && <div className="pl-recipe-meta">{meta}</div>}
+                          </div>
+                          <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
+                            <button
+                              className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
+                              title="Meal options"
+                              aria-label="Meal options"
+                              aria-haspopup="menu"
+                              aria-expanded={menuOpen}
+                              tabIndex={incoming ? -1 : 0}
+                              onClick={e => {
+                                if (incoming || weekShift) return;
+                                openCardMenu(e, meal.id, dayIndex, meal.recipe_id);
+                              }}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                <circle cx="6" cy="12" r="1.7"/>
+                                <circle cx="12" cy="12" r="1.7"/>
+                                <circle cx="18" cy="12" r="1.7"/>
+                              </svg>
+                            </button>
+                          </div>
                         </div>
-                        <div className="pl-recipe-info">
-                          <span className="pl-recipe-name">{recipe?.title}</span>
-                          {meta && <div className="pl-recipe-meta">{meta}</div>}
-                        </div>
-                        <div className="pl-card-actions" onClick={e => e.stopPropagation()}>
-                          <button
-                            className={`pl-card-btn ${menuOpen ? 'is-open' : ''}`}
-                            title="Meal options"
-                            aria-label="Meal options"
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            tabIndex={incoming ? -1 : 0}
-                            onClick={e => {
-                              if (incoming || weekShift) return;
-                              openCardMenu(e, meal.id, dayIndex, meal.recipe_id);
-                            }}
-                          >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                              <circle cx="6" cy="12" r="1.7"/>
-                              <circle cx="12" cy="12" r="1.7"/>
-                              <circle cx="18" cy="12" r="1.7"/>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -1967,7 +1974,8 @@ export default function PlannerClient() {
           flex: 1 1 auto;
           min-height: 0;
           position: relative;
-          overflow: hidden;
+          overflow-x: hidden;
+          overflow-y: auto;
         }
         .pl-days-clip.is-shifting { pointer-events: none; }
         .pl-days-clip.is-shifting .pl-days,
@@ -1977,10 +1985,9 @@ export default function PlannerClient() {
         .pl-days-clip.is-dragging { user-select: none; cursor: grabbing; }
         .pl-days {
           height: 100%;
-          min-height: 0;
+          min-height: 100%;
           display: flex; flex-direction: column;
           gap: 2px;
-          overflow: hidden;
         }
         .pl-days.is-incoming {
           position: absolute; left: 0; right: 0; height: 100%;
@@ -1988,9 +1995,13 @@ export default function PlannerClient() {
         }
         .pl-day {
           flex: 1 1 0;
-          min-height: 0;
+          min-height: 2.6rem;
           display: flex; flex-direction: column; justify-content: center;
           padding-block: 0;
+        }
+        .pl-day.has-meals {
+          flex: 0 0 auto;
+          min-height: 0;
         }
         .pl-day.is-past { opacity: 0.55; }
         .pl-day.is-drop-target {
@@ -2009,21 +2020,31 @@ export default function PlannerClient() {
           }
         }
 
-        /* Recipe stack */
+        /* One white card per day — extra dinners stack inside instead of making new rows */
+        .pl-day-card {
+          display: flex; align-items: center; gap: 0.45rem;
+          background: white; border-radius: 16px;
+          padding: 0.32rem 0.4rem 0.32rem 0.3rem;
+          min-height: 0;
+          flex: 0 0 auto; width: 100%; box-sizing: border-box;
+        }
         .pl-meal-stack {
-          display: flex; flex-direction: column; gap: 2px;
-          min-height: 0; flex: 1; justify-content: center;
+          display: flex; flex-direction: column; justify-content: center;
+          gap: 0.28rem; min-width: 0; min-height: 0; flex: 1;
         }
 
-        /* Recipe card */
+        /* Recipe row inside the day card */
         .pl-recipe-card {
-          display: flex; align-items: center; gap: 0.55rem;
-          background: white; border: none; border-radius: 12px;
-          padding: 0.3rem 0.45rem; cursor: pointer;
-          min-height: 0; flex: 1 1 0;
+          display: flex; align-items: center; gap: 0.5rem;
+          background: transparent; border: none; border-radius: 10px;
+          padding: 0.08rem 0.1rem 0.08rem 0; cursor: pointer;
+          min-height: 2.4rem; flex: 0 0 auto;
           transition: background 0.15s, box-shadow 0.15s;
         }
-        .pl-recipe-card:hover { background: #fff; box-shadow: 0 2px 14px rgba(26,22,18,0.06); }
+        .pl-day-card.has-multiple .pl-recipe-img {
+          width: 38px; height: 38px; border-radius: 9px;
+        }
+        .pl-recipe-card:hover { background: var(--parchment); }
         .pl-recipe-card.is-dragging { opacity: 0.4; touch-action: none; }
         .pl-recipe-card.is-landing {
           animation: plCardLand ${ADD_LANDING_MS}ms ${ADD_LANDING_EASING};
@@ -2124,7 +2145,6 @@ export default function PlannerClient() {
           justify-content: center; gap: 1px; background: none; border: none; padding: 0;
           color: inherit; font-family: var(--font-body);
         }
-        .pl-card-date.is-repeat { visibility: hidden; }
         .pl-card-wd { font-size: 0.68rem; font-weight: 600; color: var(--ink-muted); }
         .pl-card-num { font-size: 0.95rem; font-weight: 700; color: var(--ink); line-height: 1.15; }
         .pl-recipe-img {
@@ -2286,6 +2306,7 @@ export default function PlannerClient() {
           .pl-chip.is-today .pl-chip-num { width: 18px; height: 18px; min-width: 18px; }
           .pl-cal-day { width: 32px; height: 32px; font-size: 0.74rem; }
           .pl-recipe-img { width: 40px; height: 40px; border-radius: 9px; }
+          .pl-day-card.has-multiple .pl-recipe-img { width: 36px; height: 36px; border-radius: 9px; }
           .pl-recipe-name { font-size: 0.84rem; }
           .pl-picker { height: 100%; max-height: 100%; border-radius: 16px 16px 0 0; width: 100%; max-width: 100%; }
           .pl-picker-search { font-size: 16px; }
