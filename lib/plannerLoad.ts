@@ -47,6 +47,27 @@ export function recipeCardMeta(input: {
   return parts.join(' • ');
 }
 
+export function dayCardClass(opts: { recipeCount: number }): string {
+  const parts = ['pl-day-card'];
+  if (opts.recipeCount > 1) parts.push('has-multiple');
+  return parts.join(' ');
+}
+
+/** Packed days hug their recipes; empty days share whatever space is left. */
+export function plannerDayClass(opts: {
+  today?: boolean;
+  past?: boolean;
+  dropTarget?: boolean;
+  recipeCount: number;
+}): string {
+  const parts = ['pl-day'];
+  if (opts.today) parts.push('is-today');
+  if (opts.past) parts.push('is-past');
+  if (opts.dropTarget) parts.push('is-drop-target');
+  if (opts.recipeCount > 0) parts.push('has-meals');
+  return parts.join(' ');
+}
+
 export function weekChipClass(opts: {
   planned: boolean;
   today?: boolean;

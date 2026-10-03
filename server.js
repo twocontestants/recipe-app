@@ -19,6 +19,10 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
+    // Socket.IO also listens on this server. If Next.js answers /api/socketio
+    // first, the client gets a 404 HTML page and the server logs
+    // ERR_HTTP_HEADERS_SENT when Engine.IO tries to write the same response.
+    if (req.url && req.url.startsWith('/api/socketio')) return;
     handle(req, res, parse(req.url, true));
   });
 

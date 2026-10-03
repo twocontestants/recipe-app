@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
 import { monthCalendarCells, monthKeyOf } from '@/lib/plannerMonth';
 import { ADD_LANDING_CLASS } from '@/lib/plannerAddLanding';
+import { ToastProvider } from '@/components/Toast';
 
 vi.mock('@/components/AuthProvider', () => ({
   useAuth: () => ({
@@ -111,6 +112,17 @@ describe('PlannerClient week nav', () => {
     expect(screen.queryByPlaceholderText(/add a note/i)).toBeNull();
     expect(screen.queryByText(/this week's suggestions/i)).toBeNull();
     expect(screen.queryByText(/add another/i)).toBeNull();
+
+    expect(screen.getByText('Meal this-mon-a')).toBeTruthy();
+    expect(screen.getByText('Meal this-mon-b')).toBeTruthy();
+    expect(screen.queryByText('2 recipes')).toBeNull();
+    expect(screen.queryByText('1 recipe')).toBeNull();
+    const stacked = document.querySelector('.pl-day-card.has-multiple');
+    expect(stacked?.textContent).toContain('Meal this-mon-a');
+    expect(stacked?.textContent).toContain('Meal this-mon-b');
+    expect(stacked?.querySelectorAll('.pl-card-date').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day-card').length).toBe(2);
+    expect(document.querySelector('.pl-day.has-meals')).toBeTruthy();
   });
 
   it('expands the week navbar into a month calendar and jumps to another day', async () => {
@@ -419,10 +431,12 @@ function stubPlannerFetch({
   meals = [],
   recipes = [pastaRecipe()],
   holdPost,
+  failPost = false,
 }: {
   meals?: unknown[];
   recipes?: unknown[];
   holdPost?: Promise<unknown>;
+  failPost?: boolean;
 } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -438,6 +452,14 @@ function stubPlannerFetch({
     }
     if (url.includes('/api/planner') && method === 'POST') {
       if (holdPost) await holdPost;
+      if (failPost) {
+        return {
+          ok: false,
+          statusText: 'Internal Server Error',
+          text: async () => JSON.stringify({ error: 'Planner is full' }),
+          json: async () => ({ error: 'Planner is full' }),
+        };
+      }
       const body = JSON.parse(String(init?.body || '{}'));
       return {
         ok: true,
@@ -501,13 +523,12 @@ describe('PlannerClient recipe selector landing', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /friday/i }));
 
     expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
-    const card = await waitFor(() => {
+    await waitFor(() => {
       const el = document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`);
       expect(el).toBeTruthy();
-      return el;
+      expect(el?.textContent).toContain('Tomato Pasta');
+      expect(el?.closest('.pl-day-card')?.textContent).toMatch(/fri/i);
     });
-    expect(card?.textContent).toMatch(/fri/i);
-    expect(card?.textContent).toContain('Tomato Pasta');
   });
 
   it('shows the other week so the new dinner can land there', async () => {
@@ -539,5 +560,62 @@ describe('PlannerClient recipe selector landing', () => {
     });
     expect(await screen.findByText('Tomato Pasta')).toBeTruthy();
     expect(document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`)).toBeTruthy();
+  });
+
+  it('offers retry when the background write fails', async () => {
+    stubPlannerFetch({ failPost: true });
+    Element.prototype.scrollIntoView = vi.fn();
+    render(
+      <ToastProvider>
+        <PlannerClient />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(await openAddDinner(0));
+    expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
+    expect(await screen.findByText(/Couldn't add dinner — Planner is full/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+});
+
+describe('PlannerClient stacked day recipes', () => {
+  it('keeps three dinners on one day inside a single week-row card', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const wed = localDateIso(dayDateOf(thisWeek, 2));
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/preferences')) {
+        return { ok: true, json: async () => ({ weekStartDay: 'monday' }) };
+      }
+      if (url.includes('/api/planner-notes')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/api/planner')) {
+        return {
+          ok: true,
+          json: async () => [
+            { ...dinner('pork-bites', wed), recipe: { ...dinner('pork-bites', wed).recipe, title: 'Thai Pork Bites' } },
+            { ...dinner('cucumber', wed), recipe: { ...dinner('cucumber', wed).recipe, title: 'Asian Cucumber Salad' } },
+            { ...dinner('rice', wed), recipe: { ...dinner('rice', wed).recipe, title: 'Jasmine Rice' } },
+          ],
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<PlannerClient />);
+
+    expect(await screen.findByText('Thai Pork Bites')).toBeTruthy();
+    expect(screen.getByText('Asian Cucumber Salad')).toBeTruthy();
+    expect(screen.getByText('Jasmine Rice')).toBeTruthy();
+    expect(screen.queryByText('3 recipes')).toBeNull();
+    expect(document.querySelectorAll('.pl-day-card').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day-card.has-multiple').length).toBe(1);
+    expect(document.querySelectorAll('.pl-day.has-meals').length).toBe(1);
+    expect(document.querySelectorAll('.pl-recipe-card').length).toBe(3);
+    expect(document.querySelectorAll('.pl-day-card .pl-card-date').length).toBe(1);
+    expect(screen.getAllByRole('button', { name: 'Meal options' })).toHaveLength(3);
   });
 });

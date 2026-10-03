@@ -31,6 +31,18 @@ Ingredients:
       { amount: '1', unit: 'tsp', name: 'chilli flakes' },
     ]);
   });
+
+  it('parses mixed numbers, ranges, and dual measurements from a pasted list', () => {
+    expect(parseIngredientBlock(`
+1½ teaspoon smoked paprika
+1-3 teaspoons chilli flakes
+500g/1lb chicken thighs
+`)).toEqual([
+      { amount: '1.5', unit: 'teaspoon', name: 'smoked paprika' },
+      { amount: '1-3', unit: 'teaspoons', name: 'chilli flakes' },
+      { amount: '500', unit: 'g', name: 'chicken thighs' },
+    ]);
+  });
 });
 
 describe('parseStepBlock', () => {

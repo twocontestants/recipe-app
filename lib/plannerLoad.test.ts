@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   calendarDayClass,
   countPlannedDays,
+  dayCardClass,
   displayWeekDateRange,
   hasMealRecipeMethod,
   notesByDisplayIndex,
+  plannerDayClass,
   recipeCardMeta,
   sameDisplayWeek,
   weekChipClass,
@@ -48,6 +50,22 @@ describe('recipeCardMeta', () => {
     expect(recipeCardMeta({ cookTime: 45, servings: 4 })).toBe('45 mins • 4 servings');
     expect(recipeCardMeta({ prepTime: 15, servings: 1 })).toBe('15 mins • 1 serving');
     expect(recipeCardMeta({})).toBe('');
+  });
+});
+
+describe('dayCardClass', () => {
+  it('marks a stacked day so extra dinners share one card', () => {
+    expect(dayCardClass({ recipeCount: 1 })).toBe('pl-day-card');
+    expect(dayCardClass({ recipeCount: 2 })).toBe('pl-day-card has-multiple');
+  });
+});
+
+describe('plannerDayClass', () => {
+  it('lets occupied days hug recipe height instead of sharing equally', () => {
+    expect(plannerDayClass({ recipeCount: 0 })).toBe('pl-day');
+    expect(plannerDayClass({ recipeCount: 3, today: true })).toBe('pl-day is-today has-meals');
+    expect(plannerDayClass({ recipeCount: 1, past: true, dropTarget: true }))
+      .toBe('pl-day is-past is-drop-target has-meals');
   });
 });
 
