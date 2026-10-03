@@ -27,4 +27,20 @@ describe('parseIngredientLine', () => {
     expect(ing.amount).toBe('1/2');
     expect(ing.name).toBe('medium carrot (peeled, cut vertically then into batons)');
   });
+
+  it('keeps 1½ as the amount and teaspoon as the unit', () => {
+    const ing = parseIngredientLine('1½ teaspoon smoked paprika');
+    expect(ing.amount).toBe('1½');
+    expect(ing.unit).toBe('teaspoon');
+    expect(ing.name).toBe('smoked paprika');
+  });
+
+  it('reads a quantity range and a dual metric/imperial weight', () => {
+    expect(parseIngredientLine('1-3 teaspoons paprika')).toMatchObject({
+      amount: '1-3', unit: 'teaspoons', name: 'paprika',
+    });
+    expect(parseIngredientLine('500g/1lb chicken')).toMatchObject({
+      amount: '500', unit: 'g', name: 'chicken',
+    });
+  });
 });
