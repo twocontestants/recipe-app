@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
 import { monthCalendarCells, monthKeyOf } from '@/lib/plannerMonth';
 import { ADD_LANDING_CLASS } from '@/lib/plannerAddLanding';
+import { ToastProvider } from '@/components/Toast';
 
 vi.mock('@/components/AuthProvider', () => ({
   useAuth: () => ({
@@ -430,10 +431,12 @@ function stubPlannerFetch({
   meals = [],
   recipes = [pastaRecipe()],
   holdPost,
+  failPost = false,
 }: {
   meals?: unknown[];
   recipes?: unknown[];
   holdPost?: Promise<unknown>;
+  failPost?: boolean;
 } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -449,6 +452,14 @@ function stubPlannerFetch({
     }
     if (url.includes('/api/planner') && method === 'POST') {
       if (holdPost) await holdPost;
+      if (failPost) {
+        return {
+          ok: false,
+          statusText: 'Internal Server Error',
+          text: async () => JSON.stringify({ error: 'Planner is full' }),
+          json: async () => ({ error: 'Planner is full' }),
+        };
+      }
       const body = JSON.parse(String(init?.body || '{}'));
       return {
         ok: true,
@@ -549,6 +560,21 @@ describe('PlannerClient recipe selector landing', () => {
     });
     expect(await screen.findByText('Tomato Pasta')).toBeTruthy();
     expect(document.querySelector(`.pl-recipe-card.${ADD_LANDING_CLASS}`)).toBeTruthy();
+  });
+
+  it('offers retry when the background write fails', async () => {
+    stubPlannerFetch({ failPost: true });
+    Element.prototype.scrollIntoView = vi.fn();
+    render(
+      <ToastProvider>
+        <PlannerClient />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(await openAddDinner(0));
+    expect(screen.queryByRole('heading', { name: 'Add dinner' })).toBeNull();
+    expect(await screen.findByText(/Couldn't add dinner — Planner is full/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 });
 

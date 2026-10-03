@@ -782,7 +782,9 @@ export async function ensurePlannedOnColumns(): Promise<void> {
       day_of_week = (EXTRACT(ISODOW FROM note_on) - 1)::int
     WHERE note_on IS NOT NULL
   `);
-  await pool().query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_notes_note_on ON planner_notes(note_on)`);
+  // Unique-on-note_on-alone collides across households and used to 500 the
+  // first planner write. Owner+day uniqueness is created in ensureAccountsSchema.
+  await pool().query(`DROP INDEX IF EXISTS idx_planner_notes_note_on`);
   _plannedOnReady = true;
 }
 
