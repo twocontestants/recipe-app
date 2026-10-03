@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MealPlan } from './db';
 import {
+  aggregateContributions,
   generateShoppingList,
   mealPlansForSelectedDinners,
   parseShoppingDinnerPicks,
@@ -175,5 +176,21 @@ describe('parseShoppingDinnerPicks', () => {
       { id: 'mp-1', recipe_id: 'r1', planned_on: '2026-09-02' },
       { recipe_id: 'r2', week_start: '2026-08-31', day_of_week: 2 },
     ]);
+  });
+});
+
+describe('aggregateContributions amounts', () => {
+  it('counts a glued mixed fraction as one and a half, not one', () => {
+    expect(aggregateContributions([{ amount: '1½', unit: '' }])).toEqual({
+      totalAmount: '1.5',
+      unit: '',
+    });
+  });
+
+  it('uses the midpoint of a quantity range', () => {
+    expect(aggregateContributions([{ amount: '1-3', unit: '' }])).toEqual({
+      totalAmount: '2',
+      unit: '',
+    });
   });
 });

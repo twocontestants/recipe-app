@@ -2,6 +2,12 @@ import * as cheerio from 'cheerio';
 import dns from 'dns/promises';
 import net from 'net';
 import type { Ingredient } from './db';
+import {
+  parseLeadingAmount,
+  splitGluedUnits,
+  stripAlternateMeasurement,
+  stripHyphenBeforeUnit,
+} from './ingredientAmount';
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 5;
@@ -673,13 +679,9 @@ function _parseIngredientLine(line: string): Ingredient {
 
   if (!cleaned) return { amount: '', unit: '', name: '' };
 
-  // 4. Handle glued units like "100g", "200ml", "1.5kg" before full regex
-  cleaned = cleaned.replace(/(\d)(g|kg|ml|l|oz|lb|lbs)\b/gi, '$1 $2');
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-  // 5. Unit list — ordered longest-first so alternation is greedy.
+  // 4. Unit list — ordered longest-first so alternation is greedy.
   //    Single-letter units (g, l) come LAST and use \b word boundaries
-  //    in the full regex so they can't match mid-word (e.g. "Green", "large").
+  //    so they can't match mid-word (e.g. "Green", "large").
   const UNITS = [
     'tablespoons?', 'tbsps?', 'tbsp',
     'teaspoons?',   'tsps?',  'tsp',
@@ -702,23 +704,22 @@ function _parseIngredientLine(line: string): Ingredient {
     'kg', 'ml', 'oz', 'lb', 'lbs',
     'g',                               // must be last — most likely to false-match
   ];
-
-  // Build regex: word boundary before AND after the unit so "g" can't match
-  // the start of "Green" or "garam"
   const unitAlt = UNITS.join('|');
-  const ingRe = new RegExp(
-    `^([\\d\\s¼½¾⅓⅔⅛⅜⅝⅞/\\-\\.]+)?` +  // optional amount
-    `\\s*\\b(${unitAlt})\\.?\\b` +         // unit with word boundaries
-    `\\s*(.+)`,                             // name
-    'i'
-  );
 
-  const match = cleaned.match(ingRe);
+  // 5. Split glued units like "100g", "1½tsp", "500g/1lb" before reading the amount
+  cleaned = splitGluedUnits(cleaned, unitAlt).replace(/\s+/g, ' ').trim();
 
-  if (match) {
-    const rawAmount = (match[1] || '').trim();
-    const rawUnit   = (match[2] || '').trim();
-    let   rawName   = (match[3] || cleaned).trim();
+  const leading = parseLeadingAmount(cleaned);
+  if (leading) {
+    const originalAmount = cleaned.slice(0, leading.end).trim();
+    let rest = stripHyphenBeforeUnit(cleaned.slice(leading.end).trim(), unitAlt).trim();
+    const unitMatch = rest.match(new RegExp(`^(${unitAlt})\\.?\\b\\s*`, 'i'));
+    let rawUnit = '';
+    let rawName = rest;
+    if (unitMatch) {
+      rawUnit = unitMatch[1];
+      rawName = rest.slice(unitMatch[0].length).trim();
+    }
 
     // Drop a redundant alternate measurement that follows a slash, i.e. the
     // metric/imperial dual amounts used by RecipeTin Eats / WPRM:
@@ -726,27 +727,13 @@ function _parseIngredientLine(line: string): Ingredient {
     //   → strip "/ 1.2 lb " so the name is just "scotch fillet…".
     // Only fires when the slash is immediately followed by number(s) + a unit,
     // so an alternate *ingredient* like "beef / chicken" is left untouched.
-    rawName = rawName.replace(
-      new RegExp(`^\\s*/\\s*[\\d¼½¾⅓⅔⅛⅜⅝⅞.,/\\s-]*\\b(?:${unitAlt})\\.?\\b\\s*`, 'i'),
-      ''
-    );
+    rawName = stripAlternateMeasurement(rawName, unitAlt);
 
-    // Strip note annotations from name
     rawName = stripNotes(rawName);
-    if (!rawName) rawName = cleaned.replace(/^[\d\s¼½¾⅓⅔⅛⅜⅝⅞/\-\.]+/, '').trim();
+    if (!rawName) rawName = cleaned.slice(leading.end).trim();
 
-    const result = fixSizeWordUnit({ amount: rawAmount, unit: rawUnit, name: rawName });
+    const result = fixSizeWordUnit({ amount: originalAmount, unit: rawUnit, name: rawName });
     if (result.name) return result;
-  }
-
-  // 6. No unit — try splitting leading number from name
-  const numOnly = cleaned.match(/^([\d\s¼½¾⅓⅔⅛⅜⅝⅞\/\-\.]+)\s+(.+)/);
-  if (numOnly) {
-    return {
-      amount: numOnly[1].trim(),
-      unit:   '',
-      name:   stripNotes(numOnly[2].trim()),
-    };
   }
 
   return { amount: '', unit: '', name: stripNotes(cleaned) };

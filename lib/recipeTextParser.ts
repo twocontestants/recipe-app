@@ -15,6 +15,12 @@
 
 import type { Ingredient } from './db';
 import { inferProtein } from './autotag';
+import {
+  parseLeadingAmount,
+  splitGluedUnits,
+  stripAlternateMeasurement,
+  stripHyphenBeforeUnit,
+} from './ingredientAmount';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -70,17 +76,15 @@ const UNITS = [
   'cms?',
 ];
 
+const UNIT_ALT = UNITS.join('|');
 const UNIT_RE = new RegExp(
-  `^(${UNITS.join('|')})\\.?$`,
+  `^(${UNIT_ALT})\\.?$`,
   'i'
 );
-
-// Vulgar fractions → decimal
-const VULGAR: Record<string, number> = {
-  '¼': 0.25, '½': 0.5, '¾': 0.75,
-  '⅓': 0.333, '⅔': 0.667,
-  '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875,
-};
+const UNIT_AT_START_RE = new RegExp(
+  `^(${UNIT_ALT})\\.?\\b\\s*`,
+  'i'
+);
 
 // Section header patterns
 const INGREDIENT_HEADERS = /^(ingredients?|what you'?ll? need|shopping list|you(?:'ll)? need|for the \w+):?\s*$/i;
@@ -210,8 +214,9 @@ function heuristicSplit(lines: string[]): Sections {
 // How ingredient-like is a line? (0-5)
 function ingredientScore(line: string): number {
   let score = 0;
-  if (/^[\d¼½¾⅓⅔⅛⅜⅝⅞]/.test(line)) score += 2;           // starts with number/fraction
-  if (UNIT_RE.test(line.split(/\s+/)[1] ?? '')) score += 2; // second word is a unit
+  if (parseLeadingAmount(line)) score += 2;                  // starts with a quantity
+  const words = line.split(/\s+/);
+  if (words.slice(1, 4).some(w => UNIT_RE.test(w.replace(/\.$/, '')))) score += 2; // a nearby word is a unit
   if (line.length < 80) score += 1;                          // short lines
   if (/\d/.test(line)) score += 1;                           // contains a number
   if (line.length > 200) score -= 3;                         // too long to be ingredient
@@ -326,45 +331,6 @@ function parseTimeString(s: string): number | null {
 // Ingredient line parser
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Normalise vulgar fractions to decimal strings for display
-function normaliseFraction(s: string): string {
-  // Replace unicode vulgar fractions
-  for (const [char, val] of Object.entries(VULGAR)) {
-    s = s.replace(char, String(val));
-  }
-  // Evaluate "1 1/2" → "1.5"
-  s = s.replace(/(\d+)\s+(\d+)\/(\d+)/, (_, w, n, d) =>
-    String(parseFloat(w) + parseFloat(n) / parseFloat(d))
-  );
-  // Evaluate "1/2" → "0.5"
-  s = s.replace(/^(\d+)\/(\d+)$/, (_, n, d) =>
-    String(parseFloat(n) / parseFloat(d))
-  );
-  return s.trim();
-}
-
-// The core ingredient regex:
-// Group 1: optional amount  (digits, fractions, vulgar chars, ranges like "2-3")
-// Group 2: optional unit
-// Group 3: everything else = name
-
-// Build amount pattern
-const AMT_CHARS = `[\\d\\s¼½¾⅓⅔⅛⅜⅝⅞\\/\\-\\.]`;
-const AMT_PAT   = `(${AMT_CHARS}+)?`;
-
-// Build unit pattern with word boundary so "l" doesn't match "large"
-const UNIT_PAT = `(${UNITS.join('|')})\\.?`;
-
-const ING_RE = new RegExp(
-  `^${AMT_PAT}\\s*\\b${UNIT_PAT}\\b\\s*(.+)`,
-  'i'
-);
-
-// Fallback: amount only (no unit)
-const AMT_ONLY_RE = new RegExp(
-  `^${AMT_PAT}\\s+(.+)`
-);
-
 // Size words that must not end up in the unit field
 const SIZE_WORDS = new Set(['large', 'medium', 'small', 'extra-large', 'extra large', 'jumbo', 'mini', 'tiny']);
 
@@ -376,13 +342,24 @@ function stripParentheticals(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+function peelUnit(rest: string): { unit: string; name: string } {
+  rest = stripHyphenBeforeUnit(rest, UNIT_ALT).trim();
+  const unitMatch = rest.match(UNIT_AT_START_RE);
+  if (unitMatch) {
+    const rawUnit = unitMatch[1];
+    const name = rest.slice(unitMatch[0].length).trim();
+    if (SIZE_WORDS.has(rawUnit.toLowerCase())) {
+      return { unit: '', name: rest };
+    }
+    return { unit: rawUnit, name: stripAlternateMeasurement(name, UNIT_ALT) };
+  }
+  return { unit: '', name: stripAlternateMeasurement(rest, UNIT_ALT) };
+}
+
 export function parseIngredientLine(raw: string): Ingredient[] {
   // Clean the line
   let line = raw
     .trim()
-    .replace(/\s+/g, ' ')
-    // Separate number-glued units: "100g" → "100 g", "1.5kg" → "1.5 kg", "200ml" → "200 ml"
-    .replace(/(\d)(g|kg|ml|l|oz|lb|lbs)\b/gi, '$1 $2')
     .replace(/\s+/g, ' ')
     .replace(/^[\s•·\-\*\/\(\)\[\]]+/, '')  // leading bullets/punctuation
     .replace(/[\s\/\(\)\[\]]+$/, '');        // trailing punctuation
@@ -395,6 +372,7 @@ export function parseIngredientLine(raw: string): Ingredient[] {
 
   // Some sites use "OR" to separate alternatives — take the first
   line = line.split(/\s+or\s+/i)[0];
+  line = splitGluedUnits(line, UNIT_ALT).replace(/\s+/g, ' ');
 
   // "<amount> <unit> each A, B, C" is shorthand for several ingredients sharing
   // one amount (e.g. "1 tsp each cumin, coriander, paprika"). Split it into one
@@ -415,39 +393,15 @@ export function parseIngredientLine(raw: string): Ingredient[] {
   // Strip a stray leading "each" left on a single item ("each cumin" → "cumin").
   line = line.replace(/^each\s+/i, '');
 
-  // Attempt full match: amount + unit + name
-  const full = line.match(ING_RE);
-  if (full) {
-    const rawAmount = (full[1] || '').trim();
-    const rawUnit   = (full[2] || '').trim();
-    const rawName   = (full[3] || '').trim();
-
-    // Reject if the "unit" is actually a size word that snuck through
-    if (SIZE_WORDS.has(rawUnit.toLowerCase())) {
-      return [{ amount: normaliseFraction(rawAmount), unit: '', name: `${rawUnit} ${rawName}`.trim() }];
+  const leading = parseLeadingAmount(line);
+  if (leading) {
+    const rest = line.slice(leading.end).trim();
+    if (!rest) return [{ amount: leading.display, unit: '', name: '' }];
+    const { unit, name } = peelUnit(rest);
+    if (!name && !unit) {
+      return [{ amount: leading.display, unit: '', name: '' }];
     }
-
-    return [{
-      amount: normaliseFraction(rawAmount),
-      unit:   rawUnit,
-      name:   rawName,
-    }];
-  }
-
-  // Fallback: amount (no unit) + name — e.g. "2 eggs", "1 large onion"
-  const amtOnly = line.match(AMT_ONLY_RE);
-  if (amtOnly) {
-    const rawAmount = (amtOnly[1] || '').trim();
-    const rawName   = (amtOnly[2] || '').trim();
-    // If rawAmount is just noise, put everything in name
-    if (!rawAmount || /^[\s\-\.]+$/.test(rawAmount)) {
-      return [{ amount: '', unit: '', name: rawName }];
-    }
-    return [{
-      amount: normaliseFraction(rawAmount),
-      unit:   '',
-      name:   rawName,
-    }];
+    return [{ amount: leading.display, unit, name }];
   }
 
   // No number at all — whole line is the name

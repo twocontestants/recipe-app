@@ -1,4 +1,5 @@
 import type { MealPlan } from './db';
+import { parseAmountNumber } from './ingredientAmount';
 import { plannedOnOf } from './plannerDate';
 
 // A single recipe's original contribution to a merged shopping item. `name` is
@@ -435,18 +436,7 @@ export function resolveCategory(normalisedName: string, overrides?: Record<strin
 }
 
 function parseAmount(amount: string): number {
-  if (!amount) return 1;
-  const fractionMap: Record<string, number> = { '¼': 0.25, '½': 0.5, '¾': 0.75, '⅓': 0.333, '⅔': 0.667, '⅛': 0.125 };
-  let normalized = amount;
-  for (const [frac, val] of Object.entries(fractionMap)) normalized = normalized.replace(frac, ` ${val}`);
-  const mixedMatch = normalized.match(/(\d+)\s+(\d+)\/(\d+)/);
-  if (mixedMatch) return parseInt(mixedMatch[1]) + parseInt(mixedMatch[2]) / parseInt(mixedMatch[3]);
-  const fracMatch = normalized.match(/(\d+)\/(\d+)/);
-  if (fracMatch) return parseInt(fracMatch[1]) / parseInt(fracMatch[2]);
-  const rangeMatch = normalized.match(/(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/);
-  if (rangeMatch) return (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2;
-  const num = parseFloat(normalized.match(/[\d.]+/)?.[0] || '1');
-  return isNaN(num) ? 1 : num;
+  return parseAmountNumber(amount);
 }
 
 function formatWeight(g: number): string { return g >= 1000 ? formatDecimal(g / 1000) : formatDecimal(g); }
