@@ -63,6 +63,19 @@ describe('RecipeFormModal bulk paste', () => {
     expect(tagsField().value).toMatch(/oven/);
   });
 
+  it('shows a pasted ingredient group as an editable heading', () => {
+    renderEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Paste ingredient list' }));
+    fireEvent.change(screen.getByLabelText('Paste ingredient list'), {
+      target: { value: '1 tbsp olive oil\nFor the sauce:\n1 cup stock' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add to recipe' }));
+    expect(screen.getByDisplayValue('olive oil')).toBeTruthy();
+    expect(screen.getByDisplayValue('stock')).toBeTruthy();
+    const group = screen.getByLabelText('Ingredient group') as HTMLInputElement;
+    expect(group.value).toBe('For the sauce');
+  });
+
   it('parses a paste-list box without replacing existing rows', () => {
     renderEditor({
       ...emptyRecipeForm(),

@@ -15,6 +15,7 @@
 
 import type { Ingredient } from './db';
 import { inferProtein } from './autotag';
+import { ingredientGroupHeading } from './ingredientGroups';
 import {
   parseLeadingAmount,
   splitGluedUnits,
@@ -87,7 +88,7 @@ const UNIT_AT_START_RE = new RegExp(
 );
 
 // Section header patterns
-const INGREDIENT_HEADERS = /^(ingredients?|what you'?ll? need|shopping list|you(?:'ll)? need|for the \w+):?\s*$/i;
+const INGREDIENT_HEADERS = /^(ingredients?|what you'?ll? need|shopping list|you(?:'ll)? need):?\s*$/i;
 const METHOD_HEADERS     = /^(method|steps?|instructions?|directions?|preparation|how to(?: make)?|to make):?\s*$/i;
 const NOTES_HEADERS      = /^(notes?|tips?|serving suggestions?|nutrition|nutritional):?\s*$/i;
 
@@ -116,8 +117,8 @@ export function parseRecipeText(raw: string): ParsedRecipe {
   // ── 4. Extract description from preamble ──
   const description = extractDescription(sections.preamble, title);
 
-  // ── 5. Parse ingredients ──
-  const ingredients = sections.ingredientLines.flatMap(parseIngredientLine).filter(i => i.name.length > 0);
+  // ── 5. Parse ingredients, keeping subheadings like "For the sauce:" ──
+  const ingredients = parseIngredientLines(sections.ingredientLines);
 
   // ── 6. Parse steps ──
   const steps = parseSteps(sections.methodLines);
@@ -189,6 +190,11 @@ function heuristicSplit(lines: string[]): Sections {
   for (const line of lines) {
     if (NOISE_RE.test(line)) continue;
     if (INGREDIENT_HEADERS.test(line) || METHOD_HEADERS.test(line)) continue;
+    if (!seenStep && ingredientGroupHeading(line)) {
+      ingredientLines.push(line);
+      seenIngredient = true;
+      continue;
+    }
 
     const ingScore = ingredientScore(line);
     const stepScore = stepLikelihood(line);
@@ -354,6 +360,24 @@ function peelUnit(rest: string): { unit: string; name: string } {
     return { unit: rawUnit, name: stripAlternateMeasurement(name, UNIT_ALT) };
   }
   return { unit: '', name: stripAlternateMeasurement(rest, UNIT_ALT) };
+}
+
+/** Parse ingredient lines, recording subheadings on the following rows. */
+export function parseIngredientLines(lines: string[]): Ingredient[] {
+  const ingredients: Ingredient[] = [];
+  let group: string | undefined;
+  for (const line of lines) {
+    const heading = ingredientGroupHeading(line);
+    if (heading) {
+      group = heading;
+      continue;
+    }
+    for (const ing of parseIngredientLine(line)) {
+      if (!ing.name) continue;
+      ingredients.push(group ? { ...ing, group } : ing);
+    }
+  }
+  return ingredients;
 }
 
 export function parseIngredientLine(raw: string): Ingredient[] {

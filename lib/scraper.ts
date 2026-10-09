@@ -3,6 +3,12 @@ import dns from 'dns/promises';
 import net from 'net';
 import type { Ingredient } from './db';
 import {
+  cleanGroupHeading,
+  ingredientGroupHeading,
+  isOverallIngredientsTitle,
+  mergeGroupedIngredients,
+} from './ingredientGroups';
+import {
   parseLeadingAmount,
   splitGluedUnits,
   stripAlternateMeasurement,
@@ -113,20 +119,19 @@ export async function scrapeRecipe(url: string): Promise<ScrapedRecipe> {
   const html = await response.text();
   const $ = cheerio.load(html);
 
-  // 1. JSON-LD — most reliable when present
-  const jsonLd = extractJsonLd($);
-  if (jsonLd) return jsonLd;
+  // JSON-LD, then Next.js data, then microdata, then HTML heuristics.
+  // Grouped subheadings (a sauce, a spice mix) are read from the page HTML
+  // afterwards — schema.org's ingredient list is flat and usually drops them.
+  const recipe =
+    extractJsonLd($) ||
+    extractNextData($) ||
+    extractMicrodata($) ||
+    heuristicScrape($, url);
 
-  // 2. Next.js __NEXT_DATA__ — covers Coles and similar SPAs
-  const nextData = extractNextData($);
-  if (nextData) return nextData;
-
-  // 3. Microdata (schema.org itemtype attributes)
-  const microdata = extractMicrodata($);
-  if (microdata) return microdata;
-
-  // 4. Heuristic HTML scraping
-  return heuristicScrape($, url);
+  return {
+    ...recipe,
+    ingredients: applyHtmlGroups($, recipe.ingredients),
+  };
 }
 
 // ── JSON-LD ────────────────────────────────────────────────────────────────
@@ -179,9 +184,7 @@ function findRecipeSchema(data: unknown): Record<string, unknown> | null {
 }
 
 function parseSchemaRecipe(schema: Record<string, unknown>): ScrapedRecipe {
-  const ingredients = parseSchemaIngredients(
-    (schema.recipeIngredient as unknown[]) || []
-  );
+  const ingredients = schemaIngredients(schema.recipeIngredient);
   const steps = parseSchemaSteps(schema.recipeInstructions);
 
   // Image: string | string[] | { url } | [{ url }]
@@ -221,25 +224,75 @@ function parseSchemaRecipe(schema: Record<string, unknown>): ScrapedRecipe {
   };
 }
 
-function parseSchemaIngredients(raw: unknown[]): Ingredient[] {
-  const results: Ingredient[] = [];
-
-  for (const item of raw) {
-    if (typeof item === 'string') {
-      const trimmed = item.trim();
-      // Skip bare section headers ("For the batter:", etc.)
-      if (!trimmed || (trimmed.endsWith(':') && trimmed.split(' ').length <= 5))
-        continue;
-      results.push(parseIngredientLine(trimmed));
-    } else if (item && typeof item === 'object') {
-      // Some schemas wrap ingredients as objects: { "@type": "HowToSupply", "name": "..." }
-      const obj = item as Record<string, unknown>;
-      const text = String(obj.name || obj.text || (obj as Record<string,string>)['@value'] || '');
-      if (text) results.push(parseIngredientLine(text));
-    }
+function nestedIngredientEntries(obj: Record<string, unknown>): unknown[] | null {
+  for (const key of ['itemListElement', 'ingredients', 'items']) {
+    if (Array.isArray(obj[key])) return obj[key] as unknown[];
   }
+  return null;
+}
 
-  return results.filter(i => i.name.length > 0);
+function schemaNodeText(item: unknown): string {
+  if (typeof item === 'string') return item.trim();
+  if (!item || typeof item !== 'object') return '';
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.text === 'string' && obj.text.trim()) return obj.text.trim();
+  if (typeof obj.item === 'string' && obj.item.trim()) return obj.item.trim();
+  if (obj.item && typeof obj.item === 'object') return schemaNodeText(obj.item);
+  const named = obj.name || obj.ingredient || obj.description || obj.label || obj['@value'];
+  return typeof named === 'string' ? named.trim() : '';
+}
+
+function explicitGroupLabel(obj: Record<string, unknown>): string | undefined {
+  for (const key of ['heading', 'title', 'group', 'purpose', 'name']) {
+    const val = obj[key];
+    if (typeof val !== 'string' || !val.trim()) continue;
+    const cleaned = cleanGroupHeading(val);
+    if (cleaned) return cleaned;
+  }
+  return undefined;
+}
+
+/** Ingredients from schema.org, Next.js data, or `{ heading, ingredients }` groups. */
+export function schemaIngredients(raw: unknown): Ingredient[] {
+  if (!Array.isArray(raw)) return [];
+  const results: Ingredient[] = [];
+  let group: string | undefined;
+
+  const pushText = (text: string, forced?: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const heading = ingredientGroupHeading(trimmed);
+    if (heading) {
+      group = heading;
+      return;
+    }
+    // A short leftover label ("Batter:") that isn't a usable heading.
+    if (trimmed.endsWith(':') && trimmed.split(/\s+/).length <= 6) return;
+    const ing = parseIngredientLine(trimmed);
+    if (!ing.name) return;
+    const headingName = forced || group;
+    results.push(headingName ? { ...ing, group: headingName } : ing);
+  };
+
+  const walk = (item: unknown, forced?: string) => {
+    if (typeof item === 'string') {
+      pushText(item, forced);
+      return;
+    }
+    if (!item || typeof item !== 'object') return;
+    const obj = item as Record<string, unknown>;
+    const nested = nestedIngredientEntries(obj);
+    if (nested) {
+      const heading = explicitGroupLabel(obj) || forced;
+      for (const sub of nested) walk(sub, heading);
+      return;
+    }
+    const text = schemaNodeText(obj);
+    if (text) pushText(text, forced);
+  };
+
+  for (const item of raw) walk(item);
+  return results;
 }
 
 function parseSchemaSteps(instructions: unknown): string[] {
@@ -387,36 +440,17 @@ function parseGenericRecipeObject(obj: Record<string, unknown>): ScrapedRecipe |
     if (total) cook_time = total - (prep_time || 0) || total;
   }
 
-  // Ingredients
-  const ingredients: Ingredient[] = [];
-  const rawIng =
-    obj.recipeIngredient ||
-    obj.ingredientGroups ||
-    obj.ingredients ||
-    [];
-
-  if (Array.isArray(rawIng)) {
-    for (const item of rawIng) {
-      if (!item) continue;
-      if (typeof item === 'string') {
-        const t = item.trim();
-        if (t && !(t.endsWith(':') && t.split(' ').length <= 5))
-          ingredients.push(parseIngredientLine(t));
-      } else if (typeof item === 'object') {
-        const io = item as Record<string, unknown>;
-        // Ingredient group: { heading/title, ingredients: [...] }
-        if (Array.isArray(io.ingredients)) {
-          for (const sub of io.ingredients as unknown[]) {
-            const text = extractIngredientText(sub);
-            if (text) ingredients.push(parseIngredientLine(text));
-          }
-        } else {
-          const text = extractIngredientText(io);
-          if (text) ingredients.push(parseIngredientLine(text));
-        }
-      }
-    }
-  }
+  // Prefer a grouped list when the page has one, and keep schema wording
+  // when the flat list is the same length.
+  const fromGroups = Array.isArray(obj.ingredientGroups)
+    ? schemaIngredients(obj.ingredientGroups)
+    : [];
+  const fromFlat = schemaIngredients(
+    (Array.isArray(obj.recipeIngredient) && obj.recipeIngredient) ||
+    (Array.isArray(obj.ingredients) && obj.ingredients) ||
+    [],
+  );
+  const ingredients = mergeGroupedIngredients(fromFlat, fromGroups, true);
 
   // Steps
   const steps: string[] = [];
@@ -466,15 +500,6 @@ function parseGenericRecipeObject(obj: Record<string, unknown>): ScrapedRecipe |
     ingredients,
     steps,
   };
-}
-
-function extractIngredientText(item: unknown): string {
-  if (typeof item === 'string') return item.trim();
-  if (!item || typeof item !== 'object') return '';
-  const o = item as Record<string, unknown>;
-  return String(
-    o.text || o.name || o.ingredient || o.description || o.label || ''
-  ).trim();
 }
 
 // Depth-limited recursive search for recipe-looking objects
@@ -553,6 +578,177 @@ function extractMicrodata($: cheerio.CheerioAPI): ScrapedRecipe | null {
     ingredients,
     steps,
   };
+}
+
+// ── HTML ingredient groups ─────────────────────────────────────────────────
+// schema.org recipeIngredient is a flat list and usually omits subheadings
+// ("Chili Spice Mix", "Celeriac Puree"). Those live in the page markup.
+
+const GROUP_CONTAINERS = [
+  '.wprm-recipe-ingredients-container',
+  '.recipe-checklist',
+  '.tasty-recipes-ingredients',
+  '.tasty-recipe-ingredients',
+  '.mv-create-ingredients',
+];
+
+interface HtmlGroup {
+  heading: string | null;
+  lines: string[];
+}
+
+function elementVisible($: cheerio.CheerioAPI, el: unknown): boolean {
+  const node = $(el as never);
+  const style = node.attr('style') || '';
+  if (/display\s*:\s*none/i.test(style)) return false;
+  if (node.attr('hidden') !== undefined) return false;
+  if (node.attr('aria-hidden') === 'true') return false;
+  return true;
+}
+
+function strippedText($: cheerio.CheerioAPI, el: unknown, removeSelector?: string): string {
+  const $el = $(el as never).clone();
+  if (removeSelector) $el.find(removeSelector).remove();
+  $el.find('.sr-only, .screen-reader-text, [class*="screen-reader"], [class*="sr-only"]').remove();
+  $el.find('input, button, script, style').remove();
+  return $el.text().replace(/\s+/g, ' ').trim();
+}
+
+function chooseItemSelector($: cheerio.CheerioAPI, container: ReturnType<cheerio.CheerioAPI>): string | null {
+  if (container.find('.wprm-recipe-ingredient').length > 0) return '.wprm-recipe-ingredient';
+  if (container.find('.recipe-checklist__label').length > 0) return '.recipe-checklist__label';
+  if (container.find('li').length >= 2) return 'li';
+  return null;
+}
+
+function looksLikeIngredientBlock($: cheerio.CheerioAPI, container: ReturnType<cheerio.CheerioAPI>): boolean {
+  const cls = `${container.attr('class') || ''} ${container.attr('id') || ''}`;
+  if (/ingredient/i.test(cls)) return true;
+  if (isOverallIngredientsTitle(container.find('h1, h2, h3').first().text())) return true;
+  return container.find('.wprm-recipe-ingredient, .recipe-checklist__label').length > 0;
+}
+
+function isGroupHeadingEl($: cheerio.CheerioAPI, el: unknown, itemSelector: string): boolean {
+  const node = $(el as never);
+  if (node.is(itemSelector)) return false;
+  const tag = String(node.prop('tagName') || '').toLowerCase();
+  if (/^h[2-6]$/.test(tag)) return true;
+  const cls = node.attr('class') || '';
+  return /group-name|group-header|ingredient-heading/i.test(cls) && node.find(itemSelector).length === 0;
+}
+
+function groupsInContainer($: cheerio.CheerioAPI, container: ReturnType<cheerio.CheerioAPI>): HtmlGroup[] | null {
+  const itemSelector = chooseItemSelector($, container);
+  if (!itemSelector) return null;
+  const headingSelector = 'h2, h3, h4, h5, h6, [class*="group-name"], [class*="group-header"], [class*="ingredient-heading"]';
+  const drafts: HtmlGroup[] = [];
+  let current: HtmlGroup | null = null;
+
+  container.find(`${headingSelector}, ${itemSelector}`).each((_, el) => {
+    const node = $(el);
+    if (node.parents(itemSelector).length > 0) return;
+    if (isGroupHeadingEl($, el, itemSelector)) {
+      const raw = strippedText($, el, itemSelector);
+      if (isOverallIngredientsTitle(raw)) return;
+      if (!raw.trim()) {
+        current = { heading: null, lines: [] };
+        drafts.push(current);
+        return;
+      }
+      const heading = cleanGroupHeading(raw);
+      if (!heading) return;
+      current = { heading, lines: [] };
+      drafts.push(current);
+      return;
+    }
+    if (!node.is(itemSelector)) return;
+    const text = strippedText($, el);
+    if (!text || text.length > 200) return;
+    const inlineHeading = ingredientGroupHeading(text);
+    if (inlineHeading) {
+      current = { heading: inlineHeading, lines: [] };
+      drafts.push(current);
+      return;
+    }
+    let bucket = current;
+    if (!bucket) {
+      bucket = { heading: null, lines: [] };
+      drafts.push(bucket);
+      current = bucket;
+    }
+    bucket.lines.push(text);
+  });
+
+  const filled = drafts.filter(group => group.lines.length > 0);
+  if (!filled.some(group => group.heading)) return null;
+  return filled;
+}
+
+function siblingListGroups($: cheerio.CheerioAPI): HtmlGroup[] | null {
+  const lists = $('ul, ol').filter((_, el) => {
+    if (!elementVisible($, el)) return false;
+    const cls = `${$(el).attr('class') || ''} ${$(el).attr('id') || ''}`;
+    return /ingredient/i.test(cls);
+  });
+  if (lists.length < 2) return null;
+  const parent = lists.first().parent();
+  const drafts: HtmlGroup[] = [];
+  let headed = false;
+  lists.each((_, el) => {
+    if ($(el).parent()[0] !== parent[0]) return;
+    const prev = $(el).prevAll('h2, h3, h4, h5, h6').first();
+    let heading: string | null = null;
+    if (prev.length) {
+      const raw = prev.text().replace(/\s+/g, ' ').trim();
+      if (!isOverallIngredientsTitle(raw)) heading = cleanGroupHeading(raw);
+    }
+    if (heading) headed = true;
+    const lines: string[] = [];
+    $(el).children('li').each((__, li) => {
+      const text = strippedText($, li);
+      if (text && text.length < 200 && !ingredientGroupHeading(text)) lines.push(text);
+    });
+    if (lines.length) drafts.push({ heading, lines });
+  });
+  if (!headed) return null;
+  return drafts;
+}
+
+function draftsToIngredients(drafts: HtmlGroup[]): Ingredient[] {
+  const out: Ingredient[] = [];
+  for (const draft of drafts) {
+    for (const line of draft.lines) {
+      const ing = parseIngredientLine(line);
+      if (!ing.name) continue;
+      out.push(draft.heading ? { ...ing, group: draft.heading } : ing);
+    }
+  }
+  return out;
+}
+
+function extractHtmlGroups($: cheerio.CheerioAPI): Ingredient[] | null {
+  for (const sel of GROUP_CONTAINERS) {
+    const containers = $(sel).filter((_, el) => elementVisible($, el));
+    for (let i = 0; i < containers.length; i++) {
+      const container = containers.eq(i);
+      if (!looksLikeIngredientBlock($, container)) continue;
+      const drafts = groupsInContainer($, container);
+      if (drafts) return draftsToIngredients(drafts);
+    }
+  }
+  const sibling = siblingListGroups($);
+  return sibling ? draftsToIngredients(sibling) : null;
+}
+
+function applyHtmlGroups($: cheerio.CheerioAPI, parsed: Ingredient[]): Ingredient[] {
+  const grouped = extractHtmlGroups($);
+  if (!grouped) return parsed;
+  return mergeGroupedIngredients(parsed, grouped, true);
+}
+
+/** Test seam: stamp or replace `parsed` using grouped headings in `html`. */
+export function ingredientsWithHtmlGroups(html: string, parsed: Ingredient[]): Ingredient[] {
+  return applyHtmlGroups(cheerio.load(html), parsed);
 }
 
 // ── Heuristic fallback ─────────────────────────────────────────────────────

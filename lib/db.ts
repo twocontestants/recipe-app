@@ -47,6 +47,12 @@ export interface Ingredient {
   amount: string;
   unit: string;
   notes?: string;
+  /**
+   * Subheading this line was listed under, e.g. "Chili Spice Mix" or
+   * "For the sauce". Omitted for ingredients that aren't in a group.
+   * Shopping and tags use `name` only, so a heading is never its own item.
+   */
+  group?: string;
 }
 
 export interface Recipe {

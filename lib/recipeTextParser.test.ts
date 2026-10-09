@@ -73,6 +73,29 @@ describe('parseIngredientLine amounts', () => {
     });
   });
 
+  it('keeps ingredient subheadings on the following lines', () => {
+    const parsed = parseRecipeText(`
+Chilli con carne
+Ingredients
+1 tbsp olive oil
+500g beef mince
+Chili Spice Mix:
+4 tsp paprika
+2 tsp cumin
+To Serve
+Rice
+Method
+Brown the beef and simmer.
+`);
+    expect(parsed.ingredients).toEqual([
+      { amount: '1', unit: 'tbsp', name: 'olive oil' },
+      { amount: '500', unit: 'g', name: 'beef mince' },
+      { amount: '4', unit: 'tsp', name: 'paprika', group: 'Chili Spice Mix' },
+      { amount: '2', unit: 'tsp', name: 'cumin', group: 'Chili Spice Mix' },
+      { amount: '', unit: '', name: 'Rice', group: 'To Serve' },
+    ]);
+  });
+
   it('still splits a shared each-list', () => {
     expect(parseIngredientLine('1 tsp each cumin, coriander, paprika')).toEqual([
       { amount: '1', unit: 'tsp', name: 'cumin' },

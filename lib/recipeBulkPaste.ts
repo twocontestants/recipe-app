@@ -1,5 +1,6 @@
 import type { Ingredient } from './db';
 import { autoTag } from './autotag';
+import { ingredientGroupHeading, withIngredientGroup } from './ingredientGroups';
 import { parseIngredientLine } from './recipeTextParser';
 import type { RecipeFormState } from './recipeForm';
 
@@ -34,20 +35,27 @@ function nonHeaderLines(text: string): string[] {
  */
 export function parseIngredientBlock(text: string): Ingredient[] {
   const out: Ingredient[] = [];
+  let group: string | undefined;
   for (const line of nonHeaderLines(text)) {
+    const heading = ingredientGroupHeading(line);
+    if (heading) {
+      group = heading;
+      continue;
+    }
+    const stamp = (ing: Ingredient): Ingredient => (group ? { ...ing, group } : ing);
     if (line.includes('\t')) {
       const parts = line.split('\t').map(part => part.trim());
       if (parts.length >= 3) {
         const name = parts.slice(2).join(' ');
-        if (name) out.push({ amount: parts[0], unit: parts[1], name });
+        if (name) out.push(stamp({ amount: parts[0], unit: parts[1], name }));
         continue;
       }
       if (parts.length === 2 && parts[1]) {
-        out.push({ amount: parts[0], unit: '', name: parts[1] });
+        out.push(stamp({ amount: parts[0], unit: '', name: parts[1] }));
         continue;
       }
     }
-    out.push(...parseIngredientLine(line));
+    out.push(...parseIngredientLine(line).map(stamp));
   }
   return out.filter(ing => ing.name.trim());
 }
@@ -108,6 +116,12 @@ export function insertParsedIngredients(
 ): Ingredient[] {
   if (parsed.length === 0) return existing;
   const row = existing[index];
+  // A paste that doesn't name its own groups stays in the group of the row
+  // it was dropped on.
+  const inherited = row?.group;
+  if (inherited) {
+    parsed = parsed.map(ing => (ing.group ? ing : withIngredientGroup(ing, inherited)));
+  }
   const replace = !row || isBlankIngredient(row);
   const before = existing.slice(0, Math.max(0, index));
   const after = existing.slice(Math.max(0, index) + (replace ? 1 : 0));
