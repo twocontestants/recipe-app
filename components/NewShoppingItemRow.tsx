@@ -7,12 +7,10 @@ export const newShoppingItemRowCss = `
   .new-item-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.35rem;
-    border-radius: 0 0 5px 5px;
-    background: rgba(181,69,27,0.025);
-    border: 1px dashed var(--border);
-    border-top: none;
+    gap: 0.55rem;
+    padding: 0.42rem 0.85rem;
+    background: #FAF7F2;
+    border-top: 1px dashed var(--border);
     animation: fadeInRow 0.12s ease;
     position: relative;
     z-index: 40;
@@ -155,13 +153,6 @@ export default function NewShoppingItemRow({ autoFocus, catalog = [], onCommit, 
     <>
       <style>{newShoppingItemRowCss}</style>
       <div className="new-item-row" data-layout="name-qty">
-        <div className="item-drag-handle" style={{ opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
-          <svg width="11" height="11" viewBox="0 0 12 18" fill="currentColor">
-            <circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/>
-            <circle cx="3" cy="9" r="1.5"/><circle cx="9" cy="9" r="1.5"/>
-            <circle cx="3" cy="15" r="1.5"/><circle cx="9" cy="15" r="1.5"/>
-          </svg>
-        </div>
         <div className="shop-checkbox new-item-checkbox" />
         <div className="new-item-name-wrap">
           <input

@@ -5,7 +5,7 @@ import ShoppingListClient from './ShoppingClient';
 
 export default function ShoppingListPage() {
   return (
-    <div className="app-shell">
+    <div className="app-shell is-shopping">
       <Sidebar />
       <main className="main-content">
         <AuthGate>
