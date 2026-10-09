@@ -1,5 +1,6 @@
 import type { Ingredient } from './db';
 import { autoTag } from './autotag';
+import { decodeHtmlEntities } from './htmlEntities';
 import { ingredientGroupHeading, withIngredientGroup } from './ingredientGroups';
 import { parseIngredientLine } from './recipeTextParser';
 import type { RecipeFormState } from './recipeForm';
@@ -36,7 +37,8 @@ function nonHeaderLines(text: string): string[] {
 export function parseIngredientBlock(text: string): Ingredient[] {
   const out: Ingredient[] = [];
   let group: string | undefined;
-  for (const line of nonHeaderLines(text)) {
+  for (const rawLine of nonHeaderLines(text)) {
+    const line = decodeHtmlEntities(rawLine);
     const heading = ingredientGroupHeading(line);
     if (heading) {
       group = heading;

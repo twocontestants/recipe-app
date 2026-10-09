@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import dns from 'dns/promises';
 import net from 'net';
 import type { Ingredient } from './db';
+import { decodeHtmlEntities } from './htmlEntities';
 import {
   cleanGroupHeading,
   ingredientGroupHeading,
@@ -128,9 +129,26 @@ export async function scrapeRecipe(url: string): Promise<ScrapedRecipe> {
     extractMicrodata($) ||
     heuristicScrape($, url);
 
-  return {
+  return decodeScrapedRecipe({
     ...recipe,
     ingredients: applyHtmlGroups($, recipe.ingredients),
+  });
+}
+
+function decodeScrapedRecipe(recipe: ScrapedRecipe): ScrapedRecipe {
+  return {
+    ...recipe,
+    title: decodeHtmlEntities(recipe.title),
+    description: recipe.description ? decodeHtmlEntities(recipe.description) : undefined,
+    steps: recipe.steps.map(step => decodeHtmlEntities(step)),
+    ingredients: recipe.ingredients.map(ing => ({
+      ...ing,
+      amount: decodeHtmlEntities(ing.amount),
+      unit: decodeHtmlEntities(ing.unit),
+      name: decodeHtmlEntities(ing.name),
+      ...(ing.notes ? { notes: decodeHtmlEntities(ing.notes) } : {}),
+      ...(ing.group ? { group: decodeHtmlEntities(ing.group) } : {}),
+    })),
   };
 }
 
@@ -246,7 +264,7 @@ function explicitGroupLabel(obj: Record<string, unknown>): string | undefined {
   for (const key of ['heading', 'title', 'group', 'purpose', 'name']) {
     const val = obj[key];
     if (typeof val !== 'string' || !val.trim()) continue;
-    const cleaned = cleanGroupHeading(val);
+    const cleaned = cleanGroupHeading(decodeHtmlEntities(val));
     if (cleaned) return cleaned;
   }
   return undefined;
@@ -259,7 +277,7 @@ export function schemaIngredients(raw: unknown): Ingredient[] {
   let group: string | undefined;
 
   const pushText = (text: string, forced?: string) => {
-    const trimmed = text.trim();
+    const trimmed = decodeHtmlEntities(text).trim();
     if (!trimmed) return;
     const heading = ingredientGroupHeading(trimmed);
     if (heading) {
@@ -611,7 +629,7 @@ function strippedText($: cheerio.CheerioAPI, el: unknown, removeSelector?: strin
   if (removeSelector) $el.find(removeSelector).remove();
   $el.find('.sr-only, .screen-reader-text, [class*="screen-reader"], [class*="sr-only"]').remove();
   $el.find('input, button, script, style').remove();
-  return $el.text().replace(/\s+/g, ' ').trim();
+  return decodeHtmlEntities($el.text().replace(/\s+/g, ' ').trim());
 }
 
 function chooseItemSelector($: cheerio.CheerioAPI, container: ReturnType<cheerio.CheerioAPI>): string | null {
@@ -699,7 +717,7 @@ function siblingListGroups($: cheerio.CheerioAPI): HtmlGroup[] | null {
     const prev = $(el).prevAll('h2, h3, h4, h5, h6').first();
     let heading: string | null = null;
     if (prev.length) {
-      const raw = prev.text().replace(/\s+/g, ' ').trim();
+      const raw = decodeHtmlEntities(prev.text().replace(/\s+/g, ' ').trim());
       if (!isOverallIngredientsTitle(raw)) heading = cleanGroupHeading(raw);
     }
     if (heading) headed = true;
@@ -859,8 +877,8 @@ function stripNotes(s: string): string {
 }
 
 function _parseIngredientLine(line: string): Ingredient {
-  // 1. Basic whitespace normalisation
-  let cleaned = line.trim().replace(/\s+/g, ' ');
+  // 1. Basic whitespace normalisation. JSON-LD often leaves &#39; as text.
+  let cleaned = decodeHtmlEntities(line).trim().replace(/\s+/g, ' ');
 
   // 2. Strip leading bullets/checkbox glyphs/punctuation (but NOT leading parens
   //    that are part of amounts). Covers WPRM screen-reader markers like "▢ ".

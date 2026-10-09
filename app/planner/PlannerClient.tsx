@@ -92,22 +92,15 @@ import {
   plannerDinnerPayload,
   postPlannerDinner,
 } from '@/lib/plannerWrite';
+import { PROTEIN_COLORS, PROTEIN_EMOJI, type ProteinType } from '@/lib/proteins';
 
 // ── Protein helpers ───────────────────────────────────────────────────────────
 
-const PROTEIN_COLORS: Record<string, string> = {
-  chicken: '#E8A838', beef: '#C0392B', pork: '#D4697A', lamb: '#8E44AD',
-  fish: '#2980B9', seafood: '#16A085', tofu: '#27AE60', eggs: '#D4AC0D',
-  legumes: '#A04000', dairy: '#717D7E',
-};
-const PROTEIN_EMOJI: Record<string, string> = {
-  chicken: '🍗', beef: '🥩', pork: '🐷', lamb: '🐑',
-  fish: '🐟', seafood: '🦐', tofu: '🫘', eggs: '🥚', legumes: '🫘', dairy: '🧀',
-};
-
 function ProteinBadge({ protein }: { protein?: string }) {
   if (!protein) return null;
-  const color = PROTEIN_COLORS[protein] || '#888';
+  const known = protein in PROTEIN_COLORS;
+  const color = known ? PROTEIN_COLORS[protein as ProteinType] : '#888';
+  const emoji = known ? PROTEIN_EMOJI[protein as ProteinType] : '🍽';
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '3px',
@@ -115,7 +108,7 @@ function ProteinBadge({ protein }: { protein?: string }) {
       color: 'white', background: color, borderRadius: '99px',
       padding: '2px 6px', lineHeight: 1.4, letterSpacing: '0.02em', flexShrink: 0,
     }}>
-      {PROTEIN_EMOJI[protein]} {protein}
+      {emoji} {protein}
     </span>
   );
 }

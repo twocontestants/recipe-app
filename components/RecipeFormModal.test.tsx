@@ -35,6 +35,12 @@ function tagsField() {
 }
 
 describe('RecipeFormModal bulk paste', () => {
+  it('offers duck and an other protein alongside the usual meats', () => {
+    renderEditor();
+    expect(screen.getByRole('button', { name: /duck/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^🍖 other$/i })).toBeTruthy();
+  });
+
   it('parses a pasted ingredient list into rows and tags protein and spice', () => {
     renderEditor();
     paste(

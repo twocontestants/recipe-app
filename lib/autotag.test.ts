@@ -57,6 +57,17 @@ describe('inferProtein', () => {
     expect(inferProtein('Cottage pie', ings('500g mince', 'potato'))).toBe('beef');
   });
 
+  it('treats duck as its own protein', () => {
+    expect(inferProtein('Duck with celeriac puree', ings('whole duck', 'celeriac'))).toBe('duck');
+  });
+
+  it('files other meats under other, and ignores goat cheese and duck fat', () => {
+    expect(inferProtein('Roast turkey', ings('turkey breast'))).toBe('other');
+    expect(inferProtein('Goat curry', ings('goat shoulder', 'spices'))).toBe('other');
+    expect(inferProtein("Goat's cheese salad", ings("goat's cheese", 'leaves'))).toBeUndefined();
+    expect(inferProtein('Roast potatoes', ings('potato', 'duck fat'))).toBeUndefined();
+  });
+
   it('selects legumes from chickpeas or lentils', () => {
     expect(inferProtein('Dal', ings('red lentils', 'onion', 'turmeric'))).toBe('legumes');
   });

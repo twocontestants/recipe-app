@@ -56,6 +56,17 @@ const CHECKLIST = `
 `;
 
 describe('schemaIngredients', () => {
+  it('decodes HTML entities in names and group headings', () => {
+    expect(schemaIngredients([
+      "1 tsp chef&#39;s salt",
+      'For the chef&#39;s sauce:',
+      '1 cup stock',
+    ])).toEqual([
+      { amount: '1', unit: 'tsp', name: "chef's salt" },
+      { amount: '1', unit: 'cup', name: 'stock', group: "For the chef's sauce" },
+    ]);
+  });
+
   it('keeps colon and label subheadings from a flat schema list', () => {
     expect(schemaIngredients([
       '1 tbsp olive oil',

@@ -15,6 +15,7 @@
 
 import type { Ingredient } from './db';
 import { inferProtein } from './autotag';
+import { decodeHtmlEntities } from './htmlEntities';
 import { ingredientGroupHeading } from './ingredientGroups';
 import {
   parseLeadingAmount,
@@ -100,7 +101,7 @@ const NOISE_RE = /^(print|save|share|jump to recipe|rate this|advertisement|phot
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function parseRecipeText(raw: string): ParsedRecipe {
-  const lines = raw
+  const lines = decodeHtmlEntities(raw)
     .split(/\r?\n/)
     .map(l => l.trim())
     .filter(l => l.length > 0);
@@ -381,8 +382,8 @@ export function parseIngredientLines(lines: string[]): Ingredient[] {
 }
 
 export function parseIngredientLine(raw: string): Ingredient[] {
-  // Clean the line
-  let line = raw
+  // Clean the line. Pasted pages sometimes keep &#39; instead of an apostrophe.
+  let line = decodeHtmlEntities(raw)
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/^[\s•·\-\*\/\(\)\[\]]+/, '')  // leading bullets/punctuation

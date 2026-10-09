@@ -27,6 +27,21 @@ Season the salmon and bake in the oven until just opaque.
   });
 });
 
+describe('parseRecipeText entities', () => {
+  it('turns &#39; into an apostrophe in the title and ingredients', () => {
+    const parsed = parseRecipeText(`
+Nagi&#39;s chilli
+Ingredients
+1 tsp chef&#39;s salt
+Method
+Simmer until the chilli is thick.
+`);
+    expect(parsed.title).toBe("Nagi's chilli");
+    expect(parsed.ingredients[0].name).toBe("chef's salt");
+    expect(parsed.steps[0]).toContain("chilli");
+  });
+});
+
 describe('parseIngredientLine amounts', () => {
   it('keeps 1½ with the teaspoon instead of splitting the fraction into the name', () => {
     expect(parseIngredientLine('1½ teaspoon smoked paprika')).toEqual([

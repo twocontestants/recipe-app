@@ -1,37 +1,19 @@
-const PROTEINS = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'eggs', 'legumes', 'dairy'] as const;
+import { PROTEIN_COLORS, PROTEIN_EMOJI, type ProteinType } from '@/lib/proteins';
 
-export const PROTEIN_OPTIONS = PROTEINS;
+export { PROTEIN_COLORS, PROTEIN_EMOJI, PROTEIN_OPTIONS } from '@/lib/proteins';
 
-export const PROTEIN_COLORS: Record<string, string> = {
-  chicken: '#E8A838',
-  beef:    '#C0392B',
-  pork:    '#D4697A',
-  lamb:    '#8E44AD',
-  fish:    '#2980B9',
-  seafood: '#16A085',
-  tofu:    '#27AE60',
-  eggs:    '#D4AC0D',
-  legumes: '#A04000',
-  dairy:   '#717D7E',
-};
+function proteinColor(protein: string): string {
+  return protein in PROTEIN_COLORS ? PROTEIN_COLORS[protein as ProteinType] : '#888';
+}
 
-export const PROTEIN_EMOJI: Record<string, string> = {
-  chicken: '🍗',
-  beef:    '🥩',
-  pork:    '🐷',
-  lamb:    '🐑',
-  fish:    '🐟',
-  seafood: '🦐',
-  tofu:    '🫘',
-  eggs:    '🥚',
-  legumes: '🫘',
-  dairy:   '🧀',
-};
+function proteinEmoji(protein: string): string {
+  return protein in PROTEIN_EMOJI ? PROTEIN_EMOJI[protein as ProteinType] : '🍽';
+}
 
 export function ProteinBadge({ protein, size = 'sm' }: { protein?: string; size?: 'sm' | 'xs' }) {
   if (!protein) return null;
-  const color = PROTEIN_COLORS[protein] || '#888';
-  const emoji = PROTEIN_EMOJI[protein] || '🍽';
+  const color = proteinColor(protein);
+  const emoji = proteinEmoji(protein);
   return (
     <span
       className={`protein-badge protein-badge-${size}`}
