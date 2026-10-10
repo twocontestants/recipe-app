@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Recipe } from '@/lib/db';
+import { ingredientSections } from '@/lib/ingredientGroups';
 import { ProteinBadge } from './ProteinBadge';
 
 export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onRate, onNote, onBack, onAddToPlanner }: {
@@ -19,6 +20,7 @@ export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, 
   const [noteDraft, setNoteDraft] = useState(recipe.my_note ?? '');
   useEffect(() => { setNoteDraft(recipe.my_note ?? ''); }, [recipe.id, recipe.my_note]);
   const ingredients = recipe.ingredients ?? [];
+  const sections = ingredientSections(ingredients);
   const steps = recipe.steps ?? [];
   return (
     <>
@@ -142,15 +144,22 @@ export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, 
           {ingredients.length === 0 ? (
             <p style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>No ingredients listed</p>
           ) : (
-            <ul className="ingredient-list">
-              {ingredients.map((ing, i) => (
-                <li key={i}>
-                  <span className="ingredient-amount">{[ing.amount, ing.unit].filter(Boolean).join(' ')}</span>
-                  <span>{ing.name}</span>
-                  {ing.notes && <span style={{ color: 'var(--ink-muted)', fontSize: '0.8rem' }}> ({ing.notes})</span>}
-                </li>
+            <div className="ingredient-groups">
+              {sections.map((section, s) => (
+                <div key={`${section.heading ?? 'all'}-${s}`} className="ingredient-group">
+                  {section.heading && <h3 className="ingredient-group-heading">{section.heading}</h3>}
+                  <ul className="ingredient-list">
+                    {section.items.map((ing, i) => (
+                      <li key={`${s}-${i}`}>
+                        <span className="ingredient-amount">{[ing.amount, ing.unit].filter(Boolean).join(' ')}</span>
+                        <span>{ing.name}</span>
+                        {ing.notes && <span style={{ color: 'var(--ink-muted)', fontSize: '0.8rem' }}> ({ing.notes})</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
         <div>

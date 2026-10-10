@@ -1,19 +1,27 @@
 import type { Ingredient } from './db';
+import type { ProteinType } from './proteins';
 
-// The fixed protein vocabulary used across the app (must match RecipesClient).
-export type ProteinType =
-  | 'chicken' | 'beef' | 'pork' | 'lamb' | 'fish'
-  | 'seafood' | 'tofu' | 'eggs' | 'legumes' | 'dairy';
+export type { ProteinType };
 
 // "Main" proteins take precedence over eggs/dairy/legumes, which are often
 // supporting ingredients (butter, milk, an egg binder, beans in a chilli).
-const MAIN_PROTEINS: ProteinType[] = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood', 'tofu', 'legumes'];
+// `other` is last so a tie with a named protein keeps the named one.
+const MAIN_PROTEINS: ProteinType[] = [
+  'chicken', 'beef', 'pork', 'lamb', 'duck', 'fish', 'seafood', 'tofu', 'legumes', 'other',
+];
 
 const PROTEIN_KEYWORDS: Record<ProteinType, string[]> = {
   chicken: ['chicken', 'drumstick', 'chicken thigh', 'chicken breast', 'chicken wing', 'poussin', 'maryland'],
   beef:    ['beef', 'steak', 'sirloin', 'brisket', 'chuck', 'rump', 'ribeye', 'rib eye', 'veal', 'oxtail', 'short rib', 'porterhouse', 'scotch fillet'],
   pork:    ['pork', 'bacon', 'ham', 'prosciutto', 'pancetta', 'chorizo', 'sausage', 'salami', 'speck', 'gammon'],
   lamb:    ['lamb', 'mutton', 'hogget'],
+  duck:    ['duck', 'duckling', 'magret'],
+  // Meats without their own button. Extraction still records them, as "other".
+  other:   [
+    'turkey', 'venison', 'kangaroo', 'goat', 'rabbit', 'quail', 'goose', 'geese',
+    'bison', 'ostrich', 'emu', 'boar', 'pheasant', 'partridge', 'squab',
+    'guinea fowl', 'guinea-fowl', 'crocodile', 'cornish hen', 'game hen',
+  ],
   fish:    ['fish', 'salmon', 'tuna', 'cod', 'snapper', 'barramundi', 'barra', 'trout', 'mackerel', 'sardine', 'anchovy', 'haddock', 'tilapia', 'basa', 'whiting', 'kingfish', 'halibut', 'flathead'],
   seafood: ['prawn', 'shrimp', 'crab', 'lobster', 'mussel', 'clam', 'oyster', 'squid', 'calamari', 'scallop', 'octopus', 'marinara mix'],
   tofu:    ['tofu', 'tempeh', 'seitan', 'bean curd'],
@@ -34,8 +42,12 @@ const VEG_MINCE_RE =
 // Phrases where a protein word is really a flavouring, not the main protein.
 // Stripped before scanning so "vegetable soup with chicken stock" isn't chicken.
 const FLAVOUR_PHRASES = [
-  /\b(?:chicken|beef|fish|veg(?:etable)?|lamb)\s+(?:stock|broth|bouillon|stock\s+cube|stock\s+powder|consomm[ée]|gravy)\b/gi,
+  /\b(?:chicken|beef|fish|duck|turkey|veg(?:etable)?|lamb)\s+(?:stock|broth|bouillon|stock\s+cube|stock\s+powder|consomm[ée]|gravy)\b/gi,
   /\bchicken\s+salt\b/gi,
+  /\bduck\s+fat\b/gi,
+  /\bgoat(?:'|’)?s?\s+cheeses?\b/gi,
+  /\bwels[h]\s+rabbit\b/gi,
+  /\bpigeon\s+peas?\b/gi,
   /\bfish\s+sauce\b/gi,
   /\boyster\s+sauce\b/gi,
   /\bshrimp\s+paste\b/gi,
@@ -46,6 +58,8 @@ const FLAVOUR_PHRASES = [
 
 function clean(text: string): string {
   let t = ' ' + text.toLowerCase() + ' ';
+  // A duck egg is an egg, not a duck dish.
+  t = t.replace(/\bduck\s+eggs?\b/gi, ' egg ');
   for (const re of FLAVOUR_PHRASES) t = t.replace(re, ' ');
   return t;
 }
@@ -143,7 +157,7 @@ export function inferProtein(
   return undefined;
 }
 
-const MEAT_OR_SEA: ProteinType[] = ['chicken', 'beef', 'pork', 'lamb', 'fish', 'seafood'];
+const MEAT_OR_SEA: ProteinType[] = ['chicken', 'beef', 'pork', 'lamb', 'duck', 'fish', 'seafood', 'other'];
 
 type TagHay = 'all' | 'title-method';
 

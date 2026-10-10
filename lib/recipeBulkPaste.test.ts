@@ -32,6 +32,19 @@ Ingredients:
     ]);
   });
 
+  it('keeps a pasted subheading on the following rows', () => {
+    expect(parseIngredientBlock(`
+1 tbsp olive oil
+For the sauce:
+1 cup stock
+1 tsp salt
+`)).toEqual([
+      { amount: '1', unit: 'tbsp', name: 'olive oil' },
+      { amount: '1', unit: 'cup', name: 'stock', group: 'For the sauce' },
+      { amount: '1', unit: 'tsp', name: 'salt', group: 'For the sauce' },
+    ]);
+  });
+
   it('parses mixed numbers, ranges, and dual measurements from a pasted list', () => {
     expect(parseIngredientBlock(`
 1½ teaspoon smoked paprika

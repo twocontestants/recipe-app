@@ -46,6 +46,20 @@ describe('recipeForm', () => {
     });
   });
 
+  it('keeps a group subheading and drops a blank one on save', () => {
+    const payload = recipeFormPayload({
+      ...recipeToForm(recipe),
+      ingredients: [
+        { amount: '1', unit: 'cup', name: 'stock', group: ' Sauce ' },
+        { amount: '1', unit: '', name: 'rice', group: '   ' },
+      ],
+    });
+    expect(payload.ingredients).toEqual([
+      { amount: '1', unit: 'cup', name: 'stock', group: 'Sauce' },
+      { amount: '1', unit: '', name: 'rice' },
+    ]);
+  });
+
   it('drops blank ingredient and step rows on save', () => {
     const payload = recipeFormPayload(recipeToForm(recipe));
     expect(payload.ingredients).toEqual([{ amount: '1', unit: 'can', name: 'tomatoes' }]);

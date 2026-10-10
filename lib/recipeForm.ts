@@ -55,10 +55,20 @@ export function recipeToForm(recipe: Recipe): RecipeFormState {
   };
 }
 
+function ingredientForSave(ing: Ingredient): Ingredient {
+  const group = ing.group?.trim();
+  if (!group) {
+    if (!ing.group) return ing;
+    const { group: _drop, ...rest } = ing;
+    return rest;
+  }
+  return group === ing.group ? ing : { ...ing, group };
+}
+
 export function recipeFormPayload(form: RecipeFormState) {
   return {
     ...form,
-    ingredients: form.ingredients.filter(i => i.name.trim()),
+    ingredients: form.ingredients.filter(i => i.name.trim()).map(ingredientForSave),
     steps: form.steps.filter(s => s.trim()),
   };
 }

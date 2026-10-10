@@ -53,9 +53,43 @@ export function RecipeFormModal({
     update({ ingredients });
   };
 
-  const addIngredient = () => update({
-    ingredients: [...form.ingredients, { amount: '', unit: '', name: '' }],
-  });
+  const addIngredient = () => {
+    const prev = form.ingredients[form.ingredients.length - 1];
+    const next: Ingredient = { amount: '', unit: '', name: '' };
+    if (prev?.group) next.group = prev.group;
+    update({ ingredients: [...form.ingredients, next] });
+  };
+
+  const addGroup = () => {
+    const ingredients = [...form.ingredients];
+    const last = ingredients[ingredients.length - 1];
+    const blank = last && !`${last.amount || ''}${last.unit || ''}${last.name || ''}`.trim();
+    if (blank && !last.group) {
+      ingredients[ingredients.length - 1] = { ...last, group: 'Group' };
+      update({ ingredients });
+      return;
+    }
+    update({
+      ingredients: [...ingredients, { amount: '', unit: '', name: '', group: 'Group' }],
+    });
+  };
+
+  const renameGroup = (index: number, value: string) => {
+    const previous = form.ingredients[index]?.group;
+    if (previous === undefined) return;
+    const ingredients = form.ingredients.map((ing, idx) => {
+      if (idx < index) return ing;
+      for (let k = index; k <= idx; k++) {
+        if (form.ingredients[k].group !== previous) return ing;
+      }
+      if (!value) {
+        const { group: _drop, ...rest } = ing;
+        return rest;
+      }
+      return { ...ing, group: value };
+    });
+    update({ ingredients });
+  };
 
   const removeIngredient = (i: number) => update({
     ingredients: form.ingredients.filter((_, idx) => idx !== i),
@@ -232,7 +266,7 @@ export function RecipeFormModal({
               <textarea
                 value={ingredientDraft}
                 onChange={e => setIngredientDraft(e.target.value)}
-                placeholder={'2 cups flour\n1 tsp salt\n3 eggs'}
+                placeholder={'2 cups flour\nFor the sauce:\n1 cup stock\n1 tsp salt'}
                 rows={5}
                 aria-label="Paste ingredient list"
               />
@@ -250,17 +284,37 @@ export function RecipeFormModal({
             <span>Ingredient</span>
             <span />
           </div>
-          {form.ingredients.map((ing, i) => (
-            <div key={i} className="ingredient-row">
-              <input type="text" value={ing.amount} onChange={e => updateIngredient(i, 'amount', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="2" />
-              <input type="text" value={ing.unit} onChange={e => updateIngredient(i, 'unit', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="cups" />
-              <input type="text" value={ing.name} onChange={e => updateIngredient(i, 'name', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="flour" />
-              <button type="button" className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)' }} onClick={() => removeIngredient(i)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
-          ))}
-          <button type="button" className="add-row-btn" onClick={addIngredient}>+ Add ingredient</button>
+          {form.ingredients.map((ing, i) => {
+            const prevGroup = i > 0 ? form.ingredients[i - 1].group : undefined;
+            const showGroup = Boolean(ing.group) && ing.group !== prevGroup;
+            return (
+              <div key={i}>
+                {showGroup && (
+                  <input
+                    type="text"
+                    className="ingredient-group-input"
+                    value={ing.group}
+                    onChange={e => renameGroup(i, e.target.value)}
+                    onBlur={e => renameGroup(i, e.target.value.trim())}
+                    aria-label="Ingredient group"
+                    placeholder="Group name"
+                  />
+                )}
+                <div className="ingredient-row">
+                  <input type="text" value={ing.amount} onChange={e => updateIngredient(i, 'amount', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="2" />
+                  <input type="text" value={ing.unit} onChange={e => updateIngredient(i, 'unit', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="cups" />
+                  <input type="text" value={ing.name} onChange={e => updateIngredient(i, 'name', e.target.value)} onPaste={e => onIngredientClipboard(i, e)} placeholder="flour" />
+                  <button type="button" className="btn btn-ghost" style={{ padding: '0.4rem', color: 'var(--ink-muted)' }} onClick={() => removeIngredient(i)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          <div className="ingredient-actions">
+            <button type="button" className="add-row-btn" onClick={addIngredient}>+ Add ingredient</button>
+            <button type="button" className="add-row-btn" onClick={addGroup}>+ Add group</button>
+          </div>
         </div>
 
         <div className="form-group">

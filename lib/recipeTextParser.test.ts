@@ -27,6 +27,21 @@ Season the salmon and bake in the oven until just opaque.
   });
 });
 
+describe('parseRecipeText entities', () => {
+  it('turns &#39; into an apostrophe in the title and ingredients', () => {
+    const parsed = parseRecipeText(`
+Nagi&#39;s chilli
+Ingredients
+1 tsp chef&#39;s salt
+Method
+Simmer until the chilli is thick.
+`);
+    expect(parsed.title).toBe("Nagi's chilli");
+    expect(parsed.ingredients[0].name).toBe("chef's salt");
+    expect(parsed.steps[0]).toContain("chilli");
+  });
+});
+
 describe('parseIngredientLine amounts', () => {
   it('keeps 1½ with the teaspoon instead of splitting the fraction into the name', () => {
     expect(parseIngredientLine('1½ teaspoon smoked paprika')).toEqual([
@@ -71,6 +86,29 @@ describe('parseIngredientLine amounts', () => {
     expect(parseIngredientLine('600g / 1.2 lb scotch fillet')[0]).toMatchObject({
       amount: '600', unit: 'g', name: 'scotch fillet',
     });
+  });
+
+  it('keeps ingredient subheadings on the following lines', () => {
+    const parsed = parseRecipeText(`
+Chilli con carne
+Ingredients
+1 tbsp olive oil
+500g beef mince
+Chili Spice Mix:
+4 tsp paprika
+2 tsp cumin
+To Serve
+Rice
+Method
+Brown the beef and simmer.
+`);
+    expect(parsed.ingredients).toEqual([
+      { amount: '1', unit: 'tbsp', name: 'olive oil' },
+      { amount: '500', unit: 'g', name: 'beef mince' },
+      { amount: '4', unit: 'tsp', name: 'paprika', group: 'Chili Spice Mix' },
+      { amount: '2', unit: 'tsp', name: 'cumin', group: 'Chili Spice Mix' },
+      { amount: '', unit: '', name: 'Rice', group: 'To Serve' },
+    ]);
   });
 
   it('still splits a shared each-list', () => {

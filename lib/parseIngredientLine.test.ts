@@ -28,6 +28,13 @@ describe('parseIngredientLine', () => {
     expect(ing.name).toBe('medium carrot (peeled, cut vertically then into batons)');
   });
 
+  it('decodes an apostrophe written as an HTML entity', () => {
+    const ing = parseIngredientLine('1 tsp chef&#39;s salt');
+    expect(ing.amount).toBe('1');
+    expect(ing.unit).toBe('tsp');
+    expect(ing.name).toBe("chef's salt");
+  });
+
   it('keeps 1½ as the amount and teaspoon as the unit', () => {
     const ing = parseIngredientLine('1½ teaspoon smoked paprika');
     expect(ing.amount).toBe('1½');
