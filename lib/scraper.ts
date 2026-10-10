@@ -6,6 +6,7 @@ import { decodeHtmlEntities } from './htmlEntities';
 import {
   cleanGroupHeading,
   ingredientGroupHeading,
+  isOtherSectionTitle,
   isOverallIngredientsTitle,
   mergeGroupedIngredients,
 } from './ingredientGroups';
@@ -118,19 +119,24 @@ export async function scrapeRecipe(url: string): Promise<ScrapedRecipe> {
   }
 
   const html = await response.text();
-  const $ = cheerio.load(html);
+  return recipeFromHtml(html, url);
+}
 
+/** Parse a fetched recipe page. Grouped subheadings are read from the HTML. */
+export function recipeFromHtml(html: string, url = 'https://example.com/recipe'): ScrapedRecipe {
+  const $ = cheerio.load(html);
   // JSON-LD, then Next.js data, then microdata, then HTML heuristics.
-  // Grouped subheadings (a sauce, a spice mix) are read from the page HTML
-  // afterwards — schema.org's ingredient list is flat and usually drops them.
+  // schema.org's ingredient list is flat and usually drops subheadings.
   const recipe =
     extractJsonLd($) ||
     extractNextData($) ||
     extractMicrodata($) ||
     heuristicScrape($, url);
 
+  const steps = recipe.steps.length > 0 ? recipe.steps : stepsFromHtml($);
   return decodeScrapedRecipe({
     ...recipe,
+    steps,
     ingredients: applyHtmlGroups($, recipe.ingredients),
   });
 }
@@ -154,12 +160,25 @@ function decodeScrapedRecipe(recipe: ScrapedRecipe): ScrapedRecipe {
 
 // ── JSON-LD ────────────────────────────────────────────────────────────────
 
+/** JSON-LD sometimes contains raw newlines inside strings. Those are illegal JSON. */
+function parseEmbeddedJson(raw: string): unknown {
+  const trimmed = raw.replace(/^\uFEFF/, '').trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const relaxed = trimmed
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+      .replace(/\r?\n|\t/g, ' ');
+    return JSON.parse(relaxed);
+  }
+}
+
 function extractJsonLd($: cheerio.CheerioAPI): ScrapedRecipe | null {
   const scripts = $('script[type="application/ld+json"]');
   for (let i = 0; i < scripts.length; i++) {
     try {
       const raw = $(scripts[i]).html() || '';
-      const data = JSON.parse(raw);
+      const data = parseEmbeddedJson(raw);
       const recipe = findRecipeSchema(data);
       if (recipe) return parseSchemaRecipe(recipe);
     } catch {
@@ -608,7 +627,15 @@ const GROUP_CONTAINERS = [
   '.tasty-recipes-ingredients',
   '.tasty-recipe-ingredients',
   '.mv-create-ingredients',
+  // BBC Good Food and King Arthur share this class. Jetpack (Smitten Kitchen)
+  // puts h5 labels inside the list. Nigella uses div.ingredients plus h3s.
+  '.ingredients-list',
+  '.jetpack-recipe-ingredients',
+  '.recipe-ingredients',
+  'div.ingredients',
 ];
+
+const MAX_INGREDIENT_LINE = 500;
 
 interface HtmlGroup {
   heading: string | null;
@@ -616,11 +643,18 @@ interface HtmlGroup {
 }
 
 function elementVisible($: cheerio.CheerioAPI, el: unknown): boolean {
-  const node = $(el as never);
-  const style = node.attr('style') || '';
-  if (/display\s*:\s*none/i.test(style)) return false;
-  if (node.attr('hidden') !== undefined) return false;
-  if (node.attr('aria-hidden') === 'true') return false;
+  let node = $(el as never);
+  for (let depth = 0; depth < 12 && node.length; depth++) {
+    const style = node.attr('style') || '';
+    if (/display\s*:\s*none/i.test(style)) return false;
+    if (node.attr('hidden') !== undefined) return false;
+    if (depth === 0 && node.attr('aria-hidden') === 'true') return false;
+    // Nigella keeps a second US-cups list in the DOM and only marks it with this.
+    if (node.attr('data-switcher-state') === 'hidden') return false;
+    const parent = node.parent();
+    if (!parent.length || parent.is('body') || parent.is('html')) break;
+    node = parent as typeof node;
+  }
   return true;
 }
 
@@ -646,28 +680,58 @@ function looksLikeIngredientBlock($: cheerio.CheerioAPI, container: ReturnType<c
   return container.find('.wprm-recipe-ingredient, .recipe-checklist__label').length > 0;
 }
 
+function classTokens(value: string | undefined): string[] {
+  return (value || '').split(/\s+/).filter(Boolean);
+}
+
 function isGroupHeadingEl($: cheerio.CheerioAPI, el: unknown, itemSelector: string): boolean {
   const node = $(el as never);
   if (node.is(itemSelector)) return false;
+  if (node.find(itemSelector).length > 0) return false;
   const tag = String(node.prop('tagName') || '').toLowerCase();
   if (/^h[2-6]$/.test(tag)) return true;
   const cls = node.attr('class') || '';
-  return /group-name|group-header|ingredient-heading/i.test(cls) && node.find(itemSelector).length === 0;
+  if (/group-name|group-header|ingredient-heading|section-title|ingredients-list__heading/i.test(cls)) return true;
+  // King Arthur labels the group with a plain <p>Cake</p> inside .ingredient-section.
+  if (/^(p|div|span|legend)$/.test(tag) && classTokens(node.parent().attr('class')).includes('ingredient-section')) {
+    return true;
+  }
+  if (/^(p|strong|span|legend)$/.test(tag) && ingredientGroupHeading(strippedText($, el))) return true;
+  return false;
 }
 
-function groupsInContainer($: cheerio.CheerioAPI, container: ReturnType<cheerio.CheerioAPI>): HtmlGroup[] | null {
+function groupsInContainer(
+  $: cheerio.CheerioAPI,
+  container: ReturnType<cheerio.CheerioAPI>,
+  strictLabels = false,
+): HtmlGroup[] | null {
   const itemSelector = chooseItemSelector($, container);
   if (!itemSelector) return null;
-  const headingSelector = 'h2, h3, h4, h5, h6, [class*="group-name"], [class*="group-header"], [class*="ingredient-heading"]';
+  const headingSelector = 'h2, h3, h4, h5, h6, p, strong, legend, [class*="group-name"], [class*="group-header"], [class*="ingredient-heading"], [class*="section-title"]';
   const drafts: HtmlGroup[] = [];
   let current: HtmlGroup | null = null;
+  let stop = false;
 
   container.find(`${headingSelector}, ${itemSelector}`).each((_, el) => {
+    if (stop) return;
     const node = $(el);
+    if (!elementVisible($, el)) return;
     if (node.parents(itemSelector).length > 0) return;
     if (isGroupHeadingEl($, el, itemSelector)) {
       const raw = strippedText($, el, itemSelector);
+      if (isOtherSectionTitle(raw)) {
+        stop = true;
+        return;
+      }
       if (isOverallIngredientsTitle(raw)) return;
+      // A climbed page region can include the recipe title. Only labels such as
+      // "For the ragu" start a group there. Plugin cards still accept "Sauce".
+      if (strictLabels && /^h[2-6]$/i.test(String(node.prop('tagName') || ''))) {
+        const cls = node.attr('class') || '';
+        const labelled = ingredientGroupHeading(raw) !== null
+          || /group-name|group-header|ingredient-heading|section-title|ingredients-list__heading/i.test(cls);
+        if (!labelled) return;
+      }
       if (!raw.trim()) {
         current = { heading: null, lines: [] };
         drafts.push(current);
@@ -681,7 +745,7 @@ function groupsInContainer($: cheerio.CheerioAPI, container: ReturnType<cheerio.
     }
     if (!node.is(itemSelector)) return;
     const text = strippedText($, el);
-    if (!text || text.length > 200) return;
+    if (!text || text.length > MAX_INGREDIENT_LINE) return;
     const inlineHeading = ingredientGroupHeading(text);
     if (inlineHeading) {
       current = { heading: inlineHeading, lines: [] };
@@ -724,7 +788,7 @@ function siblingListGroups($: cheerio.CheerioAPI): HtmlGroup[] | null {
     const lines: string[] = [];
     $(el).children('li').each((__, li) => {
       const text = strippedText($, li);
-      if (text && text.length < 200 && !ingredientGroupHeading(text)) lines.push(text);
+      if (text && text.length < MAX_INGREDIENT_LINE && !ingredientGroupHeading(text)) lines.push(text);
     });
     if (lines.length) drafts.push({ heading, lines });
   });
@@ -744,6 +808,32 @@ function draftsToIngredients(drafts: HtmlGroup[]): Ingredient[] {
   return out;
 }
 
+function groupsFromIngredientsHeading($: cheerio.CheerioAPI): Ingredient[] | null {
+  const titles = $('h1, h2, h3, h4').filter((_, el) => {
+    if (!elementVisible($, el)) return false;
+    return isOverallIngredientsTitle(strippedText($, el));
+  });
+  for (let i = 0; i < titles.length; i++) {
+    let node = titles.eq(i).parent();
+    for (let depth = 0; depth < 8 && node.length && !node.is('body') && !node.is('html'); depth++) {
+      const headed = node.find('h2, h3, h4, h5, h6').filter((_, el) => {
+        if (!elementVisible($, el)) return false;
+        const text = strippedText($, el);
+        if (isOverallIngredientsTitle(text) || isOtherSectionTitle(text)) return false;
+        return ingredientGroupHeading(text) !== null;
+      });
+      const visibleItems = node.find('li').filter((_, el) => elementVisible($, el));
+      if (visibleItems.length >= 2 && headed.length >= 1) {
+        const drafts = groupsInContainer($, node, true);
+        if (drafts) return draftsToIngredients(drafts);
+        break;
+      }
+      node = node.parent();
+    }
+  }
+  return null;
+}
+
 function extractHtmlGroups($: cheerio.CheerioAPI): Ingredient[] | null {
   for (const sel of GROUP_CONTAINERS) {
     const containers = $(sel).filter((_, el) => elementVisible($, el));
@@ -754,6 +844,8 @@ function extractHtmlGroups($: cheerio.CheerioAPI): Ingredient[] | null {
       if (drafts) return draftsToIngredients(drafts);
     }
   }
+  const fromHeading = groupsFromIngredientsHeading($);
+  if (fromHeading) return fromHeading;
   const sibling = siblingListGroups($);
   return sibling ? draftsToIngredients(sibling) : null;
 }
@@ -762,6 +854,22 @@ function applyHtmlGroups($: cheerio.CheerioAPI, parsed: Ingredient[]): Ingredien
   const grouped = extractHtmlGroups($);
   if (!grouped) return parsed;
   return mergeGroupedIngredients(parsed, grouped, true);
+}
+
+// Jetpack (Smitten Kitchen) publishes the method as paragraphs and often omits
+// recipeInstructions from JSON-LD. Fill steps only when the main extract has none.
+function stepsFromHtml($: cheerio.CheerioAPI): string[] {
+  const box = $('.jetpack-recipe-directions').filter((_, el) => elementVisible($, el)).first();
+  if (!box.length) return [];
+  const steps: string[] = [];
+  const items = box.find('li').filter((_, el) => elementVisible($, el));
+  const nodes = items.length > 0 ? items : box.find('p');
+  nodes.each((_, el) => {
+    if (!elementVisible($, el)) return;
+    const text = strippedText($, el);
+    if (text.length > 10) steps.push(text);
+  });
+  return steps;
 }
 
 /** Test seam: stamp or replace `parsed` using grouped headings in `html`. */

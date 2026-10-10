@@ -18,18 +18,26 @@ const OVERALL_TITLE =
 const OTHER_SECTION =
   /^(method|steps?|instructions?|directions?|preparation|notes?|nutrition)$/i;
 
+function bareHeading(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().replace(/[:：]\s*$/, '').trim();
+}
+
 export function isOverallIngredientsTitle(raw: string): boolean {
-  const bare = raw.replace(/\s+/g, ' ').trim().replace(/[:：]\s*$/, '').trim();
-  return OVERALL_TITLE.test(bare);
+  return OVERALL_TITLE.test(bareHeading(raw));
+}
+
+/** Method, nutrition, and notes headings are not ingredient groups. */
+export function isOtherSectionTitle(raw: string): boolean {
+  return OTHER_SECTION.test(bareHeading(raw));
 }
 
 /** Heading text from a page element. Short labels only — not method sentences. */
 export function cleanGroupHeading(raw: string): string | null {
-  const bare = raw.replace(/\s+/g, ' ').trim().replace(/[:：]\s*$/, '').trim();
+  const bare = bareHeading(raw);
   if (!bare || bare.length > 80) return null;
   if (bare.split(/\s+/).length > 8) return null;
   if (/[.!?]/.test(bare)) return null;
-  if (isOverallIngredientsTitle(bare) || OTHER_SECTION.test(bare)) return null;
+  if (isOverallIngredientsTitle(bare) || isOtherSectionTitle(bare)) return null;
   return bare;
 }
 
