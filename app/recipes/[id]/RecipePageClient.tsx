@@ -10,7 +10,7 @@ import { RecipeFormModal } from '@/components/RecipeFormModal';
 import { useAddToPlannerModal } from '@/components/useAddToPlannerModal';
 import { recipeEditPath, recipeViewPath, recipeWantsEdit } from '@/lib/recipeLinks';
 import { recipeSlug } from '@/lib/recipeSlug';
-import { EMPTY_RECIPE_FORM, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
+import { EMPTY_RECIPE_FORM, formFromScrape, recipeFormPayload, recipeToForm, type RecipeFormState, type ScrapedRecipeFields } from '@/lib/recipeForm';
 import { RecipeDetailSkeleton } from '@/components/Skeleton';
 
 export default function RecipePageClient({
@@ -31,7 +31,9 @@ export default function RecipePageClient({
   const [showEditor, setShowEditor] = useState(false);
   const [form, setForm] = useState<RecipeFormState>({ ...EMPTY_RECIPE_FORM });
   const [saving, setSaving] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
   const openedEditRef = useRef(false);
+  const reparsingRef = useRef(false);
   const { openPlannerModal, plannerModalJsx } = useAddToPlannerModal(user?.id);
 
   const pathFor = (id: string, title?: string | null) => (
@@ -107,6 +109,43 @@ export default function RecipePageClient({
       showToast(`Failed to save: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReparse = async () => {
+    if (!recipe?.source_url || reparsingRef.current) return;
+    const confirmed = window.confirm(
+      'Reparse this recipe from its source? This replaces the title, ingredients, steps, times, and tags with a fresh import. Your notes and rating stay.',
+    );
+    if (!confirmed) return;
+    reparsingRef.current = true;
+    setReparsing(true);
+    try {
+      const scrapeRes = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: recipe.source_url }),
+      });
+      const scraped = await scrapeRes.json() as ScrapedRecipeFields & { error?: string };
+      if (!scrapeRes.ok) throw new Error(scraped.error || 'Scrape failed');
+      if (!scraped.title?.trim() || !scraped.ingredients?.some(ing => ing.name?.trim())) {
+        throw new Error('The source page did not return a recipe');
+      }
+      const payload = recipeFormPayload(formFromScrape(recipeToForm(recipe), scraped, recipe.source_url));
+      const saveRes = await fetch(`/api/recipes/${encodeURIComponent(recipe.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const saved = await saveRes.json() as Recipe & { error?: string };
+      if (!saveRes.ok) throw new Error(saved.error || 'Could not save recipe');
+      setRecipe(saved);
+      showToast('Recipe reparsed from its source', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not reparse recipe', 'error');
+    } finally {
+      reparsingRef.current = false;
+      setReparsing(false);
     }
   };
 
@@ -207,6 +246,8 @@ export default function RecipePageClient({
         signedIn={!!user}
         onEdit={recipe.can_edit ? () => openEditor(recipe) : undefined}
         onDelete={recipe.can_edit ? handleDelete : undefined}
+        onReparse={recipe.can_edit && recipe.source_url ? () => { void handleReparse(); } : undefined}
+        reparsing={reparsing}
         onDuplicate={handleDuplicate}
         onPublish={recipe.can_publish ? handlePublish : undefined}
         onRate={handleRating}
