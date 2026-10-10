@@ -37,6 +37,42 @@ export function emptyRecipeForm(): RecipeFormState {
   };
 }
 
+export type ScrapedRecipeFields = {
+  title?: string;
+  description?: string;
+  image_url?: string;
+  servings?: number;
+  prep_time?: number;
+  cook_time?: number;
+  ingredients?: Ingredient[];
+  steps?: string[];
+  tags?: string[];
+  primary_protein?: string;
+};
+
+/** Fresh import fields, keeping the source URL and any image the page omitted. */
+export function formFromScrape(
+  current: RecipeFormState,
+  scraped: ScrapedRecipeFields,
+  sourceUrl: string,
+): RecipeFormState {
+  const ingredients = scraped.ingredients?.filter(ing => ing.name?.trim()) ?? [];
+  const steps = scraped.steps?.map(step => step.trim()).filter(Boolean) ?? [];
+  return {
+    title: scraped.title?.trim() || current.title,
+    description: scraped.description?.trim() || '',
+    source_url: sourceUrl,
+    image_url: scraped.image_url?.trim() || current.image_url,
+    servings: scraped.servings && scraped.servings > 0 ? scraped.servings : current.servings,
+    prep_time: scraped.prep_time,
+    cook_time: scraped.cook_time,
+    ingredients: ingredients.length > 0 ? ingredients : current.ingredients,
+    steps: steps.length > 0 ? steps : current.steps,
+    tags: scraped.tags ?? current.tags,
+    primary_protein: scraped.primary_protein ?? current.primary_protein,
+  };
+}
+
 export function recipeToForm(recipe: Recipe): RecipeFormState {
   return {
     title: recipe.title,

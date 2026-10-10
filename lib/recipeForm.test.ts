@@ -5,6 +5,7 @@ import {
   EMPTY_RECIPE_FORM,
   confirmDiscardUnsavedRecipe,
   emptyRecipeForm,
+  formFromScrape,
   recipeFormHasContent,
   recipeFormPayload,
   recipeToForm,
@@ -58,6 +59,31 @@ describe('recipeForm', () => {
       { amount: '1', unit: 'cup', name: 'stock', group: 'Sauce' },
       { amount: '1', unit: '', name: 'rice' },
     ]);
+  });
+
+  it('replaces imported fields from a fresh scrape and keeps the source url', () => {
+    const next = formFromScrape(recipeToForm(recipe), {
+      title: 'Better Soup',
+      description: 'Updated',
+      servings: 6,
+      ingredients: [
+        { amount: '1', unit: 'can', name: 'tomatoes' },
+        { amount: '1', unit: 'tsp', name: 'chili', group: 'Spice mix' },
+      ],
+      steps: ['Simmer'],
+      tags: ['spicy'],
+      primary_protein: 'other',
+    }, 'https://example.com');
+    expect(next).toMatchObject({
+      title: 'Better Soup',
+      description: 'Updated',
+      source_url: 'https://example.com',
+      servings: 6,
+      tags: ['spicy'],
+      primary_protein: 'other',
+      steps: ['Simmer'],
+    });
+    expect(next.ingredients[1]).toEqual({ amount: '1', unit: 'tsp', name: 'chili', group: 'Spice mix' });
   });
 
   it('drops blank ingredient and step rows on save', () => {

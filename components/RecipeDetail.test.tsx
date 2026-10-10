@@ -24,7 +24,10 @@ const recipe: Recipe = {
   visibility: 'private',
 };
 
-function renderDetail(ingredients = recipe.ingredients) {
+function renderDetail(
+  ingredients = recipe.ingredients,
+  extra: Partial<Parameters<typeof RecipeDetail>[0]> = {},
+) {
   render(
     <RecipeDetail
       recipe={{ ...recipe, ingredients }}
@@ -34,6 +37,7 @@ function renderDetail(ingredients = recipe.ingredients) {
       onNote={() => {}}
       onBack={() => {}}
       onAddToPlanner={() => {}}
+      {...extra}
     />,
   );
 }
@@ -48,6 +52,20 @@ describe('RecipeDetail ingredient groups', () => {
     expect(screen.getByText('200 ml')).toBeTruthy();
     const headings = screen.getAllByRole('heading', { level: 3 }).map(node => node.textContent);
     expect(headings).toEqual(['Celeriac Puree', 'To Garnish']);
+  });
+
+  it('offers reparse beside view source when the recipe has a source url', () => {
+    renderDetail(recipe.ingredients, {
+      recipe: { ...recipe, source_url: 'https://example.com/duck' },
+      onReparse: () => {},
+    });
+    expect(screen.getByRole('link', { name: 'View Source ↗' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reparse' })).toBeTruthy();
+  });
+
+  it('hides reparse when there is no source url', () => {
+    renderDetail(recipe.ingredients, { onReparse: () => {} });
+    expect(screen.queryByRole('button', { name: 'Reparse' })).toBeNull();
   });
 
   it('renders a flat list when nothing is grouped', () => {
