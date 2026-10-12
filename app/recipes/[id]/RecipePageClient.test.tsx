@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Recipe } from '@/lib/db';
 import { ToastProvider } from '@/components/Toast';
@@ -43,10 +43,10 @@ vi.mock('@/components/usePlannerLive', () => ({
   usePlannerLive: () => ({ broadcastPlannerChanged: vi.fn() }),
 }));
 
-function mockFetch(handler: (url: string) => Partial<Response> | Promise<Partial<Response>>) {
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+function mockFetch(handler: (url: string, init?: RequestInit) => Partial<Response> | Promise<Partial<Response>>) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const result = await handler(url);
+    const result = await handler(url, init);
     return {
       ok: result.ok ?? true,
       status: result.status ?? 200,
@@ -89,7 +89,63 @@ describe('RecipePageClient', () => {
     expect(urls.some(url => url === '/api/recipes' || url.startsWith('/api/recipes?'))).toBe(false);
     expect(urls).toContain('/api/recipes/abc-123');
     expect(screen.queryByText(/My Recipes|Public Recipes|Your cookbook is empty/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reparse' })).toBeNull();
     expect(replace).toHaveBeenCalledWith('/recipes/abc-123/tomato-soup');
+  });
+
+  it('reparses the source page and saves the fresh ingredients', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const sourced = { ...recipe, source_url: 'https://example.com/soup' };
+    const puts: string[] = [];
+    mockFetch((url, init) => {
+      const method = init?.method || 'GET';
+      if (url === '/api/recipes/abc-123' && method === 'GET') return { json: async () => sourced };
+      if (url === '/api/scrape' && method === 'POST') {
+        return {
+          json: async () => ({
+            title: 'Tomato Soup',
+            ingredients: [
+              { amount: '1', unit: 'can', name: 'tomatoes' },
+              { amount: '1', unit: 'tsp', name: 'chili', group: 'Spice mix' },
+            ],
+            steps: ['Simmer until thick'],
+            tags: ['soup'],
+            primary_protein: '',
+            servings: 4,
+          }),
+        };
+      }
+      if (url === '/api/recipes/abc-123' && method === 'PUT') {
+        puts.push(String(init?.body));
+        return {
+          json: async () => ({
+            ...sourced,
+            ingredients: [
+              { amount: '1', unit: 'can', name: 'tomatoes' },
+              { amount: '1', unit: 'tsp', name: 'chili', group: 'Spice mix' },
+            ],
+            steps: ['Simmer until thick'],
+            can_edit: true,
+            can_publish: true,
+          }),
+        };
+      }
+      if (url === '/api/preferences') return { json: async () => ({ weekStartDay: 'monday' }) };
+      return { ok: false, status: 404 };
+    });
+
+    render(
+      <ToastProvider>
+        <RecipePageClient recipeId="abc-123" />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reparse' }));
+    expect(await screen.findByRole('heading', { name: 'Spice mix' })).toBeTruthy();
+    expect(confirm).toHaveBeenCalled();
+    const saved = JSON.parse(puts[0]) as { ingredients: Array<{ group?: string; name: string }> };
+    expect(saved.ingredients.map(ing => ing.group ?? ing.name)).toEqual(['tomatoes', 'Spice mix']);
+    confirm.mockRestore();
   });
 
   it('does not turn a hostile title into HTML and keeps the url slug safe', async () => {

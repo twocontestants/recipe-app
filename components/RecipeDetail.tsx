@@ -5,13 +5,15 @@ import type { Recipe } from '@/lib/db';
 import { ingredientSections } from '@/lib/ingredientGroups';
 import { ProteinBadge } from './ProteinBadge';
 
-export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onRate, onNote, onBack, onAddToPlanner }: {
+export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onReparse, reparsing, onRate, onNote, onBack, onAddToPlanner }: {
   recipe: Recipe;
   signedIn: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
   onDuplicate: () => void;
   onPublish?: (makePublic: boolean) => void;
+  onReparse?: () => void;
+  reparsing?: boolean;
   onRate: (stars: number | null) => void;
   onNote: (note: string) => void;
   onBack: () => void;
@@ -46,6 +48,16 @@ export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, 
             <a href={recipe.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
               View Source ↗
             </a>
+          )}
+          {recipe.source_url && onReparse && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onReparse}
+              disabled={reparsing}
+            >
+              {reparsing ? 'Reparsing…' : 'Reparse'}
+            </button>
           )}
           <button className="btn btn-primary btn-sm" onClick={onAddToPlanner}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px' }}><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>

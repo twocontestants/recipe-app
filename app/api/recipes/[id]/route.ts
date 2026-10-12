@@ -36,7 +36,11 @@ export async function PUT(
     const body = await req.json();
     delete body.owner_id;
     delete body.visibility;
-    const recipe = await updateRecipe(params.id, body);
+    const updated = await updateRecipe(params.id, body);
+    if (!updated) {
+      return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
+    }
+    const recipe = await getRecipeById(params.id, user.id);
     if (!recipe) {
       return NextResponse.json({ error: 'Recipe not found' }, { status: 404 });
     }
