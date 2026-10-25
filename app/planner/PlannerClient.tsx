@@ -362,7 +362,7 @@ export default function PlannerClient() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch('/api/recipes?includePublic=1');
+        const res = await fetch('/api/recipes');
         if (!res.ok) throw new Error('Failed to load');
         const recs = await res.json();
         if (!cancelled) setRecipes(Array.isArray(recs) ? recs : []);

@@ -1759,19 +1759,6 @@ select.settings-select {
 }
 .link-btn:hover { opacity: 0.75; }
 
-.public-library-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
-}
-.recipe-card-owner, .recipe-owner-line {
-  font-size: 0.75rem;
-  color: var(--ink-muted);
-  margin-top: 0.15rem;
-}
 .recipe-personal {
   margin: 0 0 1.25rem;
   padding: 0.9rem 1rem;

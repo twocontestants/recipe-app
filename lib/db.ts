@@ -75,7 +75,6 @@ export interface Recipe {
   visibility: Visibility;
   owner_display_name?: string;
   can_edit?: boolean;
-  can_publish?: boolean;
   my_rating?: number | null;
   my_note?: string | null;
 }
@@ -282,7 +281,7 @@ export async function ensureAuthTables(): Promise<void> {
       display_name TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'cook'
-        CHECK (role IN ('cook', 'publisher', 'moderator')),
+        CHECK (role IN ('cook', 'moderator')),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
@@ -321,12 +320,15 @@ export async function ensureAccountsSchema(): Promise<void> {
       value TEXT NOT NULL
     )
   `);
-  // Historical one-time flag name; do not rename or the public-library backfill would run again.
-  const flagged = await pool().query(`SELECT value FROM schema_flags WHERE key = 'jessica_recipes_public_backfill'`);
-  if (owner && !flagged.rows.length) {
-    await pool().query(`UPDATE recipes SET visibility = 'public' WHERE owner_id = $1`, [owner.id]);
+  // One-time: collapse the retired public library and publisher role.
+  const privateFlag = await pool().query(`SELECT value FROM schema_flags WHERE key = 'private_recipes_only_v1'`);
+  if (!privateFlag.rows.length) {
+    await pool().query(`UPDATE recipes SET visibility = 'private' WHERE visibility IS DISTINCT FROM 'private'`);
+    await pool().query(`UPDATE users SET role = 'cook' WHERE role = 'publisher'`);
+    await pool().query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await pool().query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('cook', 'moderator'))`);
     await pool().query(
-      `INSERT INTO schema_flags (key, value) VALUES ('jessica_recipes_public_backfill', 'done')`,
+      `INSERT INTO schema_flags (key, value) VALUES ('private_recipes_only_v1', 'done')`,
     );
   }
 
@@ -505,30 +507,14 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 function recipeListFilter(opts: {
-  viewerId: string | null;
-  includePublic?: boolean;
-  ownedOnly?: boolean;
+  viewerId: string;
 }): { where: string; params: unknown[] } {
-  const viewerId = opts.viewerId;
-  let where: string;
-  const params: unknown[] = [];
-  if (!viewerId) {
-    where = `r.visibility = 'public'`;
-  } else if (opts.ownedOnly || !opts.includePublic) {
-    where = `r.owner_id = $1`;
-    params.push(viewerId);
-  } else {
-    where = `(r.owner_id = $1 OR r.visibility = 'public')`;
-    params.push(viewerId);
-  }
-  return { where, params };
+  return { where: `r.owner_id = $1`, params: [opts.viewerId] };
 }
 
 /** Full recipes including ingredients and steps. Used by retag and the ingredient dictionary. */
 export async function listRecipes(opts: {
-  viewerId: string | null;
-  includePublic?: boolean;
-  ownedOnly?: boolean;
+  viewerId: string;
 }): Promise<Recipe[]> {
   await ensureAccountsSchema();
   const viewerId = opts.viewerId;
@@ -555,9 +541,7 @@ export async function listRecipes(opts: {
 
 /** Cookbook grid: card fields only. Does not migrate schema. */
 export async function listRecipeCards(opts: {
-  viewerId: string | null;
-  includePublic?: boolean;
-  ownedOnly?: boolean;
+  viewerId: string;
 }): Promise<Recipe[]> {
   const viewerId = opts.viewerId;
   const { where, params } = recipeListFilter(opts);
@@ -613,7 +597,7 @@ export async function getRecipeById(id: string, viewerId?: string | null): Promi
 }
 
 export async function createRecipe(
-  data: Omit<Recipe, 'id' | 'created_at' | 'updated_at' | 'owner_display_name' | 'can_edit' | 'can_publish' | 'my_rating' | 'my_note'>,
+  data: Omit<Recipe, 'id' | 'created_at' | 'updated_at' | 'owner_display_name' | 'can_edit' | 'my_rating' | 'my_note'>,
 ): Promise<Recipe> {
   await ensureAccountsSchema();
   // Auto-tag on save: infer the primary protein when the caller didn't set one,
@@ -694,16 +678,6 @@ export async function updateRecipe(
 export async function deleteRecipe(id: string, ownerId: string): Promise<boolean> {
   const result = await pool().query('DELETE FROM recipes WHERE id = $1 AND owner_id = $2', [id, ownerId]);
   return (result.rowCount ?? 0) > 0;
-}
-
-export async function setRecipeVisibility(id: string, visibility: Visibility): Promise<Recipe | null> {
-  await ensureAccountsSchema();
-  const result = await pool().query(
-    `UPDATE recipes SET visibility = $2, updated_at = NOW() WHERE id = $1 RETURNING id`,
-    [id, visibility],
-  );
-  if (!result.rows.length) return null;
-  return getRecipeById(id);
 }
 
 export async function duplicateRecipe(id: string, ownerId: string): Promise<Recipe | null> {

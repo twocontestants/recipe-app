@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireUser(req);
     if (!isAuthUser(user)) return user;
-    const recipes = await listRecipes({ viewerId: user.id, ownedOnly: true });
+    const recipes = await listRecipes({ viewerId: user.id });
     let updated = 0;
     const changes: Array<{ title: string; primary_protein?: string; tags: string[] }> = [];
 

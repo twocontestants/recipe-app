@@ -1,4 +1,4 @@
-export const ROLES = ['cook', 'publisher', 'moderator'] as const;
+export const ROLES = ['cook', 'moderator'] as const;
 export type Role = (typeof ROLES)[number];
 
 export interface AuthUser {
@@ -14,10 +14,6 @@ export function isRole(value: unknown): value is Role {
 
 export function parseRole(value: unknown): Role {
   return isRole(value) ? value : 'cook';
-}
-
-export function canPublishOwn(role: Role): boolean {
-  return role === 'publisher' || role === 'moderator';
 }
 
 export function isModerator(role: Role): boolean {

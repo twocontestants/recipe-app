@@ -5,13 +5,12 @@ import type { Recipe } from '@/lib/db';
 import { ingredientSections } from '@/lib/ingredientGroups';
 import { ProteinBadge } from './ProteinBadge';
 
-export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onPublish, onReparse, reparsing, onRate, onNote, onBack, onAddToPlanner }: {
+export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, onReparse, reparsing, onRate, onNote, onBack, onAddToPlanner }: {
   recipe: Recipe;
   signedIn: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
   onDuplicate: () => void;
-  onPublish?: (makePublic: boolean) => void;
   onReparse?: () => void;
   reparsing?: boolean;
   onRate: (stars: number | null) => void;
@@ -65,13 +64,7 @@ export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, 
           </button>
           {onEdit && <button className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>}
           {onDelete && <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>}
-          {!onEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>Duplicate to edit</button>}
-          {onPublish && recipe.visibility !== 'public' && (
-            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(true)}>Make public</button>
-          )}
-          {onPublish && recipe.visibility === 'public' && (
-            <button className="btn btn-secondary btn-sm" onClick={() => onPublish(false)}>Make private</button>
-          )}
+          {onEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>Duplicate</button>}
         </div>
       </div>
 
@@ -89,11 +82,6 @@ export function RecipeDetail({ recipe, signedIn, onEdit, onDelete, onDuplicate, 
 
       {recipe.primary_protein && (
         <div style={{ marginBottom: '1rem' }}><ProteinBadge protein={recipe.primary_protein} /></div>
-      )}
-      {recipe.owner_display_name && (
-        <p className="recipe-owner-line">
-          {recipe.visibility === 'public' ? 'Public recipe' : 'Private'} · {recipe.owner_display_name}
-        </p>
       )}
       {signedIn && (
         <div className="recipe-personal">

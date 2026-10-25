@@ -18,7 +18,7 @@ export async function PATCH(
     }
     const body = await req.json();
     if (!isRole(body.role)) {
-      return NextResponse.json({ error: 'role must be cook, publisher, or moderator' }, { status: 400 });
+      return NextResponse.json({ error: 'role must be cook or moderator' }, { status: 400 });
     }
     const target = await getUserById(params.id);
     if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 });

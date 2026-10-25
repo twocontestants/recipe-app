@@ -41,9 +41,10 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /settings/i })).toBeTruthy();
   });
 
-  it('offers Sign in in the nav when signed out', () => {
+  it('offers Sign in in the nav when signed out, without a guest recipe library', () => {
     authState.user = null;
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: /sign in/i })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /^recipes$/i })).toBeNull();
   });
 });
