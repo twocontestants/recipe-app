@@ -2,7 +2,7 @@
 
 A full-stack recipe management app built with Next.js 14 and Vercel Postgres.
 
-Accounts are per cook. Guests can browse public recipes. Planner, shopping lists, settings, ratings, and notes require sign-in. Sessions are stored in Postgres (they survive a process restart). New accounts sign up from the login page. Existing accounts change their password in Settings.
+Accounts are per cook with a private kitchen. Sign-in is required to browse recipes, plan meals, shop, and change settings. Sessions are stored in Postgres (they survive a process restart). New accounts sign up from the login page. Existing accounts change their password in Settings. A defined set of starter recipes for new cooks is planned for later — there is no public recipe library.
 
 ## Features
 

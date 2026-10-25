@@ -1,25 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecipe, listRecipeCards } from '@/lib/db';
-import { canPublishRecipe } from '@/lib/visibility';
-import { isAuthUser, optionalUser, requireUser } from '@/lib/session';
+import { isAuthUser, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await optionalUser(req);
-    const { searchParams } = new URL(req.url);
-    const includePublic = searchParams.get('includePublic') === '1';
-    const ownedOnly = searchParams.get('ownedOnly') === '1';
-    const recipes = await listRecipeCards({
-      viewerId: user?.id ?? null,
-      includePublic,
-      ownedOnly,
-    });
-    return NextResponse.json(recipes.map(r => ({
-      ...r,
-      can_publish: canPublishRecipe(user, r),
-    })));
+    const user = await requireUser(req);
+    if (!isAuthUser(user)) return user;
+    const recipes = await listRecipeCards({ viewerId: user.id });
+    return NextResponse.json(recipes);
   } catch (error) {
     console.error('GET /api/recipes error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -52,7 +42,7 @@ export async function POST(req: NextRequest) {
       visibility: 'private',
     });
 
-    return NextResponse.json({ ...recipe, can_publish: canPublishRecipe(user, recipe) }, { status: 201 });
+    return NextResponse.json(recipe, { status: 201 });
   } catch (error) {
     console.error('POST /api/recipes error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

@@ -62,7 +62,7 @@ const signInItem = {
 export function Sidebar() {
   const pathname = usePathname();
   const { user, loading } = useAuth();
-  const items = user ? [recipesItem, ...kitchenItems] : [recipesItem, ...(loading ? [] : [signInItem])];
+  const items = user ? [recipesItem, ...kitchenItems] : (loading ? [] : [signInItem]);
 
   return (
     <nav className="sidebar">

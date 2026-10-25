@@ -17,7 +17,6 @@ const recipe: Recipe = {
   owner_id: 'u1',
   visibility: 'private',
   can_edit: true,
-  can_publish: true,
 };
 
 const search = new URLSearchParams();
@@ -126,7 +125,6 @@ describe('RecipePageClient', () => {
             ],
             steps: ['Simmer until thick'],
             can_edit: true,
-            can_publish: true,
           }),
         };
       }

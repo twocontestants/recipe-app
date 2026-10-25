@@ -1,7 +1,3 @@
-export function recipeListQueryString(opts: { includePublic: boolean }): string {
-  return opts.includePublic ? '?includePublic=1' : '';
-}
-
 export function hasRecipeMethod(recipe: { ingredients?: unknown; steps?: unknown }): boolean {
   return Array.isArray(recipe.ingredients) && Array.isArray(recipe.steps);
 }
