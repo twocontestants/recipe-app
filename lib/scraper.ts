@@ -81,7 +81,8 @@ async function safeFetch(rawUrl: string): Promise<Response> {
         redirect: 'manual',
         signal: controller.signal,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          // "(KHTML, like Gecko)" makes Home & Plate close the socket with no response.
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-AU,en-GB;q=0.9,en;q=0.8',
           'Cache-Control': 'no-cache',
