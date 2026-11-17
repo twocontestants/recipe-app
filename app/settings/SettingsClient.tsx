@@ -384,7 +384,7 @@ function ModeratorPanel() {
   return (
     <section className="moderator-panel">
       <h2 className="section-title">Moderators</h2>
-      <p className="settings-intro">Grant Publisher so a cook can share recipes publicly. Moderators can also unpublish anyone’s public recipe from that recipe’s page.</p>
+      <p className="settings-intro">Grant or revoke Moderator on other accounts. Every cook keeps a private kitchen.</p>
       {loading ? (
         <SettingsUsersSkeleton />
       ) : (
@@ -401,7 +401,6 @@ function ModeratorPanel() {
                 onChange={e => changeRole(u.id, e.target.value as AuthUser['role'])}
               >
                 <option value="cook">Cook</option>
-                <option value="publisher">Publisher</option>
                 <option value="moderator">Moderator</option>
               </select>
             </li>

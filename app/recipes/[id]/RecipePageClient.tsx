@@ -46,6 +46,10 @@ export default function RecipePageClient({
     setMissing(false);
     try {
       const res = await fetch(`/api/recipes/${encodeURIComponent(recipeId)}`);
+      if (res.status === 401) {
+        router.replace(`/login?next=${encodeURIComponent(recipeViewPath(recipeId))}`);
+        return;
+      }
       if (res.status === 404) {
         setRecipe(null);
         setMissing(true);
@@ -60,6 +64,8 @@ export default function RecipePageClient({
     } finally {
       setLoading(false);
     }
+  // router.replace is stable enough for 401 redirect; omit from deps to avoid
+  // remount loops when useRouter() returns a new object each render (tests).
   }, [recipeId]);
 
   useEffect(() => { void loadRecipe(); }, [loadRecipe]);
@@ -175,18 +181,6 @@ export default function RecipePageClient({
     }
   };
 
-  const handlePublish = async (makePublic: boolean) => {
-    if (!recipe) return;
-    try {
-      const res = await fetch(`/api/recipes/${encodeURIComponent(recipe.id)}/${makePublic ? 'publish' : 'unpublish'}`, { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json()).error);
-      setRecipe(await res.json() as Recipe);
-      showToast(makePublic ? 'Recipe is public' : 'Recipe is private', 'success');
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not change visibility', 'error');
-    }
-  };
-
   const handleRating = async (stars: number | null) => {
     if (!user) { router.push(loginNext); return; }
     if (!recipe) return;
@@ -249,7 +243,6 @@ export default function RecipePageClient({
         onReparse={recipe.can_edit && recipe.source_url ? () => { void handleReparse(); } : undefined}
         reparsing={reparsing}
         onDuplicate={handleDuplicate}
-        onPublish={recipe.can_publish ? handlePublish : undefined}
         onRate={handleRating}
         onNote={handleNote}
         onBack={() => router.back()}

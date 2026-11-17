@@ -1,19 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasRecipeMethod,
-  recipeListQueryString,
   removeRecipeFromList,
   upsertRecipeInList,
 } from './recipeList';
-
-describe('recipeListQueryString', () => {
-  it('uses only the include-public toggle, never a user id', () => {
-    expect(recipeListQueryString({ includePublic: false })).toBe('');
-    expect(recipeListQueryString({ includePublic: true })).toBe('?includePublic=1');
-    expect(recipeListQueryString({ includePublic: true })).not.toMatch(/user/i);
-    expect(recipeListQueryString({ includePublic: false })).not.toMatch(/user/i);
-  });
-});
 
 describe('hasRecipeMethod', () => {
   it('treats missing ingredients or steps as not yet loaded', () => {

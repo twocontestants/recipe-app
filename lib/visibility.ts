@@ -1,8 +1,9 @@
-import { canPublishOwn, isModerator, type Role } from './roles';
+import type { Role } from './roles';
 
-export type Visibility = 'private' | 'public';
+/** Recipes are always private to their owner. Column may still exist as 'private'. */
+export type Visibility = 'private';
 
-export type RecipeListMode = 'guest' | 'owned' | 'ownedPlusPublic';
+export type RecipeListMode = 'owned';
 
 export interface RecipeAccess {
   owner_id: string;
@@ -14,42 +15,24 @@ export interface Viewer {
   role: Role;
 }
 
-export function parseVisibility(value: unknown): Visibility {
-  return value === 'public' ? 'public' : 'private';
+export function parseVisibility(_value: unknown): Visibility {
+  return 'private';
 }
 
 export function canViewRecipe(viewer: Viewer | null, recipe: RecipeAccess): boolean {
-  if (recipe.visibility === 'public') return true;
-  return viewer?.id === recipe.owner_id;
+  return !!viewer && viewer.id === recipe.owner_id;
 }
 
 export function canEditRecipe(viewer: Viewer | null, recipe: RecipeAccess): boolean {
   return !!viewer && viewer.id === recipe.owner_id;
 }
 
-export function canPublishRecipe(viewer: Viewer | null, recipe: RecipeAccess): boolean {
-  return !!viewer && viewer.id === recipe.owner_id && canPublishOwn(viewer.role);
-}
-
-export function canUnpublishRecipe(viewer: Viewer | null, recipe: RecipeAccess): boolean {
-  if (!viewer) return false;
-  if (isModerator(viewer.role) && recipe.visibility === 'public') return true;
-  return canPublishRecipe(viewer, recipe);
-}
-
 export function canPlanRecipe(viewer: Viewer | null, recipe: RecipeAccess): boolean {
   return !!viewer && canViewRecipe(viewer, recipe);
 }
 
-export function recipeListMode(opts: {
-  signedIn: boolean;
-  includePublic?: boolean;
-  ownedOnly?: boolean;
-}): RecipeListMode {
-  if (!opts.signedIn) return 'guest';
-  if (opts.ownedOnly) return 'owned';
-  if (opts.includePublic) return 'ownedPlusPublic';
-  return 'owned';
+export function recipeListMode(opts: { signedIn: boolean }): RecipeListMode | null {
+  return opts.signedIn ? 'owned' : null;
 }
 
 export function recipeMatchesList(
@@ -57,9 +40,8 @@ export function recipeMatchesList(
   viewerId: string | null,
   mode: RecipeListMode,
 ): boolean {
-  if (mode === 'guest') return recipe.visibility === 'public';
-  if (mode === 'owned') return recipe.owner_id === viewerId;
-  return recipe.owner_id === viewerId || recipe.visibility === 'public';
+  if (mode !== 'owned' || !viewerId) return false;
+  return recipe.owner_id === viewerId;
 }
 
 /** Fields copied into a personal duplicate. Always private; owner is the copier. */

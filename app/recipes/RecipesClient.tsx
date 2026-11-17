@@ -9,7 +9,6 @@ import { useAuth } from '@/components/AuthProvider';
 import { recipeViewPath } from '@/lib/recipeLinks';
 import {
   hasRecipeMethod,
-  recipeListQueryString,
   removeRecipeFromList,
   upsertRecipeInList,
 } from '@/lib/recipeList';
@@ -18,10 +17,9 @@ import { RecipesGridSkeleton, Skeleton } from '@/components/Skeleton';
 import { confirmDiscardUnsavedRecipe, emptyRecipeForm, recipeFormPayload, recipeToForm, type RecipeFormState } from '@/lib/recipeForm';
 
 export default function RecipesPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [includePublic, setIncludePublic] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -35,10 +33,16 @@ export default function RecipesPage() {
   const [parsing, setParsing] = useState(false);
   const { openPlannerModal: openPlanner, plannerModalJsx } = useAddToPlannerModal(user?.id);
 
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/login?next=/recipes');
+    }
+  }, [authLoading, user?.id]);
+
   const fetchRecipes = useCallback(async () => {
+    if (!user?.id) return;
     try {
-      const qs = recipeListQueryString({ includePublic });
-      const res = await fetch(`/api/recipes${qs}`);
+      const res = await fetch('/api/recipes');
       if (!res.ok) throw new Error('Failed to load');
       setRecipes(await res.json());
     } catch {
@@ -46,7 +50,7 @@ export default function RecipesPage() {
     } finally {
       setLoading(false);
     }
-  }, [includePublic]);
+  }, [user?.id]);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 
@@ -231,18 +235,12 @@ export default function RecipesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">{user ? 'My' : 'Public'} <em>Recipes</em></h1>
+          <h1 className="page-title">My <em>Recipes</em></h1>
           <p className="page-subtitle">
-            {loading ? <Skeleton width="6.5rem" height="0.7rem" /> : `${recipes.length} recipes`}
+            {loading || authLoading ? <Skeleton width="6.5rem" height="0.7rem" /> : `${recipes.length} recipes`}
           </p>
         </div>
         <div className="page-header-actions">
-          {user && (
-            <label className="public-library-toggle">
-              <input type="checkbox" checked={includePublic} onChange={e => setIncludePublic(e.target.checked)} />
-              Include public library
-            </label>
-          )}
           <input
             type="search"
             className="page-header-search"
@@ -250,8 +248,6 @@ export default function RecipesPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          {user && (
-            <>
           <button className="btn btn-secondary" onClick={() => { setEditingRecipe(null); setForm(emptyRecipeForm()); setShowPasteModal(true); }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -264,12 +260,10 @@ export default function RecipesPage() {
             </svg>
             Add Recipe
           </button>
-            </>
-          )}
         </div>
       </div>
 
-      {loading ? (
+      {loading || authLoading || !user ? (
         <RecipesGridSkeleton />
       ) : filtered.length === 0 ? (
         <div className="empty-state">
@@ -298,9 +292,6 @@ export default function RecipesPage() {
               </div>
               <div className="recipe-card-body">
                 <h3 className="recipe-card-title">{recipe.title}</h3>
-                {recipe.owner_display_name && recipe.owner_id !== user?.id && (
-                  <p className="recipe-card-owner">from {recipe.owner_display_name}</p>
-                )}
                 <div className="recipe-card-meta">
                   {recipe.prep_time && <span>⏱ {recipe.prep_time}m prep</span>}
                   {recipe.cook_time && <span>🔥 {recipe.cook_time}m cook</span>}
@@ -318,14 +309,9 @@ export default function RecipesPage() {
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
                   Plan
                 </button>
-                {recipe.can_edit ? (
-                  <>
-                    <button className="btn btn-ghost btn-sm" onClick={() => void openEditModal(recipe)}>Edit</button>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
-                  </>
-                ) : (
-                  <button className="btn btn-ghost btn-sm" onClick={() => handleDuplicate(recipe)}>Duplicate</button>
-                )}
+                <button className="btn btn-ghost btn-sm" onClick={() => void openEditModal(recipe)}>Edit</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleDuplicate(recipe)}>Duplicate</button>
+                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(recipe.id)}>Delete</button>
               </div>
             </div>
           ))}
