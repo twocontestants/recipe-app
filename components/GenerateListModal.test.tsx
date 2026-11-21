@@ -2,8 +2,11 @@ import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import GenerateListModal from './GenerateListModal';
-import { mealDayLabel } from '@/lib/generateListOptions';
+import { generateListWeeks, mealDayLabel } from '@/lib/generateListOptions';
 import { dayDateOf, getThisDisplayWeek, localDateIso, shiftWeek } from '@/lib/plannerDays';
+import { monthsForDisplayWeeks } from '@/lib/plannerMonth';
+import { hydratePlannerMealCache } from '@/lib/plannerMealCache';
+import type { MealPlan } from '@/lib/db';
 
 afterEach(() => {
   cleanup();
@@ -45,7 +48,7 @@ function stubFetch(plans: unknown[]) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/planner')) {
-      return { json: async () => plans };
+      return { ok: true, json: async () => plans };
     }
     if (url.includes('/api/shopping-lists') && init?.method === 'POST') {
       postBodies.push(JSON.parse(String(init.body)));
@@ -156,6 +159,28 @@ describe('GenerateListModal', () => {
     await waitFor(() => expect(postBodies).toHaveLength(1));
     const body = postBodies[0] as { meals: Array<{ id?: string }> };
     expect(body.meals).toEqual([expect.objectContaining({ id: 'mp-a' })]);
+  });
+
+  it('shows cached dinners immediately without another planner GET', () => {
+    const weeks = generateListWeeks('monday');
+    hydratePlannerMealCache(
+      [{
+        id: 'today',
+        recipe_id: 'r-pie',
+        planned_on: today,
+        week_start: thisWeek,
+        day_of_week: 0,
+        meal_type: 'dinner',
+        servings: 4,
+        recipe: { title: 'Chicken pie' } as MealPlan['recipe'],
+      }],
+      monthsForDisplayWeeks(weeks),
+    );
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: false, json: async () => ([]) }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderModal({ defaultWeekStart: thisWeek });
+    expect(screen.getByText('Chicken pie')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/api/planner'))).toBe(false);
   });
 
   it('groups dinners using the household week-start day', async () => {

@@ -31,6 +31,20 @@ export function monthsForDisplayWeek(weekStartIso: string): string[] {
   return keys;
 }
 
+export function monthsForDisplayWeeks(weeks: string[]): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const week of weeks) {
+    for (const key of monthsForDisplayWeek(week)) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    }
+  }
+  return keys;
+}
+
 export function storageWeeksForDateRange(from: string, to: string): string[] {
   const seen = new Set<string>();
   const weeks: string[] = [];

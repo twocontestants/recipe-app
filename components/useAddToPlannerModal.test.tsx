@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Recipe } from '@/lib/db';
+import type { MealPlan, Recipe } from '@/lib/db';
+import { dayDateOf, getThisDisplayWeek, localDateIso } from '@/lib/plannerDays';
+import { adjacentMonthKeys, monthsForDisplayWeek } from '@/lib/plannerMonth';
+import { hydratePlannerMealCache } from '@/lib/plannerMealCache';
 import { ToastProvider } from './Toast';
 import { useAddToPlannerModal } from './useAddToPlannerModal';
 
@@ -19,8 +22,16 @@ const recipe: Recipe = {
   can_edit: true,
 };
 
+const live = vi.hoisted(() => ({
+  onRemote: () => {},
+  broadcast: vi.fn(),
+}));
+
 vi.mock('@/components/usePlannerLive', () => ({
-  usePlannerLive: () => ({ broadcastPlannerChanged: vi.fn() }),
+  usePlannerLive: (onRemote: () => void) => {
+    live.onRemote = onRemote;
+    return { broadcastPlannerChanged: live.broadcast };
+  },
 }));
 
 function Harness() {
@@ -33,7 +44,11 @@ function Harness() {
   );
 }
 
-function stubFetch(opts: { holdPost?: Promise<void>; post?: () => Partial<Response> | Promise<Partial<Response>> } = {}) {
+function stubFetch(opts: {
+  holdPost?: Promise<void>;
+  post?: () => Partial<Response> | Promise<Partial<Response>>;
+  meals?: unknown[];
+} = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method || 'GET').toUpperCase();
@@ -54,7 +69,7 @@ function stubFetch(opts: { holdPost?: Promise<void>; post?: () => Partial<Respon
       return { ok: true, json: async () => ({ id: 'm1' }), text: async () => JSON.stringify({ id: 'm1' }) };
     }
     if (url.includes('/api/planner')) {
-      return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => opts.meals ?? [] };
     }
     return { ok: true, json: async () => ({}) };
   });
@@ -65,6 +80,7 @@ function stubFetch(opts: { holdPost?: Promise<void>; post?: () => Partial<Respon
 describe('useAddToPlannerModal', () => {
   afterEach(() => {
     cleanup();
+    live.broadcast.mockClear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -99,5 +115,87 @@ describe('useAddToPlannerModal', () => {
       const posts = fetchMock.mock.calls.filter(([, init]) => String(init?.method || '').toUpperCase() === 'POST');
       expect(posts.length).toBe(postsBefore + 1);
     });
+  });
+
+  it('prefetches month occupancy on mount instead of waiting for a week GET', async () => {
+    const fetchMock = stubFetch({ meals: [] });
+    render(<Harness />);
+    await waitFor(() => {
+      const plannerGets = fetchMock.mock.calls.filter(([input, init]) => {
+        const url = String(input);
+        const method = String(init?.method || 'GET').toUpperCase();
+        return url.includes('/api/planner') && method === 'GET';
+      });
+      expect(plannerGets.length).toBeGreaterThan(0);
+    });
+    const plannerGets = fetchMock.mock.calls.filter(([input]) => String(input).includes('/api/planner?'));
+    expect(plannerGets.some(([input]) => String(input).includes('from='))).toBe(true);
+    expect(plannerGets.some(([input]) => String(input).includes('weekStart='))).toBe(false);
+  });
+
+  it('opens the sheet from cache without another planner GET', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    const monthKeys = monthsForDisplayWeek(thisWeek);
+    hydratePlannerMealCache(
+      [{
+        id: 'cached',
+        planned_on: mon,
+        week_start: thisWeek,
+        recipe_id: 'r-pie',
+        day_of_week: 0,
+        meal_type: 'dinner',
+        servings: 4,
+        recipe: { title: 'Cached pie' } as MealPlan['recipe'],
+      }],
+      [...new Set(monthKeys.flatMap(key => [key, ...adjacentMonthKeys(key)]))],
+    );
+    const fetchMock = stubFetch({ meals: [] });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Plan recipe' }));
+    expect(await screen.findByRole('dialog', { name: 'Add to planner' })).toBeTruthy();
+    expect(screen.getByText('Cached pie')).toBeTruthy();
+    const plannerGets = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = String(input);
+      const method = String(init?.method || 'GET').toUpperCase();
+      return url.includes('/api/planner') && method === 'GET';
+    });
+    expect(plannerGets).toHaveLength(0);
+  });
+
+  it('refreshes cached occupancy when a remote planner change arrives', async () => {
+    const thisWeek = getThisDisplayWeek('monday');
+    const mon = localDateIso(dayDateOf(thisWeek, 0));
+    hydratePlannerMealCache(
+      [{
+        id: 'old',
+        planned_on: mon,
+        week_start: thisWeek,
+        recipe_id: 'r-old',
+        day_of_week: 0,
+        meal_type: 'dinner',
+        servings: 4,
+        recipe: { title: 'Old pie' } as MealPlan['recipe'],
+      }],
+      monthsForDisplayWeek(thisWeek),
+    );
+    stubFetch({
+      meals: [{
+        id: 'fresh',
+        planned_on: mon,
+        week_start: thisWeek,
+        recipe_id: 'r-fresh',
+        day_of_week: 0,
+        meal_type: 'dinner',
+        servings: 4,
+        recipe: { title: 'Fresh pie' },
+      }],
+    });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Plan recipe' }));
+    expect(await screen.findByText('Old pie')).toBeTruthy();
+    live.onRemote();
+    expect(await screen.findByText('Fresh pie')).toBeTruthy();
+    expect(screen.queryByText('Old pie')).toBeNull();
   });
 });

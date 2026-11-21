@@ -3,26 +3,28 @@
 import { useState, useEffect } from 'react';
 import { showToast } from './Toast';
 import {
-  dayDateOf,
   getThisDisplayWeek,
   localDateIso,
-  parseDayOfWeek,
   shiftWeek,
-  storageCoords,
   type DayKey,
 } from '@/lib/plannerDays';
-import { storageWeeksForDateRange } from '@/lib/plannerMonth';
-import { mealOnDate } from '@/lib/plannerDate';
+import { monthsForDisplayWeeks } from '@/lib/plannerMonth';
 import {
   defaultSelectedMealKeys,
-  generateListDateRange,
+  generateListFromCache,
   generateListWeekTag,
   generateListWeeks,
   mealDayLabel,
-  mealEntryKey,
+  mealsByWeekFromPlans,
   visibleGenerateListWeeks,
   type GenerateListMeal,
 } from '@/lib/generateListOptions';
+import {
+  ensurePlannerMonths,
+  hasPlannerMonths,
+  snapshotPlannerMeals,
+  subscribePlannerMeals,
+} from '@/lib/plannerMealCache';
 
 interface Props {
   onClose: () => void;
@@ -36,64 +38,54 @@ export default function GenerateListModal({ onClose, onCreated, defaultWeekStart
   const prevWeek = shiftWeek(thisWeek, -1);
   const weeks = generateListWeeks(weekStartsOn, defaultWeekStart);
 
-  const [meals, setMeals] = useState<Record<string, GenerateListMeal[]>>({});
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const monthKeys = monthsForDisplayWeeks(weeks);
+  const cachedAtOpen = hasPlannerMonths(monthKeys)
+    ? generateListFromCache(snapshotPlannerMeals(), weekStartsOn, defaultWeekStart)
+    : null;
+  const [meals, setMeals] = useState<Record<string, GenerateListMeal[]>>(cachedAtOpen?.meals ?? {});
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(cachedAtOpen?.selected ?? []));
   const [subtitle, setSubtitle] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedAtOpen);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true);
-      const map: Record<string, GenerateListMeal[]> = {};
-      const { from, to } = generateListDateRange(weeks);
-      let plans: unknown[] = [];
-      try {
-        const weeksParam = storageWeeksForDateRange(from, to).join(',');
-        const res = await fetch(`/api/planner?from=${from}&to=${to}&weeks=${encodeURIComponent(weeksParam)}`);
-        const data = await res.json();
-        if (Array.isArray(data)) plans = data;
-      } catch { plans = []; }
-      for (const wk of weeks) {
-        const entries: GenerateListMeal[] = [];
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-          const day = dayDateOf(wk, dayIndex);
-          const coords = storageCoords(day);
-          const iso = localDateIso(day);
-          for (const raw of plans) {
-            if (!raw || typeof raw !== 'object') continue;
-            const p = raw as {
-              id?: string;
-              recipe_id?: string;
-              recipe?: { title?: string };
-              day_of_week?: unknown;
-              week_start?: string;
-              planned_on?: string;
-            };
-            const storedDay = parseDayOfWeek(p.day_of_week);
-            if (!p.recipe_id) continue;
-            if (!mealOnDate(p, iso)) continue;
-            const id = typeof p.id === 'string' && p.id ? p.id : undefined;
-            entries.push({
-              key: mealEntryKey({ id, planned_on: iso, recipe_id: p.recipe_id }, entries.length),
-              id,
-              recipe_id: p.recipe_id,
-              recipe_title: p.recipe?.title ?? 'Unknown',
-              day_of_week: storedDay ?? coords.dayOfWeek,
-              week_start: coords.weekStart,
-              planned_on: iso,
-            });
-          }
-        }
-        map[wk] = entries;
-      }
+    let cancelled = false;
+    const apply = (plans: unknown[], seedSelection: boolean) => {
+      const map = mealsByWeekFromPlans(plans, weeks);
       setMeals(map);
-      const defaultWk = defaultWeekStart ?? thisWeek;
-      setSelected(new Set(defaultSelectedMealKeys(map, defaultWk, thisWeek, localDateIso(new Date()))));
-      setLoading(false);
+      if (seedSelection) {
+        const defaultWk = defaultWeekStart ?? thisWeek;
+        setSelected(new Set(defaultSelectedMealKeys(map, defaultWk, thisWeek, localDateIso(new Date()))));
+      }
     };
-    fetchAll();
+
+    const cached = hasPlannerMonths(monthKeys);
+    if (cached) {
+      apply(snapshotPlannerMeals(), true);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    void ensurePlannerMonths(monthKeys)
+      .then(plans => {
+        if (cancelled) return;
+        apply(plans, !cached);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        apply(snapshotPlannerMeals(), !cached);
+        setLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [weekStartsOn, defaultWeekStart]);
+
+  useEffect(() => subscribePlannerMeals(() => {
+    if (!hasPlannerMonths(monthKeys)) return;
+    setMeals(mealsByWeekFromPlans(snapshotPlannerMeals(), weeks));
+  }), [weekStartsOn, defaultWeekStart]);
 
   const toggleMeal = (key: string) => {
     setSelected(prev => {
