@@ -8,6 +8,7 @@ import {
   monthRange,
   monthTitle,
   monthsForDisplayWeek,
+  monthsForDisplayWeeks,
   parseWeekStartList,
   plannerQueryWindow,
   shiftMonthKey,
@@ -29,6 +30,15 @@ describe('monthsForDisplayWeek', () => {
 
   it('returns both months when the week crosses September', () => {
     expect(monthsForDisplayWeek('2026-08-31')).toEqual(['2026-08', '2026-09']);
+  });
+});
+
+describe('monthsForDisplayWeeks', () => {
+  it('dedupes months across neighbouring weeks', () => {
+    expect(monthsForDisplayWeeks(['2026-08-24', '2026-08-31', '2026-09-07'])).toEqual([
+      '2026-08',
+      '2026-09',
+    ]);
   });
 });
 

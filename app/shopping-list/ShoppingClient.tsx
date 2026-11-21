@@ -20,7 +20,11 @@ import GenerateListModal from '@/components/GenerateListModal';
 import NewShoppingItemRow from '@/components/NewShoppingItemRow';
 import { opsNeedListChanged, type ShoppingOp } from '@/lib/shoppingOps';
 import { parseWeekStartDay, type DayKey } from '@/lib/plannerDays';
+import { generateListWeeks } from '@/lib/generateListOptions';
+import { monthsForDisplayWeeks } from '@/lib/plannerMonth';
 import { ShoppingItemsSkeleton, ShoppingSelectorSkeleton } from '@/components/Skeleton';
+import { useAuth } from '@/components/AuthProvider';
+import { usePlannerMealCache } from '@/components/usePlannerMealCache';
 
 function genId() { return 'i' + Math.random().toString(36).slice(2, 10); }
 
@@ -170,6 +174,7 @@ function ItemRow({ item, isChecked, isDragging, isDropBefore, isDropAfter, onTog
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function ShoppingListClient() {
+  const { user } = useAuth();
   const [lists, setLists] = useState<ShoppingListMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [serverItems, setServerItems] = useState<ShoppingItem[]>([]);
@@ -185,6 +190,7 @@ export default function ShoppingListClient() {
   // 'ask' (prompt each time), 'always' (save silently), 'never'.
   const [prefMode, setPrefMode] = useState<'ask' | 'always' | 'never'>('ask');
   const [weekStartsOn, setWeekStartsOn] = useState<DayKey>('monday');
+  usePlannerMealCache(user?.id, monthsForDisplayWeeks(generateListWeeks(weekStartsOn)));
   // The pending "save this category to your preferences?" prompt, if any.
   const [pendingPref, setPendingPref] = useState<{ name: string; label: string; category: string } | null>(null);
   const [prefDontAsk, setPrefDontAsk] = useState(false);

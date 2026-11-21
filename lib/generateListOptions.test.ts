@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultSelectedMealKeys,
   generateListDateRange,
+  generateListFromCache,
   generateListWeekTag,
   generateListWeeks,
+  mealsByWeekFromPlans,
   mealDayLabel,
   mealEntryKey,
   shouldDefaultSelectMeal,
@@ -44,6 +46,47 @@ describe('generateListDateRange', () => {
       from: lastWeek,
       to: '2026-09-20',
     });
+  });
+});
+
+describe('generateListFromCache', () => {
+  it('ticks remaining this-week dinners from cached plans', () => {
+    const { meals, selected } = generateListFromCache(
+      [{
+        id: 'today',
+        recipe_id: 'r-pie',
+        recipe: { title: 'Chicken pie' },
+        planned_on: '2026-09-12',
+        week_start: thisWeek,
+        day_of_week: 5,
+      }],
+      'monday',
+      thisWeek,
+      now,
+    );
+    expect(meals[thisWeek]?.[0]?.id).toBe('today');
+    expect(selected).toEqual(['today']);
+  });
+});
+
+describe('mealsByWeekFromPlans', () => {
+  it('groups dinners onto the display week they fall on', () => {
+    const grouped = mealsByWeekFromPlans(
+      [{
+        id: 'pie',
+        recipe_id: 'r-pie',
+        recipe: { title: 'Chicken pie' },
+        planned_on: thisWeek,
+        week_start: thisWeek,
+        day_of_week: 0,
+      }],
+      [lastWeek, thisWeek, nextWeek],
+    );
+    expect(grouped[thisWeek]).toEqual([
+      expect.objectContaining({ id: 'pie', recipe_title: 'Chicken pie', planned_on: thisWeek }),
+    ]);
+    expect(grouped[lastWeek]).toEqual([]);
+    expect(grouped[nextWeek]).toEqual([]);
   });
 });
 

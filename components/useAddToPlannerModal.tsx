@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import type { Recipe } from '@/lib/db';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MealPlan, Recipe } from '@/lib/db';
 import { showToast } from '@/components/Toast';
 import AddToPlannerModal, { type PlannedMeal } from '@/components/AddToPlannerModal';
-import { usePlannerLive } from '@/components/usePlannerLive';
+import { usePlannerMealCache } from '@/components/usePlannerMealCache';
 import { weekPlanFromMeals } from '@/lib/plannerDaySheet';
-import { fetchMealsForMonths, fetchMealsForWeeks } from '@/lib/loadPlannerMonth';
 import {
   calendarDateOf,
   displayDayIndex,
@@ -15,10 +14,9 @@ import {
   parseWeekStartDay,
   shiftWeek,
   storageCoords,
-  storageWeeksForDisplayWeek,
   type DayKey,
 } from '@/lib/plannerDays';
-import { missingMonths, monthsForDisplayWeek } from '@/lib/plannerMonth';
+import { adjacentMonthKeys, monthsForDisplayWeek } from '@/lib/plannerMonth';
 import {
   dinnerAddFailedMessage,
   dinnerAddedMessage,
@@ -26,6 +24,7 @@ import {
   postPlannerDinner,
   type PlannerDinnerPayload,
 } from '@/lib/plannerWrite';
+import { removePlannerMeal, upsertPlannerMeal } from '@/lib/plannerMealCache';
 
 export function useAddToPlannerModal(userId?: string | null) {
   const [plannerModal, setPlannerModal] = useState<{ recipe: Recipe } | null>(null);
@@ -33,54 +32,26 @@ export function useAddToPlannerModal(userId?: string | null) {
   const [plannerWeek, setPlannerWeek] = useState(() => getThisDisplayWeek('monday'));
   const [plannerDay, setPlannerDay] = useState(() => displayDayIndex(new Date(), 'monday'));
   const [weekPlan, setWeekPlan] = useState<Record<number, PlannedMeal[]>>({});
-  const mealStoreRef = useRef(new Map<string, unknown>());
-  const loadedMonthsRef = useRef(new Set<string>());
-  const plannerWeekRef = useRef(plannerWeek);
-  plannerWeekRef.current = plannerWeek;
   const weekStartsOnRef = useRef(weekStartsOn);
   weekStartsOnRef.current = weekStartsOn;
   const plannerModalRef = useRef(plannerModal);
   plannerModalRef.current = plannerModal;
 
-  const snapshotMeals = () => [...mealStoreRef.current.values()];
-
-  const applyWeekPlan = (week: string, meals: unknown[]) => {
-    setWeekPlan(weekPlanFromMeals(meals, week, weekStartsOnRef.current));
-  };
-
-  const ensureMonths = async (keys: string[]): Promise<unknown[]> => {
-    const needed = missingMonths(keys, loadedMonthsRef.current);
-    if (needed.length) {
-      const meals = await fetchMealsForMonths(needed);
-      if (!meals.length) return snapshotMeals();
-      for (const meal of meals) {
-        if (meal && typeof meal === 'object' && 'id' in meal) {
-          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
-        }
-      }
-      for (const key of needed) loadedMonthsRef.current.add(key);
+  const prefetchKeys = useMemo(() => {
+    const current = monthsForDisplayWeek(plannerWeek);
+    if (!plannerModal) return current;
+    const keys = new Set(current);
+    for (const key of current) {
+      for (const neighbour of adjacentMonthKeys(key)) keys.add(neighbour);
     }
-    return snapshotMeals();
-  };
+    return [...keys];
+  }, [plannerModal, plannerWeek]);
 
-  const reloadPlannerCopy = async () => {
-    if (!plannerModalRef.current) return;
-    try {
-      loadedMonthsRef.current.clear();
-      await ensureMonths(monthsForDisplayWeek(plannerWeekRef.current));
-      const weekMeals = await fetchMealsForWeeks(
-        storageWeeksForDisplayWeek(plannerWeekRef.current, weekStartsOnRef.current),
-      );
-      for (const meal of weekMeals) {
-        if (meal && typeof meal === 'object' && 'id' in meal) {
-          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
-        }
-      }
-      applyWeekPlan(plannerWeekRef.current, snapshotMeals());
-    } catch { /* keep current sheet copy */ }
-  };
+  const { meals, ensureMonths, broadcastPlannerChanged } = usePlannerMealCache(userId, prefetchKeys);
 
-  const { broadcastPlannerChanged } = usePlannerLive(() => { void reloadPlannerCopy(); }, userId);
+  const applyWeekPlan = (week: string, plans: unknown[]) => {
+    setWeekPlan(weekPlanFromMeals(plans, week, weekStartsOnRef.current));
+  };
 
   useEffect(() => {
     (async () => {
@@ -96,34 +67,42 @@ export function useAddToPlannerModal(userId?: string | null) {
     })();
   }, []);
 
-  const fetchWeekPlan = async (week: string) => {
-    try {
-      await ensureMonths(monthsForDisplayWeek(week));
-      const weekMeals = await fetchMealsForWeeks(storageWeeksForDisplayWeek(week, weekStartsOnRef.current));
-      for (const meal of weekMeals) {
-        if (meal && typeof meal === 'object' && 'id' in meal) {
-          mealStoreRef.current.set(String((meal as { id: string }).id), meal);
-        }
-      }
-      applyWeekPlan(week, snapshotMeals());
-    } catch { /* silent */ }
-  };
+  useEffect(() => {
+    if (!plannerModal) return;
+    applyWeekPlan(plannerWeek, meals);
+  }, [plannerModal, plannerWeek, weekStartsOn, meals]);
 
   useEffect(() => {
-    if (plannerModal) void fetchWeekPlan(plannerWeek);
-  }, [plannerModal, plannerWeek, weekStartsOn]);
+    if (!plannerModal) return;
+    void ensureMonths(monthsForDisplayWeek(plannerWeek)).catch(() => { /* keep cached occupancy */ });
+  }, [plannerModal, plannerWeek, weekStartsOn, ensureMonths]);
 
-  const persistDinner = async (payload: PlannerDinnerPayload, successMessage: string) => {
+  const persistDinner = async (
+    payload: PlannerDinnerPayload,
+    successMessage: string,
+    tempId: string,
+    recipe: Recipe,
+  ) => {
     try {
-      await postPlannerDinner(payload);
+      const saved = await postPlannerDinner(payload);
+      removePlannerMeal(tempId);
+      const real = { ...payload, ...saved, recipe } as MealPlan;
+      if (!real.id) real.id = tempId;
+      upsertPlannerMeal(real);
       broadcastPlannerChanged();
     } catch (e) {
+      removePlannerMeal(tempId);
       const detail = e instanceof Error ? e.message : 'Unknown error';
       showToast(dinnerAddFailedMessage(detail), 'error', {
         label: 'Retry',
         onClick: () => {
           showToast(successMessage, 'success');
-          void persistDinner(payload, successMessage);
+          upsertPlannerMeal({
+            ...payload,
+            id: tempId,
+            recipe,
+          } as MealPlan);
+          void persistDinner(payload, successMessage, tempId, recipe);
         },
       });
     }
@@ -143,14 +122,22 @@ export function useAddToPlannerModal(userId?: string | null) {
       servings: modal.recipe.servings || 4,
     });
     const successMessage = dinnerAddedMessage(date);
+    const tempId = `tmp-${Date.now()}`;
+    upsertPlannerMeal({
+      ...payload,
+      id: tempId,
+      recipe: modal.recipe,
+    } as MealPlan);
     setPlannerModal(null);
     showToast(successMessage, 'success');
-    void persistDinner(payload, successMessage);
+    void persistDinner(payload, successMessage, tempId, modal.recipe);
   };
 
   const openPlannerModal = (recipe: Recipe) => {
-    setPlannerWeek(getThisDisplayWeek(weekStartsOn));
+    const week = getThisDisplayWeek(weekStartsOn);
+    setPlannerWeek(week);
     setPlannerDay(displayDayIndex(new Date(), weekStartsOn));
+    applyWeekPlan(week, meals);
     setPlannerModal({ recipe });
   };
 
@@ -162,7 +149,11 @@ export function useAddToPlannerModal(userId?: string | null) {
       weekPlan={weekPlan}
       adding={false}
       onClose={() => setPlannerModal(null)}
-      onShiftWeek={weeks => setPlannerWeek(shiftWeek(plannerWeek, weeks))}
+      onShiftWeek={weeks => {
+        const next = shiftWeek(plannerWeek, weeks);
+        setPlannerWeek(next);
+        applyWeekPlan(next, meals);
+      }}
       onSelectDay={setPlannerDay}
       onAdd={handleAddToPlanner}
       weekStartsOn={weekStartsOn}

@@ -15,7 +15,17 @@ import { useAuth } from '@/components/AuthProvider';
 import { PlannerDaysSkeleton } from '@/components/Skeleton';
 import { recipeEditPath, recipeViewPath } from '@/lib/recipeLinks';
 import { computePickerSheetBox } from '@/lib/pickerViewport';
-import { fetchMealsForMonths, fetchNotesForMonths, mergePlannerMeals, replaceNotesInRange } from '@/lib/loadPlannerMonth';
+import { fetchNotesForMonths, replaceNotesInRange } from '@/lib/loadPlannerMonth';
+import {
+  ensurePlannerMonths,
+  hasPlannerMonths,
+  invalidatePlannerMonths,
+  loadedPlannerMonthKeys,
+  reloadPlannerMonths,
+  removePlannerMeal,
+  snapshotPlannerMeals,
+  upsertPlannerMeal,
+} from '@/lib/plannerMealCache';
 import { calendarDayClass, dayCardClass, notesByDisplayIndex, plannerDayClass, recipeCardMeta, sameDisplayWeek, weekChipClass } from '@/lib/plannerLoad';
 import {
   adjacentMonthKeys,
@@ -42,7 +52,7 @@ import {
   storageCoords,
   type DayKey,
 } from '@/lib/plannerDays';
-import { mealOnDate, plannedOnOf } from '@/lib/plannerDate';
+import { mealOnDate } from '@/lib/plannerDate';
 import {
   WEEK_CROSSFADE_MS,
   WEEK_SHIFT_MS,
@@ -205,9 +215,8 @@ export default function PlannerClient() {
   } | null>(null);
   const [moveSheetPlan, setMoveSheetPlan] = useState<Record<number, PlannedMeal[]>>({});
   const [moveSheetSaving, setMoveSheetSaving] = useState(false);
-  const mealStoreRef = useRef(new Map<string, MealPlan>());
   const noteStoreRef = useRef(new Map<string, string>());
-  const loadedMonthsRef = useRef(new Set<string>());
+  const noteMonthsRef = useRef(new Set<string>());
   const weekStartRef = useRef(weekStart);
   weekStartRef.current = weekStart;
   const weekStartsOnRef = useRef(weekStartsOn);
@@ -235,61 +244,38 @@ export default function PlannerClient() {
     selectDayIndex?: number,
   ) => Promise<void>>(async () => {});
 
-  const snapshotMealPlans = () => [...mealStoreRef.current.values()];
+  const snapshotMealPlans = () => snapshotPlannerMeals();
   const notesForWeek = (start: Date | string) =>
     notesByDisplayIndex(noteStoreRef.current, typeof start === 'string' ? start : formatDate(start));
 
-  const mergeMealPlans = (plans: MealPlan[]) => {
-    for (const plan of plans) mealStoreRef.current.set(plan.id, plan);
+  const applyMonthNotes = (keys: string[], monthNotes: Record<string, string>) => {
+    for (const key of keys) {
+      const { from, to } = monthRange(key);
+      replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
+      noteMonthsRef.current.add(key);
+    }
   };
 
   const ensureMonths = async (keys: string[]): Promise<MealPlan[]> => {
-    const needed = missingMonths(keys, loadedMonthsRef.current);
-    if (needed.length) {
-      const [meals, monthNotes] = await Promise.all([
-        fetchMealsForMonths(needed),
-        fetchNotesForMonths(needed),
-      ]);
-      for (const key of needed) {
-        const { from, to } = monthRange(key);
-        for (const [id, meal] of mealStoreRef.current) {
-          const on = plannedOnOf(meal);
-          if (id.startsWith('tmp-')) continue;
-          if (on >= from && on <= to) mealStoreRef.current.delete(id);
-        }
-        replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
-        loadedMonthsRef.current.add(key);
-      }
-      mergeMealPlans(meals);
-    }
-    return snapshotMealPlans();
+    const neededNotes = missingMonths(keys, noteMonthsRef.current);
+    const [plans] = await Promise.all([
+      ensurePlannerMonths(keys),
+      neededNotes.length
+        ? fetchNotesForMonths(neededNotes).then(monthNotes => applyMonthNotes(neededNotes, monthNotes))
+        : Promise.resolve(),
+    ]);
+    return plans;
   };
 
   const reloadFromServer = async () => {
     const displayIso = formatDate(weekStartRef.current);
     const keys = monthsForDisplayWeek(displayIso);
     try {
-      const [monthMeals, monthNotes] = await Promise.all([
-        fetchMealsForMonths(keys),
+      const [, monthNotes] = await Promise.all([
+        reloadPlannerMonths(keys),
         fetchNotesForMonths(keys),
       ]);
-      const meals = mergePlannerMeals(monthMeals);
-      if (!meals.length && mealStoreRef.current.size > 0) {
-        for (const key of keys) {
-          const { from, to } = monthRange(key);
-          replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
-        }
-        setNotes(notesForWeek(weekStartRef.current));
-        return;
-      }
-      const temps = [...mealStoreRef.current.values()].filter(meal => String(meal.id).startsWith('tmp-'));
-      mealStoreRef.current = new Map(meals.map(meal => [meal.id, meal]));
-      for (const temp of temps) mealStoreRef.current.set(temp.id, temp);
-      if (meals.length) loadedMonthsRef.current = new Set(keys);
-      for (const key of keys) {
-        const { from, to } = monthRange(key);
-        replaceNotesInRange(noteStoreRef.current, from, to, monthNotes);
-      }
+      applyMonthNotes(keys, monthNotes);
       setMealPlans(snapshotMealPlans());
       setNotes(notesForWeek(weekStartRef.current));
     } catch { /* keep the copy already on screen */ }
@@ -326,8 +312,12 @@ export default function PlannerClient() {
   const fetchData = useCallback(async () => {
     const displayIso = weekStartIso;
     const monthKeys = monthsForDisplayWeek(displayIso);
-    const firstPaint = mealStoreRef.current.size === 0;
+    const firstPaint = !hasPlannerMonths(monthKeys);
     if (firstPaint) setLoading(true);
+    else {
+      setMealPlans(snapshotMealPlans());
+      setNotes(notesForWeek(displayIso));
+    }
     try {
       await ensureMonths(monthKeys);
       setMealPlans(snapshotMealPlans());
@@ -491,7 +481,7 @@ export default function PlannerClient() {
       id: tempId, recipe_id: recipeId, day_of_week: coords.dayOfWeek,
       meal_type: 'dinner', servings, planned_on: formatDate(date), week_start: coords.weekStart, recipe: recipe as any,
     };
-    mealStoreRef.current.set(tempId, optimistic);
+    upsertPlannerMeal(optimistic);
     setMealPlans(prev => [...prev, optimistic]);
     setSelectedDayIndex(dayIndex);
     setLanding({ mealId: tempId, dayIndex, weekStartIso: destWeekIso });
@@ -510,13 +500,13 @@ export default function PlannerClient() {
       }));
       const real = { ...saved, recipe } as MealPlan;
       if (!real.id) real.id = tempId;
-      mealStoreRef.current.delete(tempId);
-      mealStoreRef.current.set(real.id, real);
+      removePlannerMeal(tempId);
+      upsertPlannerMeal(real);
       setMealPlans(prev => prev.map(m => m.id === tempId ? real : m));
       setLanding(prev => landingAfterPersist(prev, tempId, real.id));
       broadcastPlannerChanged();
     } catch (e) {
-      mealStoreRef.current.delete(tempId);
+      removePlannerMeal(tempId);
       setMealPlans(prev => prev.filter(m => m.id !== tempId));
       setLanding(prev => prev?.mealId === tempId ? null : prev);
       const detail = e instanceof Error ? e.message : 'Failed to add dinner';
@@ -531,14 +521,14 @@ export default function PlannerClient() {
     const snapshot = mealPlans.find(m => m.id === id);
     // Optimistic: remove immediately
     setMealPlans(prev => prev.filter(m => m.id !== id));
-    mealStoreRef.current.delete(id);
+    removePlannerMeal(id);
     try {
       const res = await fetch(`/api/planner?id=${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       broadcastPlannerChanged();
     } catch {
       if (snapshot) {
-        mealStoreRef.current.set(snapshot.id, snapshot);
+        upsertPlannerMeal(snapshot);
         setMealPlans(prev => [...prev, snapshot]);
       }
       showToast('Failed to remove meal', 'error');
@@ -586,8 +576,8 @@ export default function PlannerClient() {
       });
       if (!res.ok) throw new Error();
       const real = { ...await res.json(), recipe: meal.recipe } as MealPlan;
-      mealStoreRef.current.delete(mealId);
-      mealStoreRef.current.set(real.id, real);
+      removePlannerMeal(mealId);
+      upsertPlannerMeal(real);
       broadcastPlannerChanged();
       if (sameDisplayWeek) {
         setMealPlans(prev => prev.map(m => m.id === mealId ? real : m));
@@ -956,9 +946,7 @@ export default function PlannerClient() {
           body: JSON.stringify({ planned_on: formatDate(getDayDate(weekStart, day)), week_start: storageCoords(getDayDate(weekStart, day)).weekStart, recipe_id: picks[day], day_of_week: storageCoords(getDayDate(weekStart, day)).dayOfWeek, meal_type: 'dinner', servings: magicSettings.servings }),
         });
       }
-      for (const key of monthsForDisplayWeek(formatDate(weekStart))) {
-        loadedMonthsRef.current.delete(key);
-      }
+      invalidatePlannerMonths(monthsForDisplayWeek(formatDate(weekStart)));
       await fetchData();
       broadcastPlannerChanged();
       setShowMagic(false);
@@ -1052,7 +1040,7 @@ export default function PlannerClient() {
     const gen = ++weekShiftGen.current;
     weekShiftLockRef.current = true;
     const monthKeys = monthsForDisplayWeek(toIso);
-    const needsMonths = missingMonths(monthKeys, loadedMonthsRef.current).length > 0;
+    const needsMonths = missingMonths(monthKeys, loadedPlannerMonthKeys()).length > 0;
     if (needsMonths) setWeekShiftBusy(direction);
     try {
       if (needsMonths) {
